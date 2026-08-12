@@ -74,6 +74,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Add workspace binaries to PATH
+        shell: bash
+        run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+
       - name: Align release versions
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
