@@ -37,6 +37,7 @@ import {
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 function mockProcess(exitCode: number) {
   return ChildProcessSpawner.makeHandle({
@@ -76,6 +77,10 @@ function iconResizeSpawnerLayer(
 }
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it("stages the AI SDK schema runtime as a server production dependency", () => {
+    assert.equal(serverPackageJson.dependencies.zod, "4.4.3");
+  });
+
   it("resolves the dedicated nightly updater channel from nightly versions", () => {
     assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
     assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
