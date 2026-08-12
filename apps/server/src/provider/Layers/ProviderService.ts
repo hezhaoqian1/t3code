@@ -35,8 +35,6 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as Stream from "effect/Stream";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import * as ServerConfig from "../../config.ts";
 import {
   increment,
   providerMetricAttributes,
@@ -125,6 +123,7 @@ function toRuntimePayloadFromSession(
   session: ProviderSession,
   extra?: {
     readonly modelSelection?: unknown;
+    readonly projectWorkspaceRoot?: string;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
   },
@@ -135,6 +134,9 @@ function toRuntimePayloadFromSession(
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
+    ...(extra?.projectWorkspaceRoot !== undefined
+      ? { projectWorkspaceRoot: extra.projectWorkspaceRoot }
+      : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
       ? { lastRuntimeEventAt: extra.lastRuntimeEventAt }
@@ -161,6 +163,19 @@ function readPersistedCwd(
   const rawCwd = "cwd" in runtimePayload ? runtimePayload.cwd : undefined;
   if (typeof rawCwd !== "string") return undefined;
   const trimmed = rawCwd.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readPersistedProjectWorkspaceRoot(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): string | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw =
+    "projectWorkspaceRoot" in runtimePayload ? runtimePayload.projectWorkspaceRoot : undefined;
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
@@ -205,7 +220,6 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
 ) {
   const analytics = yield* Effect.service(AnalyticsService.AnalyticsService);
-  const serverConfig = yield* ServerConfig.ServerConfig;
   const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
   // Options-provided logger wins (test overrides); otherwise we take whatever
   // the `ProviderEventLoggers` tag exposes — `undefined` means "no canonical
@@ -233,7 +247,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
     Effect.succeed(event).pipe(
       Effect.tap((canonicalEvent) =>
-        canonicalEventLogger
+        canonicalEventLogger && canonicalEvent.persistence !== "memory-only"
           ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
           : Effect.void,
       ),
@@ -264,6 +278,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     threadId: ThreadId,
     extra?: {
       readonly modelSelection?: unknown;
+      readonly projectWorkspaceRoot?: string;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
     },
@@ -398,6 +413,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
 
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
+      const persistedProjectWorkspaceRoot = readPersistedProjectWorkspaceRoot(
+        input.binding.runtimePayload,
+      );
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
@@ -407,6 +425,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           provider: input.binding.provider,
           providerInstanceId: bindingInstanceId,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
+          ...(persistedProjectWorkspaceRoot
+            ? { projectWorkspaceRoot: persistedProjectWorkspaceRoot }
+            : {}),
           ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
@@ -624,6 +645,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           modelSelection: input.modelSelection,
+          ...(input.projectWorkspaceRoot !== undefined
+            ? { projectWorkspaceRoot: input.projectWorkspaceRoot }
+            : {}),
         });
         yield* analytics.record("provider.session.started", {
           provider: sessionWithInstance.provider,
@@ -676,34 +700,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
     }
 
-    // Adapters inline attachment pixels into the model prompt, but the model's
-    // tools cannot dereference pixels. Appending the on-disk path is what lets
-    // a turn like "include this screenshot in the PR" copy the actual file.
-    // This runs after schema decode, so the appended lines are exempt from the
-    // PROVIDER_SEND_TURN_MAX_INPUT_CHARS check; attachment count is capped, so
-    // the overhead is bounded. Unresolvable ids are skipped here and surface
-    // as adapter errors when the file is read for inlining.
-    const attachmentPathLines = attachments.flatMap((attachment) => {
-      const attachmentPath = resolveAttachmentPath({
-        attachmentsDir: serverConfig.attachmentsDir,
-        attachment,
-      });
-      return attachmentPath === null
-        ? []
-        : [`[Attached ${attachment.type} "${attachment.name}" is saved at: ${attachmentPath}]`];
-    });
-    const inputTextWithAttachmentPaths =
-      attachmentPathLines.length === 0
-        ? parsed.input
-        : [parsed.input, attachmentPathLines.join("\n")]
-            .filter((part): part is string => typeof part === "string" && part.length > 0)
-            .join("\n\n");
-
     const input = {
       ...parsed,
-      ...(inputTextWithAttachmentPaths !== undefined
-        ? { input: inputTextWithAttachmentPaths }
-        : {}),
       attachments,
     };
     yield* Effect.annotateCurrentSpan({

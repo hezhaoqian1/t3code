@@ -32,6 +32,15 @@ function createBrowserLocalApi(): LocalApi {
 
         window.open(url, "_blank", "noopener,noreferrer");
       },
+      openPath: async (path) => {
+        if (!window.desktopBridge) {
+          throw new Error("Opening local folders is only available in the desktop app.");
+        }
+        const opened = await window.desktopBridge.openPath(path);
+        if (!opened) {
+          throw new Error("Unable to open folder.");
+        }
+      },
     },
     contextMenu: {
       show: async <T extends string>(

@@ -36,16 +36,12 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     mode: "web",
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
-    tailscaleServeEnabled: false,
-    tailscaleServePort: 443,
     port: 0,
-    host: undefined,
+    host: ServerConfig.LOOPBACK_HOST,
     desktopBootstrapToken: undefined,
     staticDir: undefined,
     devUrl: undefined,
-    devAllowedOrigins: [],
     noBrowser: false,
-    startupPresentation: "browser",
   } satisfies ServerConfig.ServerConfig["Service"];
 });
 

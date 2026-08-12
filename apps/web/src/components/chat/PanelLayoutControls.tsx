@@ -40,7 +40,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               className="shrink-0 [-webkit-app-region:no-drag]"
               pressed={terminalOpen}
               onPressedChange={onToggleTerminal}
-              aria-label="Toggle terminal drawer"
+              aria-label="切换终端面板"
               variant="ghost"
               size="sm"
               disabled={!terminalAvailable}
@@ -51,7 +51,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         />
         <TooltipPopup side="bottom">
           {terminalAvailable
-            ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
+            ? `切换终端面板${terminalShortcutLabel ? `（${terminalShortcutLabel}）` : ""}`
             : "Terminal drawer is unavailable"}
         </TooltipPopup>
       </Tooltip>
@@ -64,8 +64,8 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
               onPressedChange={onToggleRightPanel}
               aria-label={
                 liveAgentCount > 0
-                  ? `Toggle right panel, ${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working`
-                  : "Toggle right panel"
+                  ? `切换右侧面板，${liveAgentCount} 个 Agent 正在工作`
+                  : "切换右侧面板"
               }
               variant="ghost"
               size="sm"
@@ -85,7 +85,7 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         />
         <TooltipPopup side="bottom">
           {rightPanelAvailable
-            ? `Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ""}${
+            ? `切换右侧面板${rightPanelShortcutLabel ? `（${rightPanelShortcutLabel}）` : ""}${
                 liveAgentCount > 0
                   ? ` · ${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working`
                   : ""

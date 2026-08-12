@@ -14,14 +14,9 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
     to: "/settings/general",
   },
   {
-    id: "network-access",
-    title: "Network access",
-    to: "/settings/connections",
-  },
-  {
-    id: "providers",
-    title: "Providers",
-    to: "/settings/providers",
+    id: "source-control",
+    title: "Source control",
+    to: "/settings/source-control",
   },
   {
     id: "provider-updates",
@@ -38,8 +33,7 @@ const ITEMS: ReadonlyArray<SettingsSearchItem> = [
 describe("searchSettings", () => {
   it("matches only setting titles", () => {
     expect(searchSettings("word", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
-    expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
-    expect(searchSettings("connections", ITEMS)).toEqual([]);
+    expect(searchSettings("source", ITEMS).map((item) => item.id)).toEqual(["source-control"]);
     expect(searchSettings("claude", ITEMS)).toEqual([]);
   });
 
@@ -65,9 +59,15 @@ describe("searchSettings", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it("does not expose employee provider or model settings", () => {
+    expect(SETTINGS_SEARCH_ITEMS.map((item) => item.id)).not.toContain("text-generation-model");
+    expect(SETTINGS_SEARCH_ITEMS.map((item) => item.id)).not.toContain("project-default-model");
+    expect(searchSettings("model")).toEqual([]);
+  });
+
   it("serves anchor props to panels from the catalog", () => {
-    expect(searchableSetting("word-wrap")).toEqual({ id: "word-wrap", title: "Word wrap" });
-    expect(searchableSetting("archive")).toEqual({ id: "archive", title: "Archived threads" });
+    expect(searchableSetting("word-wrap")).toEqual({ id: "word-wrap", title: "自动换行" });
+    expect(searchableSetting("archive")).toEqual({ id: "archive", title: "已归档任务" });
   });
 
   it("routes appearance settings to their current section", () => {
@@ -78,11 +78,6 @@ describe("searchSettings", () => {
     expect(searchSettings("word wrap")[0]).toMatchObject({
       id: "word-wrap",
       to: "/settings/appearance",
-    });
-    expect(searchSettings("environment identification")[0]).toMatchObject({
-      id: "environment-identification",
-      to: "/settings/appearance",
-      targetId: "appearance",
     });
   });
 });

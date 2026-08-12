@@ -3,7 +3,8 @@ import { isWindowsPlatform } from "../lib/utils";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
-const DESKTOP_RELEASE_TAG_URL = "https://github.com/pingdotgg/t3code/releases/tag";
+const DESKTOP_UPDATE_MANIFEST_URL =
+  "https://ai-api.fdsure.com/downloads/desktop/latest/latest.json";
 
 /**
  * The main process fills `downloadedVersion` from the updater's `update-downloaded`
@@ -18,7 +19,7 @@ export function getDesktopUpdateDownloadedVersion(state: DesktopUpdateState): st
 export function getDesktopUpdateReleaseUrl(version: string | null): string | null {
   const normalizedVersion = version?.trim();
   if (!normalizedVersion) return null;
-  return `${DESKTOP_RELEASE_TAG_URL}/v${encodeURIComponent(normalizedVersion)}`;
+  return DESKTOP_UPDATE_MANIFEST_URL;
 }
 
 export function resolveDesktopUpdateButtonAction(
@@ -63,12 +64,12 @@ export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState):
 
   const action = resolveDesktopUpdateButtonAction(state);
   if (action === "download") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
+    return "This Mac has Apple Silicon, but 方德 AI is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
   }
   if (action === "install") {
-    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+    return "This Mac has Apple Silicon, but 方德 AI is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
   }
-  return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
+  return "This Mac has Apple Silicon, but 方德 AI is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
 }
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
@@ -101,9 +102,9 @@ export function getDesktopUpdateInstallConfirmationMessage(
 ): string {
   const version = state.downloadedVersion ?? state.availableVersion;
   const windowsInstallWarning = isWindowsPlatform(platform)
-    ? "\n\nOn Windows, T3 Code may remain closed for several minutes while the update installs, and no installer window may appear. T3 Code will reopen automatically when installation finishes."
+    ? "\n\nOn Windows, 方德 AI may remain closed for several minutes while the update installs, and no installer window may appear. 方德 AI will reopen automatically when installation finishes."
     : "";
-  return `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.${windowsInstallWarning}`;
+  return `Install update${version ? ` ${version}` : ""} and restart 方德 AI?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.${windowsInstallWarning}`;
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {

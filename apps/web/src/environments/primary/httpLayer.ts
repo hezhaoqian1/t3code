@@ -1,9 +1,9 @@
-import { remoteHttpClientLayer } from "@t3tools/client-runtime/rpc";
+import { localHttpClientLayer } from "@t3tools/client-runtime/rpc";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 
-import { readDesktopPrimaryBearerToken } from "./desktopAuth";
+import { readDesktopPrimaryBearerToken, refreshDesktopPrimaryBearerToken } from "./desktopAuth";
 import { resolvePrimaryEnvironmentHttpUrl } from "./target";
 
 function isSameOriginBrowserPrimary(): boolean {
@@ -19,7 +19,7 @@ function isSameOriginBrowserPrimary(): boolean {
 }
 
 function withPrimaryBearerToken(client: HttpClient.HttpClient): HttpClient.HttpClient {
-  return client.pipe(
+  const authorizedClient = client.pipe(
     HttpClient.mapRequestEffect((request) =>
       Effect.promise(readDesktopPrimaryBearerToken).pipe(
         Effect.map((bearerToken) =>
@@ -28,12 +28,26 @@ function withPrimaryBearerToken(client: HttpClient.HttpClient): HttpClient.HttpC
       ),
     ),
   );
+  return HttpClient.transform(authorizedClient, (responseEffect, request) =>
+    responseEffect.pipe(
+      Effect.flatMap((response) => {
+        if (response.status !== 401) return Effect.succeed(response);
+        return Effect.promise(refreshDesktopPrimaryBearerToken).pipe(
+          Effect.flatMap((bearerToken) =>
+            bearerToken === null
+              ? Effect.succeed(response)
+              : client.execute(HttpClientRequest.bearerToken(request, bearerToken)),
+          ),
+        );
+      }),
+    ),
+  );
 }
 
 export function makePrimaryEnvironmentHttpLayer() {
   return Layer.unwrap(
     Effect.sync(() => {
-      const baseLayer = remoteHttpClientLayer(globalThis.fetch);
+      const baseLayer = localHttpClientLayer(globalThis.fetch);
       if (isSameOriginBrowserPrimary()) {
         return Layer.merge(
           baseLayer,

@@ -33,7 +33,7 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
       const descriptor = yield* policy.getDescriptor();
 
       expect(descriptor.policy).toBe("desktop-managed-local");
-      expect(descriptor.bootstrapMethods).toEqual(["desktop-bootstrap"]);
+      expect(descriptor.bootstrapMethods).toEqual([]);
       // Packaged desktop has no devUrl, but still needs the port scope: it
       // scans upward from 3773 for a free port and binds 127.0.0.1, so a second
       // instance shares this one's hostname on a different port.
@@ -64,30 +64,13 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
     ),
   );
 
-  it.effect("uses remote-reachable policy for desktop mode when bound beyond loopback", () =>
+  it.effect("uses the primary Desktop policy for the dev-only loopback host", () =>
     Effect.gen(function* () {
       const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
       const descriptor = yield* policy.getDescriptor();
 
-      expect(descriptor.policy).toBe("remote-reachable");
-      expect(descriptor.bootstrapMethods).toEqual(["desktop-bootstrap", "one-time-token"]);
-    }).pipe(
-      Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
-          mode: "desktop",
-          host: "0.0.0.0",
-        }),
-      ),
-    ),
-  );
-
-  it.effect("uses loopback-browser policy for loopback web hosts", () =>
-    Effect.gen(function* () {
-      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
-      const descriptor = yield* policy.getDescriptor();
-
-      expect(descriptor.policy).toBe("loopback-browser");
-      expect(descriptor.bootstrapMethods).toEqual(["one-time-token"]);
+      expect(descriptor.policy).toBe("desktop-managed-local");
+      expect(descriptor.bootstrapMethods).toEqual([]);
       expect(descriptor.sessionCookieName).toMatch(/^t3_session_3773_[a-f0-9]{12}$/);
     }).pipe(
       Effect.provide(
@@ -95,60 +78,6 @@ it.layer(NodeServices.layer)("EnvironmentAuthPolicy.layer", (it) => {
           mode: "web",
           host: "127.0.0.1",
           port: 3773,
-        }),
-      ),
-    ),
-  );
-
-  it.effect("uses remote-reachable policy for wildcard web hosts", () =>
-    Effect.gen(function* () {
-      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
-      const descriptor = yield* policy.getDescriptor();
-
-      expect(descriptor.policy).toBe("remote-reachable");
-      expect(descriptor.bootstrapMethods).toEqual(["one-time-token"]);
-      expect(descriptor.sessionCookieName).toBe("t3_session");
-    }).pipe(
-      Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
-          mode: "web",
-          host: "0.0.0.0",
-        }),
-      ),
-    ),
-  );
-
-  it.effect("isolates wildcard-bound web development sessions", () =>
-    Effect.gen(function* () {
-      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
-      const descriptor = yield* policy.getDescriptor();
-
-      expect(descriptor.policy).toBe("remote-reachable");
-      expect(descriptor.sessionCookieName).toMatch(/^t3_session_5775_[a-f0-9]{12}$/);
-    }).pipe(
-      Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
-          mode: "web",
-          host: "0.0.0.0",
-          port: 5775,
-          devUrl: new URL("http://127.0.0.1:5736"),
-        }),
-      ),
-    ),
-  );
-
-  it.effect("uses remote-reachable policy for non-loopback web hosts", () =>
-    Effect.gen(function* () {
-      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy;
-      const descriptor = yield* policy.getDescriptor();
-
-      expect(descriptor.policy).toBe("remote-reachable");
-      expect(descriptor.sessionCookieName).toBe("t3_session");
-    }).pipe(
-      Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
-          mode: "web",
-          host: "192.168.1.50",
         }),
       ),
     ),

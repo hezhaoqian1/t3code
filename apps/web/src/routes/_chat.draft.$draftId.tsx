@@ -10,14 +10,18 @@ import {
 import { SidebarInset } from "../components/ui/sidebar";
 import { waitForDraftHeroTransition } from "../components/chat/draftHeroTransition";
 import { buildThreadRouteParams } from "../threadRoutes";
-import { useThread, useThreadRefs } from "../state/entities";
+import { usePrimaryThreadRefs, useThread } from "../state/entities";
+import { usePrimaryEnvironmentId } from "../state/environments";
 
 function DraftChatThreadRouteView() {
   const navigate = useNavigate();
   const { draftId: rawDraftId } = Route.useParams();
   const draftId = DraftId.make(rawDraftId);
-  const draftSession = useComposerDraftStore((store) => store.getDraftSession(draftId));
-  const threadRefs = useThreadRefs();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const storedDraftSession = useComposerDraftStore((store) => store.getDraftSession(draftId));
+  const draftSession =
+    storedDraftSession?.environmentId === primaryEnvironmentId ? storedDraftSession : null;
+  const threadRefs = usePrimaryThreadRefs();
   const inferredThreadRef = draftSession
     ? (threadRefs.find(
         (ref) =>
@@ -48,7 +52,7 @@ function DraftChatThreadRouteView() {
         return;
       }
       void navigate({
-        to: "/$environmentId/$threadId",
+        to: "/$threadId",
         params: buildThreadRouteParams(canonicalThreadRef),
         replace: true,
       });

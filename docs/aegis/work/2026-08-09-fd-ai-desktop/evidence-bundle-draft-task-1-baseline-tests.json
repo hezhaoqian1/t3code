@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-1-baseline-tests",
+  "type": "test",
+  "source": "vp test: DesktopLocalEnvironmentAuth, http, EnvironmentAuth, providerStatusCache",
+  "summary": "4 test files and 17 tests passed on unmodified runtime source with Node 24.14.0 and frozen lockfile.",
+  "verifier": "Vitest 4.1.9 exit code 0"
+}

@@ -10,7 +10,7 @@ import {
   type ProviderOptionSelection,
 } from "@t3tools/contracts";
 
-const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
+const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("fd-deepseek");
 
 export interface SelectableModelOption {
   slug: string;
@@ -228,10 +228,6 @@ export function getModelSelectionOptionDescriptors(
   });
 }
 
-export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
-  return typeof text === "string" && /\bultrathink\b/i.test(text);
-}
-
 export function normalizeModelSlug(
   model: string | null | undefined,
   provider: ProviderDriverKind = DEFAULT_PROVIDER_DRIVER_KIND,
@@ -352,21 +348,4 @@ export function resolvePromptInjectedEffort(
     }
   }
   return null;
-}
-
-export function applyClaudePromptEffortPrefix(
-  text: string,
-  effort: string | null | undefined,
-): string {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return trimmed;
-  }
-  if (effort !== "ultrathink") {
-    return trimmed;
-  }
-  if (trimmed.startsWith("Ultrathink:")) {
-    return trimmed;
-  }
-  return `Ultrathink:\n${trimmed}`;
 }

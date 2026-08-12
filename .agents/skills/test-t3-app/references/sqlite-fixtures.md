@@ -55,4 +55,4 @@ For a substantial current example, inspect `seedDatabase` in `scripts/mobile-sho
 
 Direct projection writes are appropriate for ephemeral visual states, edge-case counts, long titles, activity lists, and similar UI fixtures. They do not create a coherent orchestration event history. Do not modify `orchestration_events` unless the test specifically exercises projector internals, and do not use direct projection writes to claim backend business behavior works.
 
-Use the app's commands or APIs for behavior tests. Use `node apps/server/src/bin.ts auth ...` for auth state rather than editing `auth_pairing_links` or `auth_sessions`.
+Use the app's commands or APIs for behavior tests. Do not edit authentication tables directly.

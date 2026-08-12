@@ -41,7 +41,7 @@ import type { ServerProviderShape } from "./Services/ServerProvider.ts";
  * about it is dynamic — drivers are registered at startup.
  */
 export interface ProviderDriverMetadata {
-  /** Human-readable name for the driver itself (e.g. "Codex"). */
+  /** Human-readable name for the driver itself. */
   readonly displayName: string;
   /**
    * Whether the driver may be instantiated more than once concurrently.

@@ -35,12 +35,12 @@ import {
   type TestTurnResponse,
 } from "./TestProviderAdapter.integration.ts";
 import {
-  codexTurnApprovalFixture,
-  codexTurnToolFixture,
-  codexTurnTextFixture,
+  fdTurnApprovalFixture,
+  fdTurnToolFixture,
+  fdTurnTextFixture,
 } from "./fixtures/providerRuntime.ts";
 
-const codexInstanceId = ProviderInstanceId.make("codex");
+const fdInstanceId = ProviderInstanceId.make("fd-deepseek");
 
 const makeWorkspaceDirectory = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -84,7 +84,7 @@ const makeIntegrationFixture = (options?: { readonly analytics?: Layer.Layer<Ana
     const harness = yield* makeTestProviderAdapterHarness();
 
     const registry = makeAdapterRegistryMock({
-      [ProviderDriverKind.make("codex")]: harness.adapter,
+      [ProviderDriverKind.make("fd-deepseek")]: harness.adapter,
     });
 
     const directoryLayer = ProviderSessionDirectoryLive.pipe(
@@ -158,8 +158,8 @@ it.live("replays typed runtime fixture events", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-typed"), {
         threadId: ThreadId.make("thread-integration-typed"),
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
+        provider: ProviderDriverKind.make("fd-deepseek"),
+        providerInstanceId: fdInstanceId,
         cwd: fixture.cwd,
         runtimeMode: "full-access",
       });
@@ -170,16 +170,16 @@ it.live("replays typed runtime fixture events", () =>
         harness: fixture.harness,
         threadId: session.threadId,
         userText: "hello",
-        response: { events: codexTurnTextFixture },
+        response: { events: fdTurnTextFixture },
       });
 
       assert.deepEqual(
         observedEvents.map((event) => event.type),
-        codexTurnTextFixture.map((event) => event.type),
+        fdTurnTextFixture.map((event) => event.type),
       );
       assert.deepEqual(
         observedEvents.map((event) => event.providerInstanceId),
-        codexTurnTextFixture.map(() => codexInstanceId),
+        fdTurnTextFixture.map(() => fdInstanceId),
       );
     }).pipe(Effect.provide(fixture.layer));
   }).pipe(Effect.provide(NodeServices.layer)),
@@ -195,8 +195,8 @@ it.live("replays file-changing fixture turn events", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-tools"), {
         threadId: ThreadId.make("thread-integration-tools"),
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
+        provider: ProviderDriverKind.make("fd-deepseek"),
+        providerInstanceId: fdInstanceId,
         cwd: fixture.cwd,
         runtimeMode: "full-access",
       });
@@ -208,7 +208,7 @@ it.live("replays file-changing fixture turn events", () =>
         threadId: session.threadId,
         userText: "make a small change",
         response: {
-          events: codexTurnToolFixture,
+          events: fdTurnToolFixture,
           mutateWorkspace: ({ cwd }) =>
             writeFileString(join(cwd, "README.md"), "v2\n").pipe(Effect.asVoid, Effect.ignore),
         },
@@ -216,7 +216,7 @@ it.live("replays file-changing fixture turn events", () =>
 
       assert.deepEqual(
         observedEvents.map((event) => event.type),
-        codexTurnToolFixture.map((event) => event.type),
+        fdTurnToolFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
   }).pipe(Effect.provide(NodeServices.layer)),
@@ -232,8 +232,8 @@ it.live("runs multi-turn tool/approval flow", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-multi"), {
         threadId: ThreadId.make("thread-integration-multi"),
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
+        provider: ProviderDriverKind.make("fd-deepseek"),
+        providerInstanceId: fdInstanceId,
         cwd: fixture.cwd,
         runtimeMode: "full-access",
       });
@@ -245,14 +245,14 @@ it.live("runs multi-turn tool/approval flow", () =>
         threadId: session.threadId,
         userText: "turn 1",
         response: {
-          events: codexTurnToolFixture,
+          events: fdTurnToolFixture,
           mutateWorkspace: ({ cwd }) =>
             writeFileString(join(cwd, "README.md"), "v2\n").pipe(Effect.asVoid, Effect.ignore),
         },
       });
       assert.deepEqual(
         firstTurnEvents.map((event) => event.type),
-        codexTurnToolFixture.map((event) => event.type),
+        fdTurnToolFixture.map((event) => event.type),
       );
 
       const secondTurnEvents = yield* runTurn({
@@ -261,14 +261,14 @@ it.live("runs multi-turn tool/approval flow", () =>
         threadId: session.threadId,
         userText: "turn 2 approval",
         response: {
-          events: codexTurnApprovalFixture,
+          events: fdTurnApprovalFixture,
           mutateWorkspace: ({ cwd }) =>
             writeFileString(join(cwd, "README.md"), "v3\n").pipe(Effect.asVoid, Effect.ignore),
         },
       });
       assert.deepEqual(
         secondTurnEvents.map((event) => event.type),
-        codexTurnApprovalFixture.map((event) => event.type),
+        fdTurnApprovalFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
   }).pipe(Effect.provide(NodeServices.layer)),
@@ -284,8 +284,8 @@ it.live("rolls back provider conversation state only", () =>
       const provider = yield* ProviderService;
       const session = yield* provider.startSession(ThreadId.make("thread-integration-rollback"), {
         threadId: ThreadId.make("thread-integration-rollback"),
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
+        provider: ProviderDriverKind.make("fd-deepseek"),
+        providerInstanceId: fdInstanceId,
         cwd: fixture.cwd,
         runtimeMode: "full-access",
       });
@@ -297,7 +297,7 @@ it.live("rolls back provider conversation state only", () =>
         threadId: session.threadId,
         userText: "turn 1",
         response: {
-          events: codexTurnToolFixture,
+          events: fdTurnToolFixture,
           mutateWorkspace: ({ cwd }) =>
             writeFileString(join(cwd, "README.md"), "v2\n").pipe(Effect.asVoid, Effect.ignore),
         },
@@ -309,7 +309,7 @@ it.live("rolls back provider conversation state only", () =>
         threadId: session.threadId,
         userText: "turn 2 approval",
         response: {
-          events: codexTurnApprovalFixture,
+          events: fdTurnApprovalFixture,
           mutateWorkspace: ({ cwd }) =>
             writeFileString(join(cwd, "README.md"), "v3\n").pipe(Effect.asVoid, Effect.ignore),
         },
@@ -340,8 +340,8 @@ it.live("reports runtime mode per turn and on mode transitions", () =>
       const startSession = (runtimeMode: "approval-required" | "full-access") =>
         provider.startSession(threadId, {
           threadId,
-          provider: ProviderDriverKind.make("codex"),
-          providerInstanceId: codexInstanceId,
+          provider: ProviderDriverKind.make("fd-deepseek"),
+          providerInstanceId: fdInstanceId,
           cwd: fixture.cwd,
           runtimeMode,
         });
@@ -352,7 +352,7 @@ it.live("reports runtime mode per turn and on mode transitions", () =>
         harness: fixture.harness,
         threadId,
         userText: "supervised turn",
-        response: { events: codexTurnTextFixture },
+        response: { events: fdTurnTextFixture },
       });
 
       // Toggling the mode restarts the session, which is the only place the
@@ -363,7 +363,7 @@ it.live("reports runtime mode per turn and on mode transitions", () =>
         harness: fixture.harness,
         threadId,
         userText: "full access turn",
-        response: { events: codexTurnTextFixture },
+        response: { events: fdTurnTextFixture },
       });
 
       const recorded = yield* analytics.get;

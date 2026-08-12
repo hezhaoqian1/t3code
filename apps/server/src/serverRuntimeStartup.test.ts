@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { DEFAULT_MODEL, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { ProjectId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
@@ -15,12 +15,13 @@ import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngi
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
+import { FD_DEEPSEEK_MODEL_SELECTION } from "./fd-agent/FdModelPolicy.ts";
 
-it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
-  assert.deepStrictEqual(ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(), {
-    instanceId: ProviderInstanceId.make("codex"),
-    model: DEFAULT_MODEL,
-  });
+it("uses the fixed FD model for auto-bootstrapped model selection", () => {
+  assert.deepStrictEqual(
+    ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
+    FD_DEEPSEEK_MODEL_SELECTION,
+  );
 });
 
 it.effect("enqueueCommand waits for readiness and then drains queued work", () =>
@@ -123,7 +124,49 @@ it.effect("resolveWelcomeBase derives cwd and project name from server config", 
   }),
 );
 
-it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and thread ids", () => {
+it.effect("resolves browser targets only for Desktop and Vite startup", () =>
+  Effect.gen(function* () {
+    const desktopTarget = yield* ServerRuntimeStartup.resolveStartupBrowserTarget.pipe(
+      Effect.provideService(ServerConfig.ServerConfig, {
+        mode: "desktop",
+        port: 4773,
+        host: ServerConfig.LOOPBACK_HOST,
+        devUrl: undefined,
+      } as never),
+    );
+    const viteTarget = yield* ServerRuntimeStartup.resolveStartupBrowserTarget.pipe(
+      Effect.provideService(ServerConfig.ServerConfig, {
+        mode: "web",
+        port: 4773,
+        host: ServerConfig.LOOPBACK_HOST,
+        devUrl: new URL("http://127.0.0.1:5173"),
+      } as never),
+    );
+    const genericWebTarget = yield* ServerRuntimeStartup.resolveStartupBrowserTarget.pipe(
+      Effect.provideService(ServerConfig.ServerConfig, {
+        mode: "web",
+        port: 4773,
+        host: ServerConfig.LOOPBACK_HOST,
+        devUrl: undefined,
+      } as never),
+    );
+    const opaqueDevTarget = yield* ServerRuntimeStartup.resolveStartupBrowserTarget.pipe(
+      Effect.provideService(ServerConfig.ServerConfig, {
+        mode: "web",
+        port: 4773,
+        host: ServerConfig.LOOPBACK_HOST,
+        devUrl: new URL("file://localhost/tmp/index.html"),
+      } as never),
+    );
+
+    assert.equal(desktopTarget, "http://127.0.0.1:4773");
+    assert.equal(viteTarget, "http://127.0.0.1:5173/");
+    assert.isUndefined(genericWebTarget);
+    assert.isUndefined(opaqueDevTarget);
+  }),
+);
+
+it.effect("resolveAutoBootstrapWelcomeTargets returns only the existing office project", () => {
   const bootstrapProjectId = ProjectId.make("project-startup-bootstrap");
   const bootstrapThreadId = ThreadId.make("thread-startup-bootstrap");
 
@@ -175,15 +218,12 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
       Effect.provide(NodeServices.layer),
     );
 
-    assert.deepStrictEqual(targets, {
-      bootstrapProjectId,
-      bootstrapThreadId,
-    });
+    assert.deepStrictEqual(targets, { bootstrapProjectId });
     assert.deepStrictEqual(yield* Ref.get(dispatchCalls), []);
   });
 });
 
-it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when missing", () =>
+it.effect("resolveAutoBootstrapWelcomeTargets creates only the office project when missing", () =>
   Effect.gen(function* () {
     const dispatchCalls = yield* Ref.make<ReadonlyArray<string>>([]);
     const targets = yield* ServerRuntimeStartup.resolveAutoBootstrapWelcomeTargets.pipe(
@@ -221,8 +261,8 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
     );
 
     assert.equal(typeof targets.bootstrapProjectId, "string");
-    assert.equal(typeof targets.bootstrapThreadId, "string");
-    assert.deepStrictEqual(yield* Ref.get(dispatchCalls), ["project.create", "thread.create"]);
+    assert.deepStrictEqual(Object.keys(targets), ["bootstrapProjectId"]);
+    assert.deepStrictEqual(yield* Ref.get(dispatchCalls), ["project.create"]);
   }),
 );
 

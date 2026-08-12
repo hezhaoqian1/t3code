@@ -1,23 +1,18 @@
 /**
  * ProviderInstanceRegistry — the single Effect service in the new model.
  *
- * Owns a `Map<ProviderInstanceId, ProviderInstance>` produced by running
- * registered driver factories against `ServerSettings.providerInstances`.
- * The registry watches settings; when an instance's config changes (or
- * the entry disappears), the registry tears down the affected instance's
- * scope and rebuilds — that's the entire hot-reload story.
+ * Owns the live `Map<ProviderInstanceId, ProviderInstance>` produced from the
+ * fixed FD driver registration.
  *
  * What rest-of-server reads from here:
  *   - `getInstance(instanceId)` — for routing turn/session calls.
  *   - `listInstances` — for snapshot aggregation in `ProviderRegistry`.
- *   - `listUnavailable` — `ServerProvider` shadows for instances whose
- *     driver is not registered in this build (rollback / fork tolerance).
  *   - `streamChanges` — coalesced "registry mutated" pings so consumers
  *     can re-pull lists or re-broadcast.
  *
  * @module provider/Services/ProviderInstanceRegistry
  */
-import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
+import type { ProviderInstanceId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as PubSub from "effect/PubSub";
@@ -41,16 +36,9 @@ export interface ProviderInstanceRegistryShape {
    */
   readonly listInstances: Effect.Effect<ReadonlyArray<ProviderInstance>>;
   /**
-   * Wire-shape shadow snapshots for instances whose driver is unknown to
-   * this build (or whose config failed to decode). Suitable for merging
-   * directly into `ProviderRegistry` output.
-   */
-  readonly listUnavailable: Effect.Effect<ReadonlyArray<ServerProvider>>;
-  /**
    * Push notification stream emitted whenever the registry's contents
    * change — instance added, removed, or rebuilt. The payload is `void`
-   * because consumers always want to re-pull `listInstances` /
-   * `listUnavailable` together.
+   * because consumers always want to re-pull `listInstances`.
    *
    * NOTE: because `Stream.fromPubSub` defers `PubSub.subscribe` until the
    * stream starts running, forking a consumer via

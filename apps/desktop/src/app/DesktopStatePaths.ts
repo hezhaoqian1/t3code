@@ -14,9 +14,11 @@ export function resolveDesktopBaseDir(input: {
   readonly homeDirectory: string;
   readonly joinPath: JoinPath;
   readonly t3Home: Option.Option<string>;
+  readonly defaultBaseDir?: string;
 }): string {
-  return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, ".t3"),
+  return Option.getOrElse(
+    normalizeConfiguredBaseDir(input.t3Home),
+    () => input.defaultBaseDir ?? input.joinPath(input.homeDirectory, ".t3"),
   );
 }
 
@@ -26,7 +28,8 @@ export function resolveDesktopStateDir(input: {
   readonly joinPath: JoinPath;
   readonly t3Home: Option.Option<string>;
 }): string {
-  const useDevSubdir =
-    input.isDevelopment && Option.isNone(normalizeConfiguredBaseDir(input.t3Home));
-  return input.joinPath(input.baseDir, useDevSubdir ? "dev" : "userdata");
+  if (Option.isSome(normalizeConfiguredBaseDir(input.t3Home))) {
+    return input.joinPath(input.baseDir, "userdata");
+  }
+  return input.isDevelopment ? input.joinPath(input.baseDir, "dev") : input.baseDir;
 }

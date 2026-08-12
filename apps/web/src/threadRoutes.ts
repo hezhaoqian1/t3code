@@ -20,6 +20,13 @@ type DraftThreadRouteState = {
 
 export type ThreadRouteRenderState = "loading" | "ready" | "missing";
 
+export function resolveThreadRouteRedirect(input: {
+  bootstrapComplete: boolean;
+  renderState: ThreadRouteRenderState;
+}): "/" | null {
+  return input.bootstrapComplete && input.renderState === "missing" ? "/" : null;
+}
+
 export function resolveThreadRouteRenderState(input: {
   bootstrapComplete: boolean;
   serverThreadShellExists: boolean;
@@ -40,11 +47,9 @@ export function resolveThreadRouteRenderState(input: {
 }
 
 export function buildThreadRouteParams(ref: ScopedThreadRef): {
-  environmentId: EnvironmentId;
   threadId: ThreadId;
 } {
   return {
-    environmentId: ref.environmentId,
     threadId: ref.threadId,
   };
 }
@@ -56,22 +61,24 @@ export function buildDraftThreadRouteParams(draftId: DraftId): {
 }
 
 export function resolveThreadRouteRef(
-  params: Partial<Record<"environmentId" | "threadId", string | undefined>>,
+  params: Partial<Record<"threadId", string | undefined>>,
+  environmentId: EnvironmentId | null,
 ): ScopedThreadRef | null {
-  if (!params.environmentId || !params.threadId) {
+  if (!environmentId || !params.threadId) {
     return null;
   }
 
-  return scopeThreadRef(params.environmentId as EnvironmentId, params.threadId as ThreadId);
+  return scopeThreadRef(environmentId, params.threadId as ThreadId);
 }
 
 export function resolveThreadRouteTarget(
-  params: Partial<Record<"environmentId" | "threadId" | "draftId", string | undefined>>,
+  params: Partial<Record<"threadId" | "draftId", string | undefined>>,
+  environmentId: EnvironmentId | null,
 ): ThreadRouteTarget | null {
-  if (params.environmentId && params.threadId) {
+  if (environmentId && params.threadId) {
     return {
       kind: "server",
-      threadRef: scopeThreadRef(params.environmentId as EnvironmentId, params.threadId as ThreadId),
+      threadRef: scopeThreadRef(environmentId, params.threadId as ThreadId),
     };
   }
 

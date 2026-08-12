@@ -54,7 +54,7 @@ function mapSessionRpcError(error: InitialConfigError | ProbeError): ConnectionA
     case "KeybindingsConfigParseError":
     case "ServerSettingsError":
       return new ConnectionTransientErrorClass({
-        reason: "remote-unavailable",
+        reason: "endpoint-unavailable",
         detail: error.message,
       });
     case "RpcClientError":

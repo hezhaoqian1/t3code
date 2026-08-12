@@ -50,10 +50,13 @@ function resolveEarlyDesktopSettingsPath(input: {
   readonly joinPath: JoinPath;
 }): string {
   const t3Home = Option.fromUndefinedOr(input.env.T3CODE_HOME);
+  const appDataDirectory =
+    trimNonEmpty(input.env.XDG_CONFIG_HOME) ?? input.joinPath(input.homeDirectory, ".config");
   const baseDir = resolveDesktopBaseDir({
     homeDirectory: input.homeDirectory,
     joinPath: input.joinPath,
     t3Home,
+    defaultBaseDir: input.joinPath(appDataDirectory, "Fangde AI"),
   });
   const stateDir = resolveDesktopStateDir({
     baseDir,
@@ -81,7 +84,7 @@ export function resolveEarlyLinuxElectronOptions(
 ): EarlyLinuxElectronOptions {
   const preference = resolveEarlyLinuxPasswordStorePreference(input);
   return {
-    linuxWmClass: isDevelopmentEnvironment(input.env) ? "t3code-dev" : "t3code",
+    linuxWmClass: isDevelopmentEnvironment(input.env) ? "fangde-ai-dev" : "fangde-ai",
     passwordStore: resolveLinuxPasswordStoreSwitch({
       preference,
       env: input.env,

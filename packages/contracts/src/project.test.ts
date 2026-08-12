@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   ProjectReadFileError,
+  ProjectListSkillsResult,
   ProjectSearchContentsError,
   ProjectSearchContentsInput,
   ProjectSearchEntriesError,
@@ -12,6 +13,28 @@ import {
 
 const decodeSearchEntriesInput = Schema.decodeUnknownSync(ProjectSearchEntriesInput);
 const decodeSearchContentsInput = Schema.decodeUnknownSync(ProjectSearchContentsInput);
+const decodeProjectListSkillsResult = Schema.decodeUnknownSync(ProjectListSkillsResult);
+
+describe("project skill catalog", () => {
+  it("decodes display metadata without retaining instruction bodies", () => {
+    const decoded = decodeProjectListSkillsResult({
+      skills: [
+        {
+          name: "summarize-documents",
+          description: "Summarize documents",
+          path: "/workspace/.agents/skills/summarize-documents/SKILL.md",
+          scope: "project:agents",
+          enabled: true,
+          displayName: "summarize-documents",
+          shortDescription: "Summarize documents",
+          instructions: "SECRET INSTRUCTIONS",
+        },
+      ],
+    });
+
+    expect(decoded.skills[0]).not.toHaveProperty("instructions");
+  });
+});
 
 describe("project search inputs", () => {
   it("allows an empty entries query for bounded frecency browsing", () => {

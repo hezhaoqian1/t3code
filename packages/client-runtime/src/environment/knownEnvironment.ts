@@ -5,7 +5,7 @@ export interface KnownEnvironmentConnectionTarget {
   readonly wsBaseUrl: string;
 }
 
-export type KnownEnvironmentSource = "configured" | "desktop-managed" | "manual" | "window-origin";
+export type KnownEnvironmentSource = "desktop-managed" | "development-loopback";
 
 export interface KnownEnvironment {
   readonly id: string;
@@ -24,7 +24,7 @@ export function createKnownEnvironment(input: {
   return {
     id: input.id ?? `ws:${input.label}`,
     label: input.label,
-    source: input.source ?? "manual",
+    source: input.source ?? "desktop-managed",
     target: input.target,
   };
 }

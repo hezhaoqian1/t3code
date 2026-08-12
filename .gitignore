@@ -1,8 +1,10 @@
 node_modules
+/dist/
 .bun
 .turbo
 .DS_Store
 *.log
+screenlog.*
 *.tsbuildinfo
 apps/*/dist
 infra/*/dist

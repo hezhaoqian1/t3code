@@ -1,14 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vite-plus/test";
-
-vi.mock("~/hooks/useSettings", () => ({
-  useEnvironmentIdentificationMode: () => "none",
-}));
-vi.mock("../SidebarStageBackdrop", () => ({
-  StageBackdropButtonArt: () => null,
-  useSidebarStageBackdropVariant: () => null,
-}));
+import { describe, expect, it } from "vite-plus/test";
 
 import { ComposerPrimaryActions, formatPendingPrimaryActionLabel } from "./ComposerPrimaryActions";
 
@@ -69,7 +61,7 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: true,
         questionIndex: 0,
       }),
-    ).toBe("Submitting...");
+    ).toBe("正在提交…");
   });
 
   it("returns 'Submitting...' while responding regardless of other flags", () => {
@@ -80,7 +72,7 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: true,
         questionIndex: 3,
       }),
-    ).toBe("Submitting...");
+    ).toBe("正在提交…");
   });
 
   it("returns 'Submit' in compact mode on the last question", () => {
@@ -91,7 +83,7 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: false,
         questionIndex: 0,
       }),
-    ).toBe("Submit");
+    ).toBe("提交");
   });
 
   it("returns 'Next' in compact mode when not the last question", () => {
@@ -102,7 +94,7 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: false,
         questionIndex: 1,
       }),
-    ).toBe("Next");
+    ).toBe("下一步");
   });
 
   it("returns 'Next question' when not the last question", () => {
@@ -113,7 +105,7 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: false,
         questionIndex: 0,
       }),
-    ).toBe("Next question");
+    ).toBe("下一题");
   });
 
   it("returns singular 'Submit answer' on the last question when it is the only question", () => {
@@ -124,7 +116,7 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: false,
         questionIndex: 0,
       }),
-    ).toBe("Submit answer");
+    ).toBe("提交回答");
   });
 
   it("returns plural 'Submit answers' on the last question when there are multiple questions", () => {
@@ -135,7 +127,7 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: false,
         questionIndex: 1,
       }),
-    ).toBe("Submit answers");
+    ).toBe("提交回答");
   });
 
   it("returns plural 'Submit answers' for higher question indices", () => {
@@ -146,17 +138,17 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: false,
         questionIndex: 5,
       }),
-    ).toBe("Submit answers");
+    ).toBe("提交回答");
   });
 });
 
 describe("ComposerPrimaryActions", () => {
   it("offers Stop generation while a running turn is waiting for user input", () => {
-    expect(renderPendingActions(true)).toContain('aria-label="Stop generation"');
+    expect(renderPendingActions(true)).toContain('aria-label="停止生成"');
   });
 
   it("does not offer Stop generation for a pending request without a running turn", () => {
-    expect(renderPendingActions(false)).not.toContain('aria-label="Stop generation"');
+    expect(renderPendingActions(false)).not.toContain('aria-label="停止生成"');
   });
 
   it("matches the small pending action size without changing the standalone size", () => {

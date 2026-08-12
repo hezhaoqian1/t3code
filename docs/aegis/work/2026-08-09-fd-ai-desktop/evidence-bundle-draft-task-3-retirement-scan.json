@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-3-retirement-scan",
+  "type": "inspection",
+  "source": "rg Desktop remote owners plus git diff review",
+  "summary": "Desktop SSH, WSL, server-exposure, connection-catalog, saved-environment, remote folder-picker, and splash owners/channels/preload methods are absent. Legacy SSH payload types remain only for the still-active client-runtime owner queued for Task 5; bootstrap Tailscale false fields remain queued for Task 4 server-contract retirement.",
+  "verifier": "rg and direct diff inspection"
+}

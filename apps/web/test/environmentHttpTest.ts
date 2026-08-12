@@ -3,12 +3,10 @@ import {
   AuthSessionId,
   EnvironmentAuthenticatedAuth,
   EnvironmentAuthenticatedPrincipal,
-  EnvironmentHttpApi,
+  LocalEnvironmentHttpApi,
   type AuthBrowserSessionRequest,
   type AuthBrowserSessionResult,
-  type AuthCreatePairingCredentialInput,
   type AuthEnvironmentScope,
-  type AuthPairingCredentialResult,
   type AuthSessionState,
   type ExecutionEnvironmentDescriptor,
   type EnvironmentAuthInvalidError,
@@ -32,16 +30,12 @@ interface EnvironmentHttpTestScenario {
   readonly descriptor?: () => Effect.Effect<ExecutionEnvironmentDescriptor>;
   readonly session?: () => Effect.Effect<AuthSessionState>;
   readonly browserSession?: BrowserSessionHandler;
-  readonly pairingCredential?: (
-    payload: AuthCreatePairingCredentialInput,
-  ) => Effect.Effect<AuthPairingCredentialResult>;
 }
 
 export interface EnvironmentHttpTestCalls {
   descriptor: number;
   session: number;
   browserSession: Array<AuthBrowserSessionRequest>;
-  pairingCredential: Array<AuthCreatePairingCredentialInput>;
 }
 
 const unexpectedEndpoint = (endpoint: string) =>
@@ -65,14 +59,13 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
     descriptor: 0,
     session: 0,
     browserSession: [],
-    pairingCredential: [],
   };
 
   const client = await Effect.runPromise(
-    HttpApiTest.groups(EnvironmentHttpApi, ["metadata", "auth"]).pipe(
+    HttpApiTest.groups(LocalEnvironmentHttpApi, ["metadata", "auth"]).pipe(
       Effect.provide([
         NodeHttpServer.layerHttpServices,
-        HttpApiBuilder.group(EnvironmentHttpApi, "metadata", (handlers) =>
+        HttpApiBuilder.group(LocalEnvironmentHttpApi, "metadata", (handlers) =>
           handlers.handle(
             "descriptor",
             Effect.fn("test.environment.metadata.descriptor")(function* () {
@@ -81,7 +74,7 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
             }),
           ),
         ),
-        HttpApiBuilder.group(EnvironmentHttpApi, "auth", (handlers) =>
+        HttpApiBuilder.group(LocalEnvironmentHttpApi, "auth", (handlers) =>
           handlers
             .handle(
               "session",
@@ -100,22 +93,7 @@ export async function installEnvironmentHttpTest(scenario: EnvironmentHttpTestSc
               }),
             )
             .handle("token", () => unexpectedEndpoint("auth.token"))
-            .handle("webSocketTicket", () => unexpectedEndpoint("auth.webSocketTicket"))
-            .handle(
-              "pairingCredential",
-              Effect.fn("test.environment.auth.pairingCredential")(function* ({ payload }) {
-                calls.pairingCredential.push(payload);
-                return yield* (
-                  scenario.pairingCredential?.(payload) ??
-                    unexpectedEndpoint("auth.pairingCredential")
-                );
-              }),
-            )
-            .handle("pairingLinks", () => unexpectedEndpoint("auth.pairingLinks"))
-            .handle("revokePairingLink", () => unexpectedEndpoint("auth.revokePairingLink"))
-            .handle("clients", () => unexpectedEndpoint("auth.clients"))
-            .handle("revokeClient", () => unexpectedEndpoint("auth.revokeClient"))
-            .handle("revokeOtherClients", () => unexpectedEndpoint("auth.revokeOtherClients")),
+            .handle("webSocketTicket", () => unexpectedEndpoint("auth.webSocketTicket")),
         ),
       ]),
       Effect.provideService(EnvironmentAuthenticatedAuth, authenticatedAuth),

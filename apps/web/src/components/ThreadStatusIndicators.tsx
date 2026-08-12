@@ -4,9 +4,8 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import type { VcsStatusResult } from "@t3tools/contracts";
-import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
+import { FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useMemo } from "react";
-import { useEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { useProject } from "../state/entities";
 import { useEnvironmentQuery } from "../state/query";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
@@ -292,23 +291,16 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
 
 /**
  * Non-interactive trailing status icons for a thread row in compact contexts
- * like the command palette. Shows a terminal-running indicator and a remote
- * environment indicator, matching the sidebar's trailing indicators.
+ * like the command palette. Shows the terminal-running indicator.
  */
 export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary }) {
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: thread.environmentId,
     threadId: thread.id,
   });
-  const environment = useEnvironment(thread.environmentId);
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const isRemoteThread =
-    primaryEnvironmentId !== null && thread.environmentId !== primaryEnvironmentId;
-  const remoteEnvLabel = environment?.label ?? null;
-  const threadEnvironmentLabel = isRemoteThread ? (remoteEnvLabel ?? "Remote") : null;
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
 
-  if (!terminalStatus && !isRemoteThread) {
+  if (!terminalStatus) {
     return null;
   }
 
@@ -330,21 +322,6 @@ export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSumma
             />
           </TooltipTrigger>
           <TooltipPopup side="top">{terminalStatus.label}</TooltipPopup>
-        </Tooltip>
-      ) : null}
-      {isRemoteThread ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                aria-label={threadEnvironmentLabel ?? "Remote"}
-                className="inline-flex items-center justify-center"
-              />
-            }
-          >
-            <CloudIcon className="size-3 text-muted-foreground/60" />
-          </TooltipTrigger>
-          <TooltipPopup side="top">{threadEnvironmentLabel}</TooltipPopup>
         </Tooltip>
       ) : null}
     </span>

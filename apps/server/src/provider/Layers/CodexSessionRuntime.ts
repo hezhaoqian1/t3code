@@ -35,22 +35,23 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
-import { buildCodexInitializeParams } from "./CodexProvider.ts";
+import { buildFdCodexInitializeParams } from "../../fd-codex/FdCodexInitialize.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadStartResponse,
+);
+const decodeV2ThreadResumeResponse = Schema.decodeUnknownEffect(
+  EffectCodexSchema.V2ThreadResumeResponse,
+);
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
 const ANSI_ESCAPE_CHAR = String.fromCharCode(27);
 const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE_CHAR}\\[[0-9;]*m`, "g");
-const CODEX_STDERR_LOG_REGEX =
-  /^\d{4}-\d{2}-\d{2}T\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+\S+:\s+(.*)$/;
-const BENIGN_ERROR_LOG_SNIPPETS = [
-  "state db missing rollout path for thread",
-  "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
-];
+const FATAL_STDERR_SNIPPETS = ["failed to connect to websocket"];
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "not found",
@@ -106,10 +107,50 @@ export interface CodexSessionRuntimeOptions {
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly resumeCursor?: CodexResumeCursor;
   readonly appServerArgs?: ReadonlyArray<string>;
+  readonly developerInstructions?: string;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+  readonly dynamicToolExecutor?: (
+    input: EffectCodexSchema.DynamicToolCallParams,
+  ) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse>;
+}
+
+const unauthorizedDynamicToolResponse: EffectCodexSchema.DynamicToolCallResponse = {
+  success: false,
+  contentItems: [
+    {
+      type: "inputText",
+      text: "FD enterprise tool authorization is unavailable for this request.",
+    },
+  ],
+};
+
+export function executeAuthorizedDynamicToolCall(input: {
+  readonly providerThreadId: string | undefined;
+  readonly authorizedTools: ReadonlySet<string>;
+  readonly payload: EffectCodexSchema.DynamicToolCallParams;
+  readonly executor: (
+    payload: EffectCodexSchema.DynamicToolCallParams,
+  ) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse>;
+}): Effect.Effect<EffectCodexSchema.DynamicToolCallResponse> {
+  const requestedTool = input.payload.namespace
+    ? `${input.payload.namespace}.${input.payload.tool}`
+    : input.payload.tool;
+  if (
+    !input.providerThreadId ||
+    input.payload.threadId !== input.providerThreadId ||
+    !input.authorizedTools.has(requestedTool)
+  ) {
+    return Effect.succeed(unauthorizedDynamicToolResponse);
+  }
+  return input.executor(input.payload);
 }
 
 export interface CodexSessionRuntimeSendTurnInput {
   readonly input?: string;
+  readonly skills?: ReadonlyArray<{
+    readonly name: string;
+    readonly path: string;
+  }>;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
     readonly url: string;
@@ -297,18 +338,28 @@ function runtimeModeToThreadConfig(input: RuntimeMode): {
   }
 }
 
+type CodexExperimentalThreadStartParams = EffectCodexSchema.V2ThreadStartParams & {
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+};
+
 function buildThreadStartParams(input: {
   readonly cwd: string;
   readonly runtimeMode: RuntimeMode;
   readonly model: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
-}): EffectCodexSchema.V2ThreadStartParams {
+  readonly developerInstructions?: string;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+}): CodexExperimentalThreadStartParams {
   const config = runtimeModeToThreadConfig(input.runtimeMode);
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
     approvalsReviewer: config.approvalsReviewer,
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
+    ...(input.dynamicTools && input.dynamicTools.length > 0
+      ? { dynamicTools: input.dynamicTools }
+      : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
   };
@@ -362,6 +413,10 @@ export function buildTurnStartParams(input: {
   readonly threadId: string;
   readonly runtimeMode: RuntimeMode;
   readonly prompt?: string;
+  readonly skills?: ReadonlyArray<{
+    readonly name: string;
+    readonly path: string;
+  }>;
   readonly attachments?: ReadonlyArray<{
     readonly type: "image";
     readonly url: string;
@@ -375,6 +430,13 @@ export function buildTurnStartParams(input: {
   CodexErrors.CodexAppServerProtocolParseError
 > {
   const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
+  for (const skill of input.skills ?? []) {
+    turnInput.push({
+      type: "skill",
+      name: skill.name,
+      path: skill.path,
+    });
+  }
   if (input.prompt) {
     turnInput.push({
       type: "text",
@@ -413,24 +475,9 @@ export function buildTurnStartParams(input: {
   );
 }
 
-function classifyCodexStderrLine(rawLine: string): { readonly message: string } | null {
-  const line = rawLine.replaceAll(ANSI_ESCAPE_REGEX, "").trim();
-  if (!line) {
-    return null;
-  }
-
-  const match = line.match(CODEX_STDERR_LOG_REGEX);
-  if (match) {
-    const level = match[1];
-    if (level && level !== "ERROR") {
-      return null;
-    }
-    if (BENIGN_ERROR_LOG_SNIPPETS.some((snippet) => line.includes(snippet))) {
-      return null;
-    }
-  }
-
-  return { message: line };
+function isFatalCodexStderrLine(rawLine: string): boolean {
+  const line = rawLine.replaceAll(ANSI_ESCAPE_REGEX, "").trim().toLowerCase();
+  return FATAL_STDERR_SNIPPETS.some((snippet) => line.includes(snippet));
 }
 
 export function isRecoverableThreadResumeError(error: unknown): boolean {
@@ -452,7 +499,30 @@ interface CodexThreadOpenClient {
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
   ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
+  readonly raw?: {
+    readonly request: (
+      method: string,
+      payload: unknown,
+    ) => Effect.Effect<unknown, CodexErrors.CodexAppServerError>;
+  };
 }
+
+const decodeThreadOpenResponse = (
+  method: CodexThreadOpenMethod,
+  response: unknown,
+): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> =>
+  (method === "thread/start"
+    ? decodeV2ThreadStartResponse(response)
+    : decodeV2ThreadResumeResponse(response)
+  ).pipe(
+    Effect.mapError((error) =>
+      CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
+        "decode-response-payload",
+        error,
+        { method },
+      ),
+    ),
+  );
 
 export const openCodexThread = (input: {
   readonly client: CodexThreadOpenClient;
@@ -462,6 +532,8 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly developerInstructions?: string;
+  readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -469,10 +541,36 @@ export const openCodexThread = (input: {
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
+    ...(input.developerInstructions ? { developerInstructions: input.developerInstructions } : {}),
+    ...(input.dynamicTools ? { dynamicTools: input.dynamicTools } : {}),
   });
 
   if (resumeThreadId === undefined) {
+    if (startParams.dynamicTools !== undefined) {
+      return input.client
+        .raw!.request("thread/start", startParams)
+        .pipe(Effect.flatMap((response) => decodeThreadOpenResponse("thread/start", response)));
+    }
     return input.client.request("thread/start", startParams);
+  }
+
+  if (startParams.dynamicTools !== undefined) {
+    const resumeParams = { threadId: resumeThreadId, ...startParams };
+    return input.client.raw!.request("thread/resume", resumeParams).pipe(
+      Effect.flatMap((response) => decodeThreadOpenResponse("thread/resume", response)),
+      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
+        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+          threadId: input.threadId,
+          requestedRuntimeMode: input.runtimeMode,
+          resumeThreadId,
+          recoverable: true,
+          cause: error,
+        }).pipe(
+          Effect.andThen(input.client.raw!.request("thread/start", startParams)),
+          Effect.flatMap((response) => decodeThreadOpenResponse("thread/start", response)),
+        ),
+      ),
+    );
   }
 
   return input.client
@@ -1370,6 +1468,28 @@ export const makeCodexSessionRuntime = (
 
     const currentSessionProviderThreadId = Effect.map(Ref.get(sessionRef), currentProviderThreadId);
 
+    if (options.dynamicToolExecutor) {
+      const authorizedTools = new Set(
+        (options.dynamicTools ?? []).flatMap((tool) =>
+          tool.type === "function"
+            ? [tool.name]
+            : tool.tools.map((nestedTool) => `${tool.name}.${nestedTool.name}`),
+        ),
+      );
+      yield* client.handleServerRequest("item/tool/call", (payload) =>
+        currentSessionProviderThreadId.pipe(
+          Effect.flatMap((providerThreadId) =>
+            executeAuthorizedDynamicToolCall({
+              providerThreadId,
+              authorizedTools,
+              payload,
+              executor: options.dynamicToolExecutor!,
+            }),
+          ),
+        ),
+      );
+    }
+
     yield* client.handleServerNotification("thread/started", (payload) =>
       currentSessionProviderThreadId.pipe(
         Effect.flatMap((providerThreadId) => {
@@ -1635,15 +1755,14 @@ export const makeCodexSessionRuntime = (
             Effect.forEach(
               lines,
               (line) => {
-                const classified = classifyCodexStderrLine(line);
-                if (!classified) {
+                if (!isFatalCodexStderrLine(line)) {
                   return Effect.void;
                 }
                 return emitEvent({
                   kind: "notification",
                   threadId: options.threadId,
                   method: "process/stderr",
-                  message: classified.message,
+                  message: "FD Agent runtime connection failed.",
                 });
               },
               { discard: true },
@@ -1683,7 +1802,7 @@ export const makeCodexSessionRuntime = (
 
     const start = Effect.fn("CodexSessionRuntime.start")(function* () {
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
+      yield* client.request("initialize", buildFdCodexInitializeParams());
       yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);
@@ -1696,6 +1815,10 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        ...(options.developerInstructions
+          ? { developerInstructions: options.developerInstructions }
+          : {}),
+        ...(options.dynamicTools ? { dynamicTools: options.dynamicTools } : {}),
       });
 
       const providerThreadId = opened.thread.id;
@@ -1765,6 +1888,7 @@ export const makeCodexSessionRuntime = (
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
             ...(input.input ? { prompt: input.input } : {}),
+            ...(input.skills ? { skills: input.skills } : {}),
             ...(input.attachments ? { attachments: input.attachments } : {}),
             ...(normalizedModel ? { model: normalizedModel } : {}),
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),

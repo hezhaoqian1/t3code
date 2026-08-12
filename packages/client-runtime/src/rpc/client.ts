@@ -42,7 +42,6 @@ type RpcMethod<TTag extends EnvironmentRpcTag> = WsRpcProtocolClient[TTag];
 export type EnvironmentSubscriptionRpcTag =
   | typeof ORCHESTRATION_WS_METHODS.subscribeShell
   | typeof ORCHESTRATION_WS_METHODS.subscribeThread
-  | typeof WS_METHODS.subscribeAuthAccess
   | typeof WS_METHODS.subscribeServerConfig
   | typeof WS_METHODS.subscribeServerLifecycle
   | typeof WS_METHODS.subscribeTerminalEvents
@@ -54,10 +53,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeVcsStatus
   | typeof WS_METHODS.terminalAttach;
 
-export type EnvironmentStreamCommandRpcTag =
-  | typeof WS_METHODS.cloudInstallRelayClient
-  | typeof WS_METHODS.serverUpdateServerWithProgress
-  | typeof WS_METHODS.gitRunStackedAction;
+export type EnvironmentStreamCommandRpcTag = typeof WS_METHODS.gitRunStackedAction;
 
 export type EnvironmentStreamRpcTag =
   | EnvironmentSubscriptionRpcTag

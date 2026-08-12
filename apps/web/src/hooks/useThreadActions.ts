@@ -38,6 +38,7 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
+import { usePrimaryEnvironmentId } from "../state/environments";
 
 export class ThreadArchiveBlockedError extends Schema.TaggedErrorClass<ThreadArchiveBlockedError>()(
   "ThreadArchiveBlockedError",
@@ -59,7 +60,7 @@ export class ThreadSettlementUnsupportedError extends Schema.TaggedErrorClass<Th
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support settling yet. Update the server to use Settle.";
+    return "Settling is not available in the local service.";
   }
 }
 
@@ -83,7 +84,7 @@ export class ThreadSnoozeUnsupportedError extends Schema.TaggedErrorClass<Thread
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support snoozing yet. Update the server to use Snooze.";
+    return "Snoozing is not available in the local service.";
   }
 }
 
@@ -102,9 +103,10 @@ export class ThreadSnoozeBlockedError extends Schema.TaggedErrorClass<ThreadSnoo
 /** Key that sorts before every arranged pinned thread, so a fresh pin lands
     at the top of the run. Undefined (keyless, sorts with the legacy block)
     when key math can't produce one — pinning must never fail on placement. */
-function topOfPinnedRunOrderKey(): string | undefined {
+function topOfPinnedRunOrderKey(environmentId: EnvironmentId): string | undefined {
   let firstKey: string | null = null;
   for (const shell of readThreadShells()) {
+    if (shell.environmentId !== environmentId) continue;
     if (shell.pinnedAt == null || shell.pinOrderKey == null) continue;
     if (firstKey === null || shell.pinOrderKey < firstKey) firstKey = shell.pinOrderKey;
   }
@@ -119,7 +121,7 @@ export class ThreadPinningUnsupportedError extends Schema.TaggedErrorClass<Threa
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support pinning yet. Update the server to use Pin.";
+    return "Pinning is not available in the local service.";
   }
 }
 
@@ -131,7 +133,7 @@ export class ThreadPinReorderUnsupportedError extends Schema.TaggedErrorClass<Th
   },
 ) {
   override get message(): string {
-    return "This environment's server does not support reordering pinned threads yet. Update the server to reorder pins.";
+    return "Reordering pinned threads is not available in the local service.";
   }
 }
 
@@ -182,6 +184,7 @@ export function useThreadActions() {
   );
   const clearTerminalUiState = useTerminalUiStateStore((state) => state.clearTerminalUiState);
   const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const router = useRouter();
   const handleNewThread = useNewThreadHandler();
   // Keep a ref so archiveThread can call handleNewThread without appearing in
@@ -203,8 +206,8 @@ export function useThreadActions() {
   }, []);
   const getCurrentRouteThreadRef = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
-    return resolveThreadRouteRef(currentRouteParams);
-  }, [router]);
+    return resolveThreadRouteRef(currentRouteParams, primaryEnvironmentId);
+  }, [primaryEnvironmentId, router]);
 
   const archiveThread = useCallback(
     async (target: ScopedThreadRef, opts: { onArchived?: () => void } = {}) => {
@@ -378,7 +381,7 @@ export function useThreadActions() {
           if (fallbackThread) {
             const navigationResult = await settlePromise(() =>
               router.navigate({
-                to: "/$environmentId/$threadId",
+                to: "/$threadId",
                 params: buildThreadRouteParams(
                   scopeThreadRef(fallbackThread.environmentId, fallbackThread.id),
                 ),
@@ -554,7 +557,7 @@ export function useThreadActions() {
       // orderKey rides only to servers that decode it; pre-reorder servers
       // get the bare pin they understand and the thread stays keyless.
       const orderKey = readEnvironmentSupportsPinReorder(target.environmentId)
-        ? (opts.orderKey ?? topOfPinnedRunOrderKey())
+        ? (opts.orderKey ?? topOfPinnedRunOrderKey(target.environmentId))
         : undefined;
       return pinThreadMutation({
         environmentId: target.environmentId,

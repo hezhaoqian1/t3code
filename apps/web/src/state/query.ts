@@ -18,7 +18,7 @@ function formatError(cause: Cause.Cause<unknown>): string {
   const error = Cause.squash(cause);
   return error instanceof Error && error.message.trim().length > 0
     ? error.message
-    : "The environment request failed.";
+    : "The local service request failed.";
 }
 
 export function useEnvironmentQuery<A, E>(

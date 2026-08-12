@@ -5,8 +5,6 @@ import type {
 } from "@t3tools/contracts";
 import { isLoopbackHost, normalizePreviewUrl } from "@t3tools/shared/preview";
 
-import { readPreparedConnection } from "~/state/session";
-
 export const normalizeHostname = (host: string): string =>
   host.toLowerCase().replace(/^\[|\]$/g, "");
 
@@ -24,68 +22,25 @@ export const isLocalLoopbackHost = (host: string): boolean => {
   return parseIpv4Address(normalized)?.[0] === 127;
 };
 
-const isPrivateNetworkHost = (host: string): boolean => {
-  const normalized = normalizeHostname(host);
-  if (isLocalLoopbackHost(normalized) || normalized.endsWith(".local")) {
-    return true;
-  }
-  if (normalized.endsWith(".ts.net")) return true;
-  const parts = parseIpv4Address(normalized);
-  if (parts) {
-    return (
-      parts[0] === 10 ||
-      (parts[0] === 100 && parts[1]! >= 64 && parts[1]! <= 127) ||
-      (parts[0] === 172 && parts[1]! >= 16 && parts[1]! <= 31) ||
-      (parts[0] === 192 && parts[1] === 168) ||
-      (parts[0] === 169 && parts[1] === 254)
-    );
-  }
-  const firstIpv6Token = normalized.split(":", 1)[0] ?? "";
-  if (!normalized.includes(":") || !/^[\da-f]{1,4}$/u.test(firstIpv6Token)) return false;
-  const firstIpv6Hextet = Number.parseInt(firstIpv6Token, 16);
-  return (
-    Number.isInteger(firstIpv6Hextet) &&
-    ((firstIpv6Hextet & 0xfe00) === 0xfc00 || (firstIpv6Hextet & 0xffc0) === 0xfe80)
-  );
-};
-
-const readEnvironmentUrl = (environmentId: EnvironmentId): URL => {
-  const connection = readPreparedConnection(environmentId);
-  if (!connection) throw new Error(`Environment ${environmentId} is not connected.`);
-  return new URL(connection.httpBaseUrl);
-};
-
 const resolveEnvironmentPortTarget = (
   environmentId: EnvironmentId,
   target: Extract<BrowserNavigationTarget, { readonly kind: "environment-port" }>,
-  environmentUrl: URL,
   requestedUrl?: string,
   sourceUrl?: URL,
 ): PreviewUrlResolution => {
-  if (!isPrivateNetworkHost(environmentUrl.hostname)) {
-    throw new Error(
-      "This environment port needs the planned authenticated preview gateway; its server address is not directly private-network reachable.",
-    );
-  }
   const protocol = target.protocol ?? "http";
   const path = target.path?.startsWith("/") ? target.path : `/${target.path ?? ""}`;
-  const normalizedEnvironmentHost = environmentUrl.hostname.replace(/^\[|\]$/g, "");
-  const resolvedHost = normalizedEnvironmentHost.includes(":")
-    ? `[${normalizedEnvironmentHost}]`
-    : normalizedEnvironmentHost;
   const resolved = sourceUrl
     ? new URL(sourceUrl)
-    : new URL(path, `${protocol}://${resolvedHost}:${target.port}`);
+    : new URL(path, `${protocol}://localhost:${target.port}`);
   if (sourceUrl) {
-    resolved.hostname = resolvedHost;
+    resolved.hostname = "localhost";
     resolved.port = String(target.port);
   }
   return {
     requestedUrl: requestedUrl ?? `${protocol}://localhost:${target.port}${path}`,
     resolvedUrl: resolved.toString(),
-    resolutionKind: isLocalLoopbackHost(normalizedEnvironmentHost)
-      ? "direct"
-      : "direct-private-network",
+    resolutionKind: "direct",
     environmentId,
   };
 };
@@ -102,22 +57,18 @@ export function resolveBrowserNavigationTarget(
       // Preserve the existing direct-navigation behavior so the preview host
       // reports malformed URL errors through its normal navigation path.
     }
-    if (parsed && isLoopbackHost(parsed.hostname)) {
-      const environmentUrl = readEnvironmentUrl(environmentId);
-      if (parsed.hostname === "0.0.0.0" || !isLocalLoopbackHost(environmentUrl.hostname)) {
-        return resolveEnvironmentPortTarget(
-          environmentId,
-          {
-            kind: "environment-port",
-            port: Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80)),
-            protocol: parsed.protocol === "https:" ? "https" : "http",
-            path: `${parsed.pathname}${parsed.search}${parsed.hash}`,
-          },
-          environmentUrl,
-          target.url,
-          parsed,
-        );
-      }
+    if (parsed?.hostname === "0.0.0.0" && isLoopbackHost(parsed.hostname)) {
+      return resolveEnvironmentPortTarget(
+        environmentId,
+        {
+          kind: "environment-port",
+          port: Number(parsed.port || (parsed.protocol === "https:" ? 443 : 80)),
+          protocol: parsed.protocol === "https:" ? "https" : "http",
+          path: `${parsed.pathname}${parsed.search}${parsed.hash}`,
+        },
+        target.url,
+        parsed,
+      );
     }
     return {
       requestedUrl: target.url,
@@ -126,7 +77,7 @@ export function resolveBrowserNavigationTarget(
       environmentId,
     };
   }
-  return resolveEnvironmentPortTarget(environmentId, target, readEnvironmentUrl(environmentId));
+  return resolveEnvironmentPortTarget(environmentId, target);
 }
 
 export function resolveDiscoveredServerUrl(environmentId: EnvironmentId, rawUrl: string): string {

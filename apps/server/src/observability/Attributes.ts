@@ -36,14 +36,6 @@ export function normalizeModelMetricLabel(model: string | null | undefined): str
   if (!normalized) {
     return undefined;
   }
-  if (normalized.includes("gpt")) {
-    return "gpt";
-  }
-  if (normalized.includes("claude")) {
-    return "claude";
-  }
-  if (normalized.includes("gemini")) {
-    return "gemini";
-  }
+  if (normalized.includes("deepseek")) return "deepseek";
   return "other";
 }

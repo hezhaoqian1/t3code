@@ -11,10 +11,17 @@ describe("http dev routing", () => {
     expect(isLoopbackHostname("[::1]")).toBe(true);
   });
 
-  it("does not treat LAN addresses as local", () => {
-    expect(isLoopbackHostname("192.168.86.35")).toBe(false);
-    expect(isLoopbackHostname("10.0.0.24")).toBe(false);
-    expect(isLoopbackHostname("example.local")).toBe(false);
+  it("rejects wildcard, LAN, tailnet, and non-loopback IPv6 hosts", () => {
+    for (const hostname of [
+      "0.0.0.0",
+      "192.168.86.35",
+      "10.0.0.24",
+      "host.example.ts.net",
+      "fd7a:115c:a1e0::1",
+      "[fd7a:115c:a1e0::1]",
+    ]) {
+      expect(isLoopbackHostname(hostname)).toBe(false);
+    }
   });
 
   it("preserves path and query when redirecting to the dev server", () => {

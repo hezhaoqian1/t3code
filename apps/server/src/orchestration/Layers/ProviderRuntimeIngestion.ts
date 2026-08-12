@@ -43,6 +43,7 @@ import {
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { FdEnterpriseThreadRuntime } from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -875,6 +876,7 @@ const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
   const serverSettingsService = yield* ServerSettingsService;
+  const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
   const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
     crypto.randomUUIDv4.pipe(
       Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
@@ -1474,6 +1476,12 @@ const make = Effect.gen(function* () {
 
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      if (event.persistence === "memory-only") {
+        if (Option.isSome(enterpriseRuntime)) {
+          yield* enterpriseRuntime.value.applyRuntimeEvent(event);
+        }
+        return;
+      }
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
 
@@ -1503,7 +1511,7 @@ const make = Effect.gen(function* () {
       // A turn.started that conflicts with the active turn is legitimate when
       // the server itself has a turn start pending for this thread AND the
       // provider session already tracks the event's turn as its active turn:
-      // steering a running turn makes some providers (e.g. opencode) open a
+      // steering a running turn can make a provider open a
       // new turn without ever completing the superseded one. A stale
       // turn.started for some other turn id still gets rejected.
       const conflictingTurnStartIsPendingTurnStart =
@@ -1535,10 +1543,8 @@ const make = Effect.gen(function* () {
             // No active turn tracked: accept only completions that name their
             // turn (covers a real completion whose turn.started was lost). An
             // untargeted completion cannot prove it belongs to any turn this
-            // thread ran — the known emitter was the Claude resume handshake
-            // (system/init + result(num_turns: 0)), which is not a turn at
-            // all — and applying it here stomps the "starting" lifecycle
-            // state while a turn start is pending.
+            // thread ran, and applying it here would stomp the "starting"
+            // lifecycle state while a turn start is pending.
             return eventTurnId !== undefined;
           default:
             return true;

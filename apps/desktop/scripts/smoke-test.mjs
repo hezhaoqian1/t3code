@@ -36,7 +36,9 @@ child.on("exit", () => {
 
   const fatalPatterns = [
     "Cannot find module",
+    "module not found:",
     "MODULE_NOT_FOUND",
+    "Unable to load preload script",
     "Refused to execute",
     "Uncaught Error",
     "Uncaught TypeError",

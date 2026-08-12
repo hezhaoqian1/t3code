@@ -181,10 +181,10 @@ function asUsage(value: unknown): SubagentUsage | undefined {
 
 /**
  * Provider-specific usage merge (#4779 semantics, verbatim):
- * - max-merge (Codex-style cumulative frames): field-wise maximum, idempotent
+ * - max-merge (cumulative frames): field-wise maximum, idempotent
  *   under duplicate or late frames. Cumulative totals never shrink.
- * - accumulate (Claude-style activation deltas): not needed at this layer —
- *   Claude's task_progress usage is itself cumulative per task, so the fold
+ * - accumulate (activation deltas): not needed at this layer because task
+ *   progress usage is cumulative per task, so the fold
  *   also max-merges. The distinction matters when v2 sums activations.
  * Field-wise: a terminal payload carrying only totalTokens must not wipe a
  * known breakdown.
@@ -454,7 +454,7 @@ function asRuntimeStatus(value: unknown): RuntimeSubagentStatus | undefined {
  * provider session, so agents whose terminal rows were lost (server
  * restart, crash) must not read as running forever (review finding: a dead
  * session left a panel full of "Working" agents while the sidebar showed
- * nothing). Idle is preserved — a resumable Codex child stays resumable.
+ * nothing). Idle is preserved so a resumable child stays resumable.
  */
 export function foldSubagentActivities(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -577,7 +577,7 @@ export function foldSubagentActivities(
         if (agent.activationCount === 0) agent.activationCount = 1;
         // Already-terminal: status and timestamps are frozen (first write
         // wins, duplicates must not slide them) but the completion still
-        // ENRICHES — Claude commonly emits terminal task.updated before
+        // ENRICHES — a provider may emit terminal task.updated before
         // task.completed, and the completion carries the result summary and
         // final usage the update lacked (review finding: the early return
         // dropped both). Fill-if-missing keeps duplicate completions from
@@ -785,7 +785,7 @@ export function deriveAgentPanelModel({
         .slice()
         .sort((a, b) => (a.agentIndex ?? 0) - (b.agentIndex ?? 0));
       const activeCount = phaseMembers.filter(
-        // Idle members count as active for phase-liveness: a resumable Codex
+        // Idle members count as active for phase-liveness: a resumable
         // member has not finished the phase.
         (member) => isActiveSubagentStatus(member.status) || member.status === "idle",
       ).length;
@@ -901,7 +901,7 @@ export function isAgentAttributedToolActivity(activity: OrchestrationThreadActiv
   return typeof payload.agentId === "string" && payload.agentId.trim().length > 0;
 }
 
-/** Timeline-bypassing synthesized rows (Codex children, workflow members). */
+/** Timeline-bypassing synthesized rows (child agents and workflow members). */
 export function isTimelineBypassActivity(activity: OrchestrationThreadActivity): boolean {
   if (typeof activity.payload !== "object" || activity.payload === null) {
     return false;
@@ -910,9 +910,8 @@ export function isTimelineBypassActivity(activity: OrchestrationThreadActivity):
 }
 
 /**
- * Compact model chip text: strips vendor prefixes/date-or-context suffixes
- * ("claude-sonnet-5[1m]" → "sonnet-5[1m]", "claude-opus-4-20250514" →
- * "opus-4"). Unknown ids pass through untouched; effort appends as "· high".
+ * Compact model chip text: strips date and moving-alias suffixes. Unknown ids
+ * pass through untouched; effort appends as "· high".
  */
 export function formatSubagentModelLabel(
   model: string | null,
@@ -921,10 +920,7 @@ export function formatSubagentModelLabel(
   if (!model) {
     return null;
   }
-  const compact = model
-    .replace(/^claude-/, "")
-    .replace(/-\d{8}$/, "")
-    .replace(/-latest$/, "");
+  const compact = model.replace(/-\d{8}$/, "").replace(/-latest$/, "");
   return effort ? `${compact} · ${effort}` : compact;
 }
 

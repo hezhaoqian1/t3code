@@ -125,7 +125,7 @@ export default function ProjectScriptsControl({
       setEditorRequest({
         scriptId: null,
         initial: payload,
-        error: error instanceof Error ? error.message : "Failed to import action.",
+        error: error instanceof Error ? error.message : "导入操作失败。",
       });
     }
   };
@@ -134,7 +134,7 @@ export default function ProjectScriptsControl({
     <>
       {primaryScript && <MenuSeparator />}
       <MenuGroup>
-        <MenuGroupLabel>From t3.json</MenuGroupLabel>
+        <MenuGroupLabel>来自 t3.json</MenuGroupLabel>
         {importableScripts.map((fileScript) => (
           <MenuItem
             key={`${fileScript.name} ${fileScript.command}`}
@@ -144,7 +144,7 @@ export default function ProjectScriptsControl({
             <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4" />
             <span className="truncate">{fileScript.name}</span>
             <MenuShortcut className="ms-auto">
-              <DownloadIcon className="size-3.5" aria-label="Import" />
+              <DownloadIcon className="size-3.5" aria-label="导入" />
             </MenuShortcut>
           </MenuItem>
         ))}
@@ -155,7 +155,7 @@ export default function ProjectScriptsControl({
   return (
     <>
       {primaryScript ? (
-        <Group aria-label="Project scripts">
+        <Group aria-label="空间脚本">
           <Tooltip>
             <TooltipTrigger
               render={
@@ -236,7 +236,7 @@ export default function ProjectScriptsControl({
               {importMenuItems}
               <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
                 <PlusIcon className="size-4" />
-                Add action
+                添加操作
               </MenuItem>
             </MenuPopup>
           </Menu>
@@ -247,10 +247,10 @@ export default function ProjectScriptsControl({
           open={actionsMenuOpen.imports}
           onOpenChange={(open) => setActionsMenuOpen({ scripts: false, imports: open })}
         >
-          <MenuTrigger render={<Button size="xs" variant="outline" aria-label="Project actions" />}>
+          <MenuTrigger render={<Button size="xs" variant="outline" aria-label="空间操作" />}>
             <PlusIcon className="size-3.5" />
             <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              Add action
+              添加操作
             </span>
             <ChevronDownIcon className="size-3.5" />
           </MenuTrigger>
@@ -258,7 +258,7 @@ export default function ProjectScriptsControl({
             {importMenuItems}
             <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
               <PlusIcon className="size-4" />
-              Add action
+              添加操作
             </MenuItem>
           </MenuPopup>
         </Menu>
@@ -270,7 +270,7 @@ export default function ProjectScriptsControl({
                 size="xs"
                 variant="outline"
                 className="w-7 px-0 sm:w-6 @3xl/header-actions:w-auto! @3xl/header-actions:px-[calc(--spacing(2)-1px)]"
-                aria-label="Add action"
+                aria-label="添加操作"
                 // The tooltip wrapper replaces data-slot="button", so themed
                 // toolbar styling needs its own hook.
                 data-toolbar-control=""
@@ -280,10 +280,10 @@ export default function ProjectScriptsControl({
           >
             <PlusIcon className="size-3.5" />
             <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              Add action
+              添加操作
             </span>
           </TooltipTrigger>
-          <TooltipPopup side="top">Add action</TooltipPopup>
+          <TooltipPopup side="top">添加操作</TooltipPopup>
         </Tooltip>
       )}
 

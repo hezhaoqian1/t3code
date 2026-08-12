@@ -422,7 +422,7 @@ const make = Effect.gen(function* () {
   // git-ref-based checkpoint.
   //
   // ProviderRuntimeIngestion creates placeholder checkpoints on turn.diff.updated
-  // events from the Codex runtime. This handler fires when the corresponding
+  // runtime events. This handler fires when the corresponding
   // domain event arrives, allowing the reactor to capture the actual filesystem
   // state into a git ref and dispatch a replacement checkpoint.
   const captureCheckpointFromPlaceholder = Effect.fn("captureCheckpointFromPlaceholder")(function* (

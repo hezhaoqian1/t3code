@@ -466,7 +466,6 @@ it.effect(
               })
             : Effect.fail(unsupported()),
         listInstances: () => Effect.succeed([instanceId]),
-        listProviders: () => Effect.succeed([driverKind] as const),
         streamChanges: Stream.empty,
         subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
           PubSub.subscribe(pubsub),
@@ -476,13 +475,7 @@ it.effect(
         ProviderAdapterRegistry.ProviderAdapterRegistry,
         registry,
       );
-      const serverSettingsLayer = ServerSettings.ServerSettingsService.layerTest({
-        providers: {
-          codex: {
-            enabled: false,
-          },
-        },
-      });
+      const serverSettingsLayer = ServerSettings.ServerSettingsService.layerTest();
       const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
         Layer.provide(SqlitePersistenceMemory),
       );
@@ -546,7 +539,6 @@ it.effect("ProviderServiceLive rejects new sessions for disabled custom instance
             })
           : Effect.fail(unsupported()),
       listInstances: () => Effect.succeed([instanceId]),
-      listProviders: () => Effect.succeed([CODEX_DRIVER] as const),
       streamChanges: Stream.empty,
       subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
         PubSub.subscribe(pubsub),
@@ -940,7 +932,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("appends attachment file paths to the turn input text", () =>
+  it.effect("forwards attachment turns without synthesizing local paths into model text", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
 
@@ -968,21 +960,19 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
 
       const turnInput = routing.codex.sendTurn.mock.calls[0]?.[0] as ProviderSendTurnInput;
-      assert.equal(typeof turnInput.input, "string");
-      const turnText = turnInput.input ?? "";
-      assert.equal(turnText.startsWith("use this screenshot"), true);
-      assert.include(turnText, '[Attached image "screenshot.png" is saved at: ');
-      assert.equal(turnText.endsWith(`${attachment.id}.png]`), true);
+      assert.equal(turnInput.input, "use this screenshot");
+      assert.deepEqual(turnInput.attachments, [attachment]);
+      assert.notInclude(turnInput.input ?? "", "saved at:");
+      assert.notInclude(turnInput.input ?? "", attachment.id);
 
-      // An attachment-only turn stays valid and the injected line becomes the
-      // whole input text, so the agent still learns the path.
       routing.codex.sendTurn.mockClear();
       yield* provider.sendTurn({
         threadId: session.threadId,
         attachments: [attachment],
       });
       const imageOnlyInput = routing.codex.sendTurn.mock.calls[0]?.[0] as ProviderSendTurnInput;
-      assert.equal(imageOnlyInput.input?.startsWith('[Attached image "screenshot.png"'), true);
+      assert.equal(imageOnlyInput.input, undefined);
+      assert.deepEqual(imageOnlyInput.attachments, [attachment]);
 
       yield* provider.stopSession({ threadId: session.threadId });
     }),
@@ -1189,6 +1179,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
         providerInstanceId: codexInstanceId,
         threadId: asThreadId("thread-1"),
         cwd: "/tmp/project-send-turn",
+        projectWorkspaceRoot: "/tmp/project-root",
         runtimeMode: "full-access",
       });
 
@@ -1209,11 +1200,13 @@ routing.layer("ProviderServiceLive routing", (it) => {
         const startPayload = resumedStartInput as {
           provider?: string;
           cwd?: string;
+          projectWorkspaceRoot?: string;
           resumeCursor?: unknown;
           threadId?: string;
         };
         assert.equal(startPayload.provider, "codex");
         assert.equal(startPayload.cwd, "/tmp/project-send-turn");
+        assert.equal(startPayload.projectWorkspaceRoot, "/tmp/project-root");
         assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
         assert.equal(startPayload.threadId, initial.threadId);
       }

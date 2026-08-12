@@ -1,6 +1,7 @@
 import {
   EnvironmentId,
   EventId,
+  MessageId,
   ORCHESTRATION_WS_METHODS,
   ProjectId,
   ProviderInstanceId,
@@ -50,7 +51,6 @@ const PREPARED: PreparedConnection = {
   label: TARGET.label,
   httpBaseUrl: TARGET.httpBaseUrl,
   socketUrl: TARGET.wsBaseUrl,
-  httpAuthorization: null,
   target: TARGET,
 };
 const BASE_THREAD: OrchestrationThread = {
@@ -273,6 +273,28 @@ const snapshot = (thread: OrchestrationThread): OrchestrationThreadStreamItem =>
 
 const synchronized = (): OrchestrationThreadStreamItem => ({ kind: "synchronized" });
 
+const volatileSnapshot = (revision: number, text?: string): OrchestrationThreadStreamItem => ({
+  kind: "volatile-snapshot",
+  overlay: {
+    threadId: THREAD_ID,
+    revision,
+    messages: text
+      ? [
+          {
+            id: MessageId.make("fd-enterprise-message"),
+            role: "assistant",
+            text,
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-04-01T00:02:00.000Z",
+            updatedAt: "2026-04-01T00:02:00.000Z",
+          },
+        ]
+      : [],
+    activities: [],
+  },
+});
+
 const titleUpdated = (title: string, sequence = 2): OrchestrationThreadStreamItem => ({
   kind: "event",
   event: {
@@ -315,6 +337,36 @@ const deleted = (): OrchestrationThreadStreamItem => ({
 });
 
 describe("EnvironmentThreads", () => {
+  it.effect(
+    "rejects stale volatile snapshots until a new subscription establishes a baseline",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({ cached: BASE_THREAD });
+        yield* Queue.offer(harness.inputs, volatileSnapshot(9, "账号 A 的企业历史"));
+        yield* awaitThreadState(
+          harness.observed,
+          (value) =>
+            Option.isSome(value.data) &&
+            value.data.value.messages.some((message) => message.text === "账号 A 的企业历史"),
+        );
+
+        yield* Queue.offer(harness.inputs, volatileSnapshot(1));
+        yield* Effect.yieldNow;
+        expect(Option.getOrThrow((yield* Ref.get(harness.latest)).data).messages).toMatchObject([
+          { text: "账号 A 的企业历史" },
+        ]);
+
+        yield* harness.replaceSession;
+        while ((yield* Ref.get(harness.subscriptionCount)) < 2) yield* Effect.yieldNow;
+        yield* Queue.offer(harness.inputs, volatileSnapshot(1));
+        const cleared = yield* awaitThreadState(
+          harness.observed,
+          (value) => Option.isSome(value.data) && value.data.value.messages.length === 0,
+        );
+        expect(Option.getOrThrow(cleared.data).messages).toEqual([]);
+      }),
+  );
+
   it.effect("publishes cached data immediately from a warm cache", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ cached: BASE_THREAD });

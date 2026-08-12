@@ -18,27 +18,6 @@ import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString;
 const UnknownRecordSchema = Schema.Record(Schema.String, Schema.Unknown);
 
-const RuntimeEventRawSource = Schema.Union([
-  Schema.Literal("codex.app-server.notification"),
-  Schema.Literal("codex.app-server.request"),
-  Schema.Literal("codex.eventmsg"),
-  Schema.Literal("claude.sdk.message"),
-  Schema.Literal("claude.sdk.permission"),
-  Schema.Literal("codex.sdk.thread-event"),
-  Schema.Literal("opencode.sdk.event"),
-  Schema.Literal("acp.jsonrpc"),
-  Schema.TemplateLiteral(["acp.", Schema.String, ".extension"]),
-]);
-export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
-
-export const RuntimeEventRaw = Schema.Struct({
-  source: RuntimeEventRawSource,
-  method: Schema.optional(TrimmedNonEmptyStringSchema),
-  messageType: Schema.optional(TrimmedNonEmptyStringSchema),
-  payload: Schema.Unknown,
-});
-export type RuntimeEventRaw = typeof RuntimeEventRaw.Type;
-
 const ProviderRequestId = TrimmedNonEmptyStringSchema;
 export type ProviderRequestId = typeof ProviderRequestId.Type;
 
@@ -260,7 +239,12 @@ const ProviderRuntimeEventBase = Schema.Struct({
   itemId: Schema.optional(RuntimeItemId),
   requestId: Schema.optional(RuntimeRequestId),
   providerRefs: Schema.optional(ProviderRefs),
-  raw: Schema.optional(RuntimeEventRaw),
+  // Enterprise Agent content is rendered through an in-memory thread overlay.
+  // Lifecycle events remain durable; only content/tool events opt into this flag.
+  persistence: Schema.optional(Schema.Literal("memory-only")),
+  // Account generation captured when an Enterprise turn starts. The volatile
+  // runtime rejects events from a generation cleared at an identity boundary.
+  volatileGeneration: Schema.optional(NonNegativeInt),
 });
 export type ProviderRuntimeEventBase = typeof ProviderRuntimeEventBase.Type;
 
@@ -471,8 +455,8 @@ export type UserInputResolvedPayload = typeof UserInputResolvedPayload.Type;
 /**
  * Typed per-task usage rollup. Field names match the orchestration-v2 subagent
  * usage vocabulary (#4779) so the eventual migration is a rename, not a remap.
- * Claude reports per-activation deltas; Codex reports cumulative totals — the
- * merge strategy is provider-specific and lives in client-runtime.
+ * Providers may report activation deltas or cumulative totals; the merge
+ * strategy lives in client-runtime.
  */
 export const RuntimeTaskUsage = Schema.Struct({
   totalTokens: NonNegativeInt,
@@ -574,11 +558,11 @@ const taskAgentLinkageFields = {
   attempt: Schema.optional(NonNegativeInt),
   runHandles: Schema.optional(TaskRunHandles),
   outputFile: Schema.optional(TrimmedNonEmptyStringSchema),
-  /** Codex agent hierarchy path, e.g. "/root/marlow". */
+  /** Optional agent hierarchy path, e.g. "/root/worker". */
   agentPath: Schema.optional(TrimmedNonEmptyStringSchema),
   /**
-   * Set on provider-synthesized child-agent events (Codex) whose activity
-   * belongs in the Agents surface, never the parent timeline.
+   * Set on provider-synthesized child-agent events whose activity belongs in
+   * the Agents surface, never the parent timeline.
    */
   timelineBypass: Schema.optional(Schema.Boolean),
 } as const;
@@ -620,8 +604,7 @@ const TaskProgressPayload = Schema.Struct({
 export type TaskProgressPayload = typeof TaskProgressPayload.Type;
 
 /**
- * Non-terminal status patch (from the Claude SDK's task_updated, which main
- * previously dropped). killed→cancelled and paused→idle are mapped at the
+ * Non-terminal status patch. Provider-specific states are mapped at the
  * adapter so the wire only carries the shared vocabulary.
  */
 const TaskUpdatedPayload = Schema.Struct({

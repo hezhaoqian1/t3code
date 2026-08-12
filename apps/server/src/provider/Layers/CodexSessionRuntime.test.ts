@@ -16,6 +16,7 @@ import {
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
+  executeAuthorizedDynamicToolCall,
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
@@ -130,12 +131,15 @@ describe("buildTurnStartParams", () => {
     });
   });
 
-  it("includes default collaboration mode and image attachments", () => {
+  it("includes structured Skills, default collaboration mode, and image attachments", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
         threadId: "provider-thread-1",
         runtimeMode: "auto-accept-edits",
         prompt: "Implement it",
+        skills: [
+          { name: "weekly-report", path: "/tmp/project/.agents/skills/weekly-report/SKILL.md" },
+        ],
         model: "gpt-5.3-codex",
         interactionMode: "default",
         attachments: [
@@ -155,6 +159,11 @@ describe("buildTurnStartParams", () => {
         type: "workspaceWrite",
       },
       input: [
+        {
+          type: "skill",
+          name: "weekly-report",
+          path: "/tmp/project/.agents/skills/weekly-report/SKILL.md",
+        },
         {
           type: "text",
           text: "Implement it",
@@ -192,7 +201,7 @@ describe("buildTurnStartParams", () => {
     const settings = params.collaborationMode?.settings;
     NodeAssert.equal(settings?.model, DEFAULT_MODEL);
     NodeAssert.equal(settings?.reasoning_effort, "medium");
-    NodeAssert.ok(settings?.developer_instructions?.includes(`as ${DEFAULT_MODEL} with medium`));
+    NodeAssert.ok(settings?.developer_instructions?.includes(`using ${DEFAULT_MODEL} with medium`));
   });
 
   it.effect("routes approvals to the auto reviewer in auto mode", () =>
@@ -254,9 +263,9 @@ describe("buildCodexDeveloperInstructions", () => {
     });
 
     NodeAssert.ok(instructions.startsWith(CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS));
-    NodeAssert.match(instructions, /T3 Code/);
-    NodeAssert.match(instructions, /Codex harness/);
-    NodeAssert.match(instructions, /as gpt-5\.3-codex with high reasoning effort/);
+    NodeAssert.match(instructions, /FD AI Desktop/);
+    NodeAssert.match(instructions, /company-managed Agent runtime/);
+    NodeAssert.match(instructions, /using gpt-5\.3-codex with high reasoning effort/);
   });
 
   it("includes runtime info alongside plan mode instructions", () => {
@@ -266,7 +275,7 @@ describe("buildCodexDeveloperInstructions", () => {
     });
 
     NodeAssert.ok(instructions.startsWith(CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS));
-    NodeAssert.match(instructions, /as gpt-5\.3-codex with medium reasoning effort/);
+    NodeAssert.match(instructions, /using gpt-5\.3-codex with medium reasoning effort/);
   });
 
   it("varies with the model and effort of each turn", () => {
@@ -288,7 +297,7 @@ describe("buildCodexDeveloperInstructions", () => {
       reasoningEffort: " high\neffort ",
     });
 
-    NodeAssert.match(instructions, /as gpt 5\.3 codex with high effort reasoning effort/);
+    NodeAssert.match(instructions, /using gpt 5\.3 codex with high effort reasoning effort/);
     NodeAssert.doesNotMatch(instructions, /<runtime_info>[^<]*\n/);
   });
 });
@@ -393,6 +402,86 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it.effect(
+    "sends documented experimental dynamic tools through the raw thread/start transport",
+    () =>
+      Effect.gen(function* () {
+        const calls: Array<{ method: string; payload: unknown }> = [];
+        const started = {
+          cwd: "/tmp/project",
+          model: "gpt-5.3-codex",
+          modelProvider: "openai",
+          approvalPolicy: "never",
+          approvalsReviewer: "user",
+          sandbox: { type: "dangerFullAccess" },
+          thread: {
+            cliVersion: "0.0.0-test",
+            createdAt: 1_776_460_800,
+            cwd: "/tmp/project",
+            ephemeral: false,
+            id: "dynamic-thread",
+            modelProvider: "openai",
+            preview: "",
+            sessionId: "dynamic-thread",
+            source: "appServer",
+            status: { type: "idle" },
+            turns: [],
+            updatedAt: 1_776_460_800,
+          },
+        };
+        const client = {
+          request: <M extends "thread/start" | "thread/resume">(
+            _method: M,
+            _payload: CodexRpc.ClientRequestParamsByMethod[M],
+          ) => Effect.die("typed request must not be used for experimental dynamic tools"),
+          raw: {
+            request: (method: string, payload: unknown) => {
+              calls.push({ method, payload });
+              return Effect.succeed(started);
+            },
+          },
+        };
+
+        const opened = yield* openCodexThread({
+          client,
+          threadId: ThreadId.make("thread-1"),
+          runtimeMode: "approval-required",
+          cwd: "/tmp/project",
+          requestedModel: "gpt-5.3-codex",
+          serviceTier: undefined,
+          resumeThreadId: undefined,
+          developerInstructions: "Authorized FD Skill instructions.",
+          dynamicTools: [
+            {
+              type: "function",
+              name: "fd_data_list_resources",
+              description: "List authorized resources",
+              inputSchema: { type: "object", properties: {}, required: [] },
+            },
+          ],
+        });
+
+        NodeAssert.equal(opened.thread.id, "dynamic-thread");
+        NodeAssert.equal(calls[0]?.method, "thread/start");
+        NodeAssert.deepStrictEqual(calls[0]?.payload, {
+          cwd: "/tmp/project",
+          approvalPolicy: "untrusted",
+          sandbox: "read-only",
+          approvalsReviewer: "user",
+          model: "gpt-5.3-codex",
+          developerInstructions: "Authorized FD Skill instructions.",
+          dynamicTools: [
+            {
+              type: "function",
+              name: "fd_data_list_resources",
+              description: "List authorized resources",
+              inputSchema: { type: "object", properties: {}, required: [] },
+            },
+          ],
+        });
+      }),
+  );
+
   it.effect("falls back to thread/start when resume fails recoverably", () =>
     Effect.gen(function* () {
       const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
@@ -466,6 +555,67 @@ describe("openCodexThread", () => {
 
       NodeAssert.ok(isCodexAppServerRequestError(error));
       NodeAssert.equal(error.errorMessage, "timed out waiting for server");
+    }),
+  );
+});
+
+describe("executeAuthorizedDynamicToolCall", () => {
+  const payload: CodexRpc.ServerRequestParamsByMethod["item/tool/call"] = {
+    arguments: { resource: "customer_holdings" },
+    callId: "call-1",
+    threadId: "provider-thread-1",
+    tool: "fd_data_query",
+    turnId: "turn-1",
+  };
+  const successResponse: CodexRpc.ServerRequestResponsesByMethod["item/tool/call"] = {
+    success: true,
+    contentItems: [{ type: "inputText", text: "authorized result" }],
+  };
+
+  it.effect("executes an authorized tool for the active provider thread", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const response = yield* executeAuthorizedDynamicToolCall({
+        providerThreadId: "provider-thread-1",
+        authorizedTools: new Set(["fd_data_query"]),
+        payload,
+        executor: () => {
+          calls += 1;
+          return Effect.succeed(successResponse);
+        },
+      });
+
+      NodeAssert.equal(calls, 1);
+      NodeAssert.deepStrictEqual(response, successResponse);
+    }),
+  );
+
+  it.effect("fails closed for a different thread or an unknown tool", () =>
+    Effect.gen(function* () {
+      let calls = 0;
+      const executor = () => {
+        calls += 1;
+        return Effect.succeed(successResponse);
+      };
+
+      for (const input of [
+        { providerThreadId: "other-thread", authorizedTools: new Set(["fd_data_query"]) },
+        { providerThreadId: "provider-thread-1", authorizedTools: new Set(["other_tool"]) },
+      ]) {
+        const response = yield* executeAuthorizedDynamicToolCall({
+          ...input,
+          payload,
+          executor,
+        });
+        NodeAssert.equal(response.success, false);
+        const contentItem = response.contentItems[0];
+        NodeAssert.equal(contentItem?.type, "inputText");
+        if (contentItem?.type === "inputText") {
+          NodeAssert.match(contentItem.text, /authorization is unavailable/);
+        }
+      }
+
+      NodeAssert.equal(calls, 0);
     }),
   );
 });

@@ -1671,8 +1671,8 @@ export default function GitActionsControl({
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
-                  title: "Git initialization failed",
-                  description: error instanceof Error ? error.message : "An error occurred.",
+                  title: "Git 初始化失败",
+                  description: error instanceof Error ? error.message : "发生错误。",
                   ...(threadToastData !== undefined ? { data: threadToastData } : {}),
                 }),
               );
@@ -1680,9 +1680,7 @@ export default function GitActionsControl({
           }}
         >
           <GitBranchPlusIcon className="size-3.5" aria-hidden />
-          <span className="ml-0.5">
-            {initAction.isPending ? "Initializing..." : "Initialize Git"}
-          </span>
+          <span className="ml-0.5">{initAction.isPending ? "正在初始化…" : "初始化 Git"}</span>
         </Button>
       ) : (
         <Group aria-label="Git actions" className="shrink-0">

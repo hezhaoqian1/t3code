@@ -10,8 +10,7 @@
  *      most recently updated projects and, per project, the most recent
  *      threads that have fully stopped. Working, settled, and monitored
  *      threads are skipped so the dev server never adopts live work.
- *      Auth sessions, pairing links, command receipts, and provider
- *      runtime rows are dropped — pair a fresh browser against dev.
+ *      Auth sessions, command receipts, and provider runtime rows are dropped.
  *   3. Runs migrations on the result. Because the clone carries the real
  *      `effect_sql_migrations` table, this proves a new migration applies
  *      on top of the real applied set, and the slot check below catches
@@ -38,6 +37,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { Command, Flag } from "effect/unstable/cli";
 
+import * as DatabaseLease from "../src/persistence/DatabaseLease.ts";
 import { migrationManifest, runMigrations } from "../src/persistence/Migrations.ts";
 import * as NodeSqliteClient from "../src/persistence/NodeSqliteClient.ts";
 
@@ -78,18 +78,6 @@ export class MigrateDevDbSourceIsDestinationError extends Schema.TaggedErrorClas
 ) {
   override get message(): string {
     return `Source database '${this.sourcePath}' resolves to a path this command rewrites. Pick a different --source or --base-dir.`;
-  }
-}
-
-export class MigrateDevDbServerRunningError extends Schema.TaggedErrorClass<MigrateDevDbServerRunningError>()(
-  "MigrateDevDbServerRunningError",
-  {
-    databasePath: Schema.String,
-    pid: Schema.Number,
-  },
-) {
-  override get message(): string {
-    return `Dev database at '${this.databasePath}' is open by a running server (pid ${this.pid} per server-runtime.json). Stop that server first; if that pid is not actually a T3 server (stale descriptor, reused pid), delete the server-runtime.json next to the database and retry.`;
   }
 }
 
@@ -167,43 +155,10 @@ const removeDatabaseFiles = Effect.fn("removeDatabaseFiles")(function* (database
   }
 });
 
-/** The slice of server-runtime.json this script cares about. */
-const ServerRuntimeState = Schema.fromJsonString(Schema.Struct({ pid: Schema.Number }));
-const decodeServerRuntimeState = Schema.decodeEffect(ServerRuntimeState);
-
-const isProcessAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM means the process exists but belongs to someone else.
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-};
-
-/** Liveness probe for a running dev server. The server writes its pid to
- * server-runtime.json next to the database, which also catches an idle
- * server holding an open-but-inactive connection. The SQL probes below back
- * that up: BEGIN IMMEDIATE fails while a writer is active, and
- * wal_checkpoint(TRUNCATE) reports busy while another connection holds the
- * WAL. A leftover -shm alone is not a signal — read-only connections cannot
- * clean it up on close. */
+/** The caller holds the server-compatible lease while these SQL probes check
+ * for non-server writers and active WAL readers. */
 const ensureNotInUse = Effect.fn("ensureDevDbNotInUse")(function* (databasePath: string) {
   const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-
-  const runtimeStatePath = path.join(path.dirname(databasePath), "server-runtime.json");
-  const runtimeState = yield* fs.readFileString(runtimeStatePath).pipe(
-    Effect.flatMap(decodeServerRuntimeState),
-    // A missing or malformed descriptor is not a liveness signal.
-    Effect.option,
-  );
-  if (Option.isSome(runtimeState) && isProcessAlive(runtimeState.value.pid)) {
-    return yield* new MigrateDevDbServerRunningError({
-      databasePath,
-      pid: runtimeState.value.pid,
-    });
-  }
 
   if (!(yield* fs.exists(databasePath))) {
     return;
@@ -314,7 +269,6 @@ const pruneSnapshot = Effect.fn("pruneDevDbSnapshot")(function* (input: RunMigra
       yield* sql`DELETE FROM orchestration_command_receipts`;
       yield* sql`DELETE FROM provider_session_runtime`;
       yield* sql`DELETE FROM auth_sessions`;
-      yield* sql`DELETE FROM auth_pairing_links`;
     }),
   );
 
@@ -403,100 +357,106 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
   }
 
   yield* fs.makeDirectory(stateDir, { recursive: true });
-  yield* ensureNotInUse(databasePath);
+  return yield* Effect.scoped(
+    Effect.gen(function* () {
+      yield* DatabaseLease.acquire(databasePath);
+      yield* ensureNotInUse(databasePath);
 
-  const wrapPhase =
-    (phase: MigrateDevDbPhaseError["phase"], phaseDatabasePath: string) =>
-    <A, E, R>(effect: Effect.Effect<A, E, R>) =>
-      effect.pipe(
-        Effect.mapError(
-          (cause) => new MigrateDevDbPhaseError({ phase, databasePath: phaseDatabasePath, cause }),
-        ),
+      const wrapPhase =
+        (phase: MigrateDevDbPhaseError["phase"], phaseDatabasePath: string) =>
+        <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+          effect.pipe(
+            Effect.mapError(
+              (cause) =>
+                new MigrateDevDbPhaseError({ phase, databasePath: phaseDatabasePath, cause }),
+            ),
+          );
+
+      yield* removeDatabaseFiles(snapshotPath);
+      // The snapshot is a full-size copy of the source; make sure it is removed
+      // even when a phase fails partway through.
+      const { executedMigrations, pruned } = yield* Effect.gen(function* () {
+        yield* Console.log(`Snapshotting ${sourcePath} (read-only)...`);
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`VACUUM INTO ${snapshotPath}`;
+        }).pipe(
+          Effect.provide(NodeSqliteClient.layer({ filename: sourcePath, readonly: true })),
+          wrapPhase("snapshot", sourcePath),
+        );
+
+        // Migrate before pruning: a source older than this checkout would
+        // otherwise crash the prune queries on columns that don't exist yet.
+        // Running against the full snapshot also exercises new migrations on the
+        // same data volume the real database would face.
+        yield* Console.log("Running migrations on the snapshot...");
+        const executed = yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          // Mirror server boot (persistence/Layers/Sqlite.ts).
+          yield* sql.unsafe("PRAGMA foreign_keys = ON").unprepared;
+          return yield* runMigrations();
+        }).pipe(
+          Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
+          wrapPhase("migrate", snapshotPath),
+        );
+
+        // Verify while the snapshot is still the only thing touched: a slot
+        // collision must abort before the old worktree db gets replaced with a
+        // schema whose colliding migration was silently skipped.
+        yield* verifyMigrationSlots().pipe(
+          Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
+          Effect.catchTags({
+            SqlError: (cause) =>
+              Effect.fail(
+                new MigrateDevDbPhaseError({ phase: "verify", databasePath: snapshotPath, cause }),
+              ),
+          }),
+        );
+
+        yield* Console.log(
+          `Pruning to ${input.projects} projects, ${input.threadsPerProject} stopped threads each...`,
+        );
+        const result = yield* pruneSnapshot(input).pipe(
+          Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
+          wrapPhase("prune", snapshotPath),
+        );
+
+        yield* Console.log(`Compacting into ${databasePath}...`);
+        // Re-check right before the swap: a dev server started while the
+        // snapshot was migrating and pruning must not lose its database.
+        yield* ensureNotInUse(databasePath);
+        yield* removeDatabaseFiles(databasePath);
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          yield* sql`VACUUM INTO ${databasePath}`;
+        }).pipe(
+          Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
+          wrapPhase("compact", databasePath),
+        );
+        return { executedMigrations: executed, pruned: result };
+      }).pipe(Effect.ensuring(removeDatabaseFiles(snapshotPath)));
+      yield* fs.chmod(databasePath, 0o600);
+
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        // WAL does not survive VACUUM INTO; set it so first `vp run dev` finds
+        // the database exactly as server boot would have left it.
+        yield* sql.unsafe("PRAGMA journal_mode = WAL").unprepared;
+      }).pipe(
+        Effect.provide(NodeSqliteClient.layer({ filename: databasePath })),
+        wrapPhase("compact", databasePath),
       );
 
-  yield* removeDatabaseFiles(snapshotPath);
-  // The snapshot is a full-size copy of the source; make sure it is removed
-  // even when a phase fails partway through.
-  const { executedMigrations, pruned } = yield* Effect.gen(function* () {
-    yield* Console.log(`Snapshotting ${sourcePath} (read-only)...`);
-    yield* Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql`VACUUM INTO ${snapshotPath}`;
-    }).pipe(
-      Effect.provide(NodeSqliteClient.layer({ filename: sourcePath, readonly: true })),
-      wrapPhase("snapshot", sourcePath),
-    );
-
-    // Migrate before pruning: a source older than this checkout would
-    // otherwise crash the prune queries on columns that don't exist yet.
-    // Running against the full snapshot also exercises new migrations on the
-    // same data volume the real database would face.
-    yield* Console.log("Running migrations on the snapshot...");
-    const executed = yield* Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      // Mirror server boot (persistence/Layers/Sqlite.ts).
-      yield* sql.unsafe("PRAGMA foreign_keys = ON").unprepared;
-      return yield* runMigrations();
-    }).pipe(
-      Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
-      wrapPhase("migrate", snapshotPath),
-    );
-
-    // Verify while the snapshot is still the only thing touched: a slot
-    // collision must abort before the old worktree db gets replaced with a
-    // schema whose colliding migration was silently skipped.
-    yield* verifyMigrationSlots().pipe(
-      Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
-      Effect.catchTags({
-        SqlError: (cause) =>
-          Effect.fail(
-            new MigrateDevDbPhaseError({ phase: "verify", databasePath: snapshotPath, cause }),
-          ),
-      }),
-    );
-
-    yield* Console.log(
-      `Pruning to ${input.projects} projects, ${input.threadsPerProject} stopped threads each...`,
-    );
-    const result = yield* pruneSnapshot(input).pipe(
-      Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
-      wrapPhase("prune", snapshotPath),
-    );
-
-    yield* Console.log(`Compacting into ${databasePath}...`);
-    // Re-check right before the swap: a dev server started while the
-    // snapshot was migrating and pruning must not lose its database.
-    yield* ensureNotInUse(databasePath);
-    yield* removeDatabaseFiles(databasePath);
-    yield* Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
-      yield* sql`VACUUM INTO ${databasePath}`;
-    }).pipe(
-      Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
-      wrapPhase("compact", databasePath),
-    );
-    return { executedMigrations: executed, pruned: result };
-  }).pipe(Effect.ensuring(removeDatabaseFiles(snapshotPath)));
-  yield* fs.chmod(databasePath, 0o600);
-
-  yield* Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    // WAL does not survive VACUUM INTO; set it so first `vp run dev` finds
-    // the database exactly as server boot would have left it.
-    yield* sql.unsafe("PRAGMA journal_mode = WAL").unprepared;
-  }).pipe(
-    Effect.provide(NodeSqliteClient.layer({ filename: databasePath })),
-    wrapPhase("compact", databasePath),
+      const size = (yield* fs.stat(databasePath)).size;
+      return {
+        databasePath,
+        sizeBytes: Number(size),
+        projects: pruned.projects,
+        eventCount: pruned.eventCount,
+        executedMigrations: executedMigrations.map(([id, name]) => `${id}_${name}`),
+      };
+    }),
   );
-
-  const size = (yield* fs.stat(databasePath)).size;
-  return {
-    databasePath,
-    sizeBytes: Number(size),
-    projects: pruned.projects,
-    eventCount: pruned.eventCount,
-    executedMigrations: executedMigrations.map(([id, name]) => `${id}_${name}`),
-  };
 });
 
 const formatSize = (bytes: number): string =>

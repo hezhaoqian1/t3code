@@ -1,7 +1,5 @@
 import {
   DEFAULT_MODEL,
-  DEFAULT_MODEL_BY_PROVIDER,
-  defaultInstanceIdForDriver,
   type EnvironmentId,
   ModelSelection,
   ProjectId,
@@ -52,6 +50,7 @@ import { createDebouncedStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
+import { selectedFdSkillVersionId, useFdSkillSelectionStore } from "./fdSkillSelectionStore";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
@@ -132,11 +131,8 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   elementContexts: Schema.optionalKey(Schema.Array(PersistedElementContextDraft)),
   previewAnnotations: Schema.optionalKey(Schema.Array(PreviewAnnotationPayloadSchema)),
   reviewComments: Schema.optionalKey(Schema.Array(ReviewCommentContextSchema)),
-  // Keyed by `ProviderInstanceId` (open branded slug) so custom provider
-  // instances (e.g. `codex_personal`) round-trip alongside the built-in
-  // `codex` / `claudeAgent` / ... entries. Every prior `ProviderDriverKind`
-  // literal satisfies the `ProviderInstanceId` slug pattern, so existing
-  // persisted drafts decode unchanged.
+  // Keyed by `ProviderInstanceId` so the runtime routing key and its model
+  // selection remain one atomic persisted value.
   //
   // The record's value schema is NOT wrapped in `Schema.optionalKey`:
   // that helper is only meaningful on property signatures with a known
@@ -159,12 +155,6 @@ type ProviderOptionSelectionsByProvider = Partial<
   Record<string, ReadonlyArray<ProviderOptionSelection>>
 >;
 
-type LegacyCodexFields = {
-  effort?: unknown;
-  codexFastMode?: unknown;
-  serviceTier?: unknown;
-};
-
 type LegacyThreadModelFields = {
   provider?: unknown;
   model?: unknown;
@@ -177,7 +167,6 @@ type LegacyV2ThreadDraftFields = {
 };
 
 type LegacyPersistedComposerThreadDraftState = PersistedComposerThreadDraftState &
-  LegacyCodexFields &
   LegacyThreadModelFields &
   LegacyV2ThreadDraftFields;
 
@@ -263,12 +252,7 @@ export interface ComposerThreadDraftState {
   previewAnnotations: PreviewAnnotationPayload[];
   reviewComments: ReviewCommentContext[];
   /**
-   * Per-instance model selection. Keyed by `ProviderInstanceId` (open
-   * branded slug) so a default `codex` instance and a user-authored
-   * `codex_personal` instance each persist their own selected model. Every
-   * historical `ProviderDriverKind` literal (`codex` / `claudeAgent` / `cursor` /
-   * `opencode`) also satisfies the `ProviderInstanceId` slug pattern, so
-   * legacy kind-keyed drafts round-trip unchanged.
+   * Per-instance model selection keyed by the runtime routing id.
    */
   modelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   /** Routing key of the last picked instance (see `modelSelectionByProvider`). */
@@ -295,6 +279,8 @@ export interface DraftSessionState {
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
+  /** The draft will allocate its own app-managed task directory on first send. */
+  taskArea?: boolean;
   promotedTo?: ScopedThreadRef | null;
 }
 
@@ -359,6 +345,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      taskArea?: boolean;
     },
   ) => void;
   /** Creates or updates the draft session tracked for a concrete project ref. */
@@ -374,6 +361,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      taskArea?: boolean;
     },
   ) => void;
   /** Updates mutable draft-session metadata without touching composer content. */
@@ -388,6 +376,7 @@ interface ComposerDraftStoreState {
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      taskArea?: boolean;
     },
   ) => void;
   clearProjectDraftThreadId: (projectRef: ScopedProjectRef) => void;
@@ -766,47 +755,18 @@ function coerceProviderOptionSelections(
 /**
  * Normalize a per-provider options bag from either the v3 or legacy v2 shape.
  *
- * `provider` and `legacy` parameters are migration-only inputs used to
- * recover legacy codex fields (effort/codexFastMode/serviceTier) that lived
- * directly on the draft instead of inside `modelOptions.codex`.
  */
-function normalizeProviderModelOptions(
-  value: unknown,
-  provider?: ProviderDriverKind | null,
-  legacy?: LegacyCodexFields,
-): ProviderOptionSelectionsByProvider | null {
+function normalizeProviderModelOptions(value: unknown): ProviderOptionSelectionsByProvider | null {
   const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
   const result: ProviderOptionSelectionsByProvider = {};
-  for (const providerKey of ["codex", "claudeAgent", "cursor", "opencode"] as const) {
-    const selections = coerceProviderOptionSelections(candidate?.[providerKey]);
+  for (const [rawProviderKey, rawOptions] of Object.entries(candidate ?? {})) {
+    const providerKey = normalizeProviderDriverKind(rawProviderKey);
+    if (providerKey === null) continue;
+    const selections = coerceProviderOptionSelections(rawOptions);
     if (selections) {
       result[providerKey] = selections;
     }
   }
-
-  // Recover legacy codex fields that lived outside modelOptions.
-  if (provider === "codex" && legacy) {
-    const codexExtras: ProviderOptionSelection[] = [];
-    if (typeof legacy.effort === "string" && legacy.effort.length > 0) {
-      codexExtras.push({ id: "reasoningEffort", value: legacy.effort });
-    }
-    const fastMode =
-      legacy.codexFastMode === true ||
-      (typeof legacy.serviceTier === "string" && legacy.serviceTier === "fast");
-    if (fastMode) {
-      codexExtras.push({ id: "fastMode", value: true });
-    }
-    if (codexExtras.length > 0) {
-      const existing = result.codex ?? [];
-      const existingIds = new Set(existing.map((entry) => entry.id));
-      const merged = [...existing];
-      for (const extra of codexExtras) {
-        if (!existingIds.has(extra.id)) merged.push(extra);
-      }
-      result.codex = merged;
-    }
-  }
-
   return Object.keys(result).length > 0 ? result : null;
 }
 
@@ -823,7 +783,6 @@ function normalizeModelSelection(
     provider?: unknown;
     model?: unknown;
     modelOptions?: unknown;
-    legacyCodex?: LegacyCodexFields;
   },
 ): NormalizedModelSelection | null {
   const candidate = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -845,7 +804,7 @@ function normalizeModelSelection(
   // into a driver kind here; they get generic default normalization.
   const driverKindHint =
     normalizeProviderDriverKind(candidate?.provider ?? legacy?.provider) ??
-    ProviderDriverKind.make("codex");
+    ProviderDriverKind.make("fd-deepseek");
   const model = normalizeModelSlug(rawModel, driverKindHint);
   if (!model) {
     return null;
@@ -861,8 +820,6 @@ function normalizeModelSelection(
   const modelOptions = kindForLegacyOptions
     ? normalizeProviderModelOptions(
         candidate?.options ? { [kindForLegacyOptions]: candidate.options } : legacy?.modelOptions,
-        kindForLegacyOptions,
-        kindForLegacyOptions === "codex" ? legacy?.legacyCodex : undefined,
       )
     : null;
   const options = kindForLegacyOptions ? modelOptions?.[kindForLegacyOptions] : undefined;
@@ -936,16 +893,14 @@ function legacyToModelSelectionByProvider(
 ): Partial<Record<ProviderInstanceId, ModelSelection>> {
   const result: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
   if (modelOptions) {
-    for (const provider of ["codex", "claudeAgent", "cursor", "opencode"] as const) {
-      const options = modelOptions[provider];
+    for (const [rawProvider, options] of Object.entries(modelOptions)) {
+      const provider = normalizeProviderDriverKind(rawProvider);
+      if (provider === null) continue;
       if (options && options.length > 0) {
-        const driverKind = ProviderDriverKind.make(provider);
-        const instanceKey = defaultInstanceIdForDriver(driverKind);
+        const instanceKey = ProviderInstanceId.make(provider);
         result[instanceKey] = createModelSelection(
           instanceKey,
-          modelSelection?.instanceId === instanceKey
-            ? modelSelection.model
-            : (DEFAULT_MODEL_BY_PROVIDER[driverKind] ?? DEFAULT_MODEL),
+          modelSelection?.instanceId === instanceKey ? modelSelection.model : DEFAULT_MODEL,
           options,
         );
       }
@@ -967,9 +922,8 @@ export function deriveEffectiveComposerModelState(input: {
   /**
    * Optional routing key of the instance whose selection should override
    * the driver-level lookup. When present, the draft is queried by
-   * `modelSelectionByProvider[selectedInstanceId]` so a custom Codex
-   * instance (e.g. `codex_personal`) reads its own saved model instead of
-   * collapsing to the default Codex bucket.
+   * `modelSelectionByProvider[selectedInstanceId]` so an explicit runtime
+   * instance reads its own saved model.
    */
   selectedInstanceId?: ProviderInstanceId | null | undefined;
   threadModelSelection: ModelSelection | null | undefined;
@@ -1338,6 +1292,7 @@ function createDraftThreadState(
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
     interactionMode?: ProviderInteractionMode;
+    taskArea?: boolean;
   },
 ): DraftThreadState {
   // A project change (including switching environments within a logical
@@ -1378,6 +1333,7 @@ function createDraftThreadState(
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
+    ...(options?.taskArea === true || existingThread?.taskArea === true ? { taskArea: true } : {}),
     promotedTo: null,
   };
 }
@@ -1410,6 +1366,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.worktreePath === right.worktreePath &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
+    (left.taskArea === true) === (right.taskArea === true) &&
     scopedThreadRefsEqual(left.promotedTo, right.promotedTo)
   );
 }
@@ -1505,6 +1462,7 @@ function normalizePersistedDraftThreads(
       const branch = candidateDraftThread.branch;
       const worktreePath = candidateDraftThread.worktreePath;
       const startFromOrigin = candidateDraftThread.startFromOrigin === true;
+      const taskArea = candidateDraftThread.taskArea === true;
       const normalizedWorktreePath = typeof worktreePath === "string" ? worktreePath : null;
       const promotedToCandidate = candidateDraftThread.promotedTo;
       const promotedToRecord =
@@ -1553,6 +1511,7 @@ function normalizePersistedDraftThreads(
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
         startFromOrigin,
+        ...(taskArea ? { taskArea: true } : {}),
         promotedTo,
       };
     }
@@ -1701,18 +1660,13 @@ function normalizePersistedDraftsByThreadId(
     } else {
       // v2 or legacy format: migrate
       const normalizedModelOptions =
-        normalizeProviderModelOptions(
-          legacyDraftCandidate.modelOptions,
-          undefined,
-          legacyDraftCandidate,
-        ) ?? null;
+        normalizeProviderModelOptions(legacyDraftCandidate.modelOptions) ?? null;
       const normalizedModelSelection = normalizeModelSelection(
         legacyDraftCandidate.modelSelection,
         {
           provider: legacyDraftCandidate.provider,
           model: legacyDraftCandidate.model,
           modelOptions: normalizedModelOptions ?? (legacyDraftCandidate.modelOptions as unknown),
-          legacyCodex: legacyDraftCandidate,
         },
       );
       const mergedModelOptions = legacyMergeModelSelectionIntoProviderModelOptions(
@@ -1795,7 +1749,7 @@ function migratePersistedComposerDraftStoreState(
   // Migrate sticky state from v2 (dual) to v3 (consolidated)
   const stickyModelOptions = normalizeProviderModelOptions(candidate.stickyModelOptions) ?? {};
   const normalizedStickyModelSelection = normalizeModelSelection(candidate.stickyModelSelection, {
-    provider: candidate.stickyProvider ?? "codex",
+    provider: candidate.stickyProvider ?? "fd-deepseek",
     model: candidate.stickyModel,
     modelOptions: stickyModelOptions,
   });
@@ -1836,6 +1790,13 @@ function partializeComposerDraftStoreState(
   > = {};
   for (const [threadKey, draft] of Object.entries(state.draftsByThreadKey)) {
     if (typeof threadKey !== "string" || threadKey.length === 0) {
+      continue;
+    }
+    const threadId =
+      state.draftThreadsByThreadKey[threadKey]?.threadId ??
+      parseScopedThreadKey(threadKey)?.threadId ??
+      threadKey.slice(threadKey.lastIndexOf(":") + 1);
+    if (selectedFdSkillVersionId(threadId) !== undefined) {
       continue;
     }
     const hasModelData =
@@ -2378,6 +2339,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
+              ...(options.taskArea === true || existing.taskArea === true
+                ? { taskArea: true }
+                : {}),
               promotedTo: existing.promotedTo ?? null,
             };
             const isUnchanged =
@@ -2391,6 +2355,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.worktreePath === existing.worktreePath &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
+              (nextDraftThread.taskArea === true) === (existing.taskArea === true) &&
               scopedThreadRefsEqual(nextDraftThread.promotedTo, existing.promotedTo);
             if (isUnchanged) {
               return state;
@@ -2665,16 +2630,15 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             const base = existing ?? createEmptyThreadDraft();
             const nextMap = { ...base.modelSelectionByProvider };
-            for (const provider of ["codex", "claudeAgent", "cursor", "opencode"] as const) {
-              if (!modelOptions || !(provider in modelOptions)) continue;
-              const opts = modelOptions[provider];
-              const driverKind = ProviderDriverKind.make(provider);
-              const instanceKey = defaultInstanceIdForDriver(driverKind);
+            for (const [rawProvider, opts] of Object.entries(modelOptions ?? {})) {
+              const driverKind = normalizeProviderDriverKind(rawProvider);
+              if (driverKind === null) continue;
+              const instanceKey = ProviderInstanceId.make(driverKind);
               const current = nextMap[instanceKey];
               if (opts && opts.length > 0) {
                 nextMap[instanceKey] = createModelSelection(
                   instanceKey,
-                  current?.model ?? DEFAULT_MODEL_BY_PROVIDER[driverKind] ?? DEFAULT_MODEL,
+                  current?.model ?? DEFAULT_MODEL,
                   opts,
                 );
               } else if (current?.options) {
@@ -2707,11 +2671,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           if (normalizedProvider === null) {
             return;
           }
-          const instanceKey = options?.instanceId ?? defaultInstanceIdForDriver(normalizedProvider);
+          const instanceKey = options?.instanceId ?? ProviderInstanceId.make(normalizedProvider);
           const fallbackModel =
-            normalizeModelSlug(options?.model, normalizedProvider) ??
-            DEFAULT_MODEL_BY_PROVIDER[normalizedProvider] ??
-            DEFAULT_MODEL;
+            normalizeModelSlug(options?.model, normalizedProvider) ?? DEFAULT_MODEL;
           const providerOpts =
             nextProviderOptions && nextProviderOptions.length > 0 ? nextProviderOptions : undefined;
 
@@ -3414,6 +3376,65 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 
 export const useComposerDraftStore = composerDraftStore;
 
+function draftKeyMatchesThreadId(
+  state: ComposerDraftStoreState,
+  threadKey: string,
+  threadId: string,
+): boolean {
+  return (
+    state.draftThreadsByThreadKey[threadKey]?.threadId === threadId ||
+    parseScopedThreadKey(threadKey)?.threadId === threadId ||
+    threadKey === threadId
+  );
+}
+
+/** Keep FD enterprise prompts in memory even when the shared composer persists drafts. */
+export function excludeEnterpriseComposerDraftFromPersistence(threadId: string): void {
+  composerDebouncedStorage.removeItem(COMPOSER_DRAFT_STORAGE_KEY);
+  useComposerDraftStore.setState((state) => ({
+    draftsByThreadKey: { ...state.draftsByThreadKey },
+  }));
+  composerDebouncedStorage.flush();
+}
+
+function clearEnterpriseComposerDrafts(threadIds: ReadonlySet<string>): void {
+  if (threadIds.size === 0) return;
+  composerDebouncedStorage.removeItem(COMPOSER_DRAFT_STORAGE_KEY);
+  useComposerDraftStore.setState((state) => {
+    const nextDrafts = { ...state.draftsByThreadKey };
+    for (const [threadKey, draft] of Object.entries(nextDrafts)) {
+      if (![...threadIds].some((threadId) => draftKeyMatchesThreadId(state, threadKey, threadId))) {
+        continue;
+      }
+      for (const image of draft.images) revokeObjectPreviewUrl(image.previewUrl);
+      const nextDraft = {
+        ...draft,
+        prompt: "",
+        images: [],
+        nonPersistedImageIds: [],
+        persistedAttachments: [],
+      };
+      if (shouldRemoveDraft(nextDraft)) delete nextDrafts[threadKey];
+      else nextDrafts[threadKey] = nextDraft;
+    }
+    return { draftsByThreadKey: nextDrafts };
+  });
+  composerDebouncedStorage.flush();
+}
+
+export function clearEnterpriseComposerDraft(threadId: string): void {
+  clearEnterpriseComposerDrafts(new Set([threadId]));
+}
+
+export function clearAllEnterpriseComposerDrafts(): void {
+  const selectedThreadIds = new Set(
+    Object.entries(useFdSkillSelectionStore.getState().selectedByThread)
+      .filter(([, versionId]) => versionId !== null)
+      .map(([threadId]) => threadId),
+  );
+  clearEnterpriseComposerDrafts(selectedThreadIds);
+}
+
 export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): void {
   useComposerDraftStore.setState((state) => {
     const removedThreadKeys = new Set<string>();
@@ -3497,8 +3518,8 @@ export function useEffectiveComposerModelState(input: {
   selectedProvider: ProviderDriverKind;
   /**
    * When supplied, the draft's saved selection for this instance takes
-   * precedence over the driver-kind bucket — so a custom `codex_personal`
-   * instance reads its own model, not the default Codex's.
+   * precedence over the driver-kind bucket so an explicit runtime instance
+   * reads its own model.
    */
   selectedInstanceId?: ProviderInstanceId | null | undefined;
   threadModelSelection: ModelSelection | null | undefined;

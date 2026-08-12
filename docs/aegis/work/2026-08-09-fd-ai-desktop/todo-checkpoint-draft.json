@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-08-09-fd-ai-desktop",
+  "currentTodo": "Task 11A: run the real FD Codex App Server compatibility gate",
+  "completedTodos": [
+    "Selectively restored effect-codex-app-server and T3 Codex adapter/session runtime",
+    "Bound exact deepseek-v4-flash and fd_new_api through managed CODEX_HOME and a minimal child environment",
+    "Routed ordinary/project/local-Skill turns through Codex while retaining Enterprise Agent ownership",
+    "Proved structured local Skills, bidirectional conversation owner locking, restart/resume, approval, user input, cancellation, usage, and exactly-once projection with focused local tests",
+    "Passed 14 focused files and 237 tests, four package typechecks, Server bundle, format, diff, and credential-boundary scans"
+  ],
+  "activeSlice": "Local structural and fake-runtime compatibility evidence is green. The skipped-by-default real test is implemented but has not run against the exact FD endpoint.",
+  "evidenceRefs": ["task-11a-codex-compatibility-local"],
+  "blockedOn": "FD_RUN_REAL_APP_SERVER, an absolute working FD_CODEX_BINARY, and FD_NEW_API_KEY are unavailable; the global codex install is missing @openai/codex-darwin-x64.",
+  "nextStep": "Provide the gated runtime inputs and run apps/server/src/fd-codex/FdCodexAppServer.integration.test.ts. Only after it passes, review the compatibility gate and retire FdAgentKernel/FdResponsesClient/AI SDK callers.",
+  "updatedAt": "2026-08-11"
+}

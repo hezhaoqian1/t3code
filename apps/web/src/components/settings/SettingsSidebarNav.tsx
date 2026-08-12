@@ -10,11 +10,9 @@ import {
 import {
   ArchiveIcon,
   ArrowLeftIcon,
-  BotIcon,
   FolderIcon,
   GitBranchIcon,
   KeyboardIcon,
-  Link2Icon,
   PaletteIcon,
   SearchIcon,
   Settings2Icon,
@@ -34,7 +32,6 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "../ui/sidebar";
-import { T3ConnectSidebarAvatar, T3ConnectSidebarSignIn } from "../clerk/T3ConnectSidebarSignIn";
 import { scrollToSettingsTarget } from "./settingsLayout";
 import {
   searchSettings,
@@ -50,9 +47,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/appearance": PaletteIcon,
   "/settings/keybindings": KeyboardIcon,
   "/settings/projects": FolderIcon,
-  "/settings/providers": BotIcon,
   "/settings/source-control": GitBranchIcon,
-  "/settings/connections": Link2Icon,
   "/settings/archived": ArchiveIcon,
 };
 
@@ -206,8 +201,8 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 setActiveResultIndex(0);
               }}
               onKeyDown={handleSearchKeyDown}
-              placeholder="Search"
-              aria-label="Search settings"
+              placeholder="搜索设置"
+              aria-label="搜索设置"
               role="combobox"
               aria-autocomplete="list"
               aria-expanded={isSearching && hasResults}
@@ -225,7 +220,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                 size="icon-xs"
                 variant="ghost"
                 className="size-5 shrink-0 rounded-sm text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
-                aria-label="Clear settings search"
+                aria-label="清除设置搜索"
                 onClick={() => {
                   clearSearch();
                   searchInputRef.current?.focus();
@@ -244,14 +239,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
               role="status"
               className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
             >
-              No settings found
+              未找到相关设置
             </p>
           ) : null}
           <SidebarMenu
             className="ps-px"
             id={isSearching && hasResults ? "settings-search-results" : undefined}
             role={isSearching && hasResults ? "listbox" : undefined}
-            aria-label={isSearching && hasResults ? "Settings search results" : undefined}
+            aria-label={isSearching && hasResults ? "设置搜索结果" : undefined}
           >
             {isSearching
               ? results.map((item, index) => (
@@ -300,18 +295,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-[var(--sidebar-content-inset)]">
-        <T3ConnectSidebarSignIn />
-        <div className="flex items-center gap-1">
-          <SidebarMenu className="min-w-0 flex-1">
-            <SidebarMenuItem>
-              <SidebarMenuButton onClick={handleBackClick}>
-                <ArrowLeftIcon />
-                <span>Back</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <T3ConnectSidebarAvatar />
-        </div>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton onClick={handleBackClick}>
+              <ArrowLeftIcon />
+              <span>返回</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
     </>
   );

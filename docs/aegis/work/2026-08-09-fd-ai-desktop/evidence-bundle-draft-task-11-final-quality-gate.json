@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-11-final-quality-gate",
+  "type": "test, typecheck, review, build, and visual-acceptance boundary",
+  "source": "Task 11 focused Desktop, Server, Web, contracts, and client-runtime suites; five affected package typechecks; formatter/diff checks; independent specification and code-quality review loops; packaged Electron launch",
+  "summary": "Final Task 11 verification passed 17 focused files and 174 tests. Server, Web, contracts, client-runtime, and Desktop typechecks passed; current Web production build, Server bundle, and Desktop main/preload pack passed; formatter and git diff checks passed. Independent review verified repairs for office worktree policy bypass, blank-draft startup, state-directory symlink escape, Settings entry points, and hidden-project leakage, with a final Critical/Important/Minor result of none. Web development and packaged Electron startup were observed, but required desktop and compact-laptop visual acceptance remains unverified because macOS UI automation timed out.",
+  "verifier": "Vitest 4.1.9, tsgo, Vite+ formatter, git, specification reviewer task11_spec_review, code-quality reviewer task11_quality_review, and codex-controller"
+}

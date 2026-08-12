@@ -94,7 +94,6 @@ const PREPARED: PreparedConnection = {
   label: TARGET.label,
   httpBaseUrl: TARGET.httpBaseUrl,
   socketUrl: "wss://environment.example.test/ws?wsTicket=test",
-  httpAuthorization: null,
   target: TARGET,
 };
 
@@ -113,8 +112,8 @@ const SERVER_CONFIG: ServerConfigType = {
     },
   },
   auth: {
-    policy: "loopback-browser",
-    bootstrapMethods: ["one-time-token"],
+    policy: "desktop-managed-local",
+    bootstrapMethods: ["desktop-bootstrap"],
     sessionMethods: ["browser-session-cookie", "bearer-access-token"],
     sessionCookieName: "t3_session",
   },

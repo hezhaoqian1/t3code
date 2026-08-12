@@ -1,8 +1,5 @@
 /**
- * Multi-environment usage state.
- *
- * Every connected environment answers the same typed query; the client merges
- * the results. Raw transcripts never leave the machine that produced them.
+ * Usage state scoped to the primary local service.
  *
  * @module state/usage
  */
@@ -10,64 +7,67 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   USAGE_CONTRACT_VERSION,
   type EnvironmentId,
+  type FdUsageSummary,
   type UsageSummary,
   type UsageSummaryInput,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { mergeUsage, type EnvironmentUsage, type MergedUsage } from "../usage/usageMerge";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentPresentations } from "./presentation";
+import { summarizeUsage, type UsageTotals } from "../usage/usageSummary";
+import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { serverEnvironment } from "./server";
 
-export interface EnvironmentUsageStatus {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
+interface UsageStatus {
+  readonly environmentId: EnvironmentId | null;
   readonly isPending: boolean;
+  readonly isRefreshing: boolean;
   readonly error: string | null;
   readonly summary: UsageSummary | null;
 }
 
-/**
- * Reads every environment's summary for one window.
- *
- * Keyed by the serialised window so switching ranges does not thrash the atom
- * cache, and so each environment's query is shared with any other reader of the
- * same window.
- */
-const usageByWindowAtom = Atom.family((windowKey: string) =>
-  Atom.make((get): readonly EnvironmentUsageStatus[] => {
-    const input = JSON.parse(windowKey) as UsageSummaryInput;
-    const presentations = get(environmentPresentations.presentationsAtom);
+export function resolveUsageLoadingState(input: {
+  readonly waiting: boolean;
+  readonly hasValue: boolean;
+}): Pick<UsageStatus, "isPending" | "isRefreshing"> {
+  return {
+    isPending: input.waiting && !input.hasValue,
+    isRefreshing: input.waiting && input.hasValue,
+  };
+}
 
-    const statuses: EnvironmentUsageStatus[] = [];
-    for (const [environmentId, presentation] of presentations) {
-      const result = get(serverEnvironment.usageSummary({ environmentId, input }));
-      statuses.push({
-        environmentId,
-        label: presentation.entry.target.label,
-        isPending: result.waiting,
-        error: result._tag === "Failure" ? "This environment could not report usage." : null,
-        summary: Option.getOrNull(AsyncResult.value(result)),
-      });
+const usageByWindowAtom = Atom.family((windowKey: string) =>
+  Atom.make((get): UsageStatus => {
+    const environmentId = get(primaryEnvironmentIdAtom);
+    if (environmentId === null) {
+      return {
+        environmentId: null,
+        isPending: true,
+        isRefreshing: false,
+        error: null,
+        summary: null,
+      };
     }
-    return statuses;
+
+    const input = JSON.parse(windowKey) as UsageSummaryInput;
+    const result = get(serverEnvironment.usageSummary({ environmentId, input }));
+    const summary = Option.getOrNull(AsyncResult.value(result));
+    return {
+      environmentId,
+      ...resolveUsageLoadingState({ waiting: result.waiting, hasValue: summary !== null }),
+      error: result._tag === "Failure" ? "无法从本地服务读取用量数据。" : null,
+      summary,
+    };
   }).pipe(Atom.withLabel(`web-usage:window:${windowKey}`)),
 );
 
 export interface UsageView {
-  readonly merged: MergedUsage;
-  readonly environments: readonly EnvironmentUsageStatus[];
-  /** True until at least one environment has answered. */
+  readonly merged: UsageTotals;
   readonly isPending: boolean;
-  /**
-   * True while environments that have not failed are still answering. Failed
-   * environments are reported through their own error rows: totals will not
-   * improve by waiting on them, so they must not read as "still reporting".
-   */
-  readonly isPartial: boolean;
+  readonly isRefreshing: boolean;
+  readonly error: string | null;
   readonly refresh: () => void;
 }
 
@@ -81,46 +81,85 @@ export function useUsage(input: UsageSummaryInput): UsageView {
       }),
     [input.sinceDay, input.untilDay, input.timeZone],
   );
-  const atom = usageByWindowAtom(windowKey);
-  const environments = useAtomValue(atom);
+  const status = useAtomValue(usageByWindowAtom(windowKey));
 
-  // Refreshing only the derived atom would re-read the per-environment SWR
-  // queries within their stale window and change nothing. Refresh each
-  // environment's query so the button always rescans.
   const refresh = useCallback(() => {
+    if (status.environmentId === null) return;
     const input = JSON.parse(windowKey) as UsageSummaryInput;
-    for (const environment of environments) {
-      appAtomRegistry.refresh(
-        serverEnvironment.usageSummary({ environmentId: environment.environmentId, input }),
-      );
-    }
-  }, [environments, windowKey]);
-
-  const merged = useMemo(() => {
-    const answered: EnvironmentUsage[] = environments.flatMap((environment) =>
-      environment.summary === null
-        ? []
-        : [
-            {
-              environmentId: environment.environmentId,
-              label: environment.label,
-              summary: environment.summary,
-            },
-          ],
+    appAtomRegistry.refresh(
+      serverEnvironment.usageSummary({ environmentId: status.environmentId, input }),
     );
-    return mergeUsage(answered, USAGE_CONTRACT_VERSION);
-  }, [environments]);
+  }, [status.environmentId, windowKey]);
 
-  const answeredCount = environments.filter((environment) => environment.summary !== null).length;
-  const stillReporting = environments.filter(
-    (environment) => environment.summary === null && environment.error === null,
-  ).length;
+  const contractMismatch =
+    status.summary !== null && status.summary.contractVersion !== USAGE_CONTRACT_VERSION;
+  const merged = useMemo(
+    () => summarizeUsage(contractMismatch ? null : status.summary),
+    [contractMismatch, status.summary],
+  );
 
   return {
     merged,
-    environments,
-    isPending: answeredCount === 0 && stillReporting > 0,
-    isPartial: answeredCount > 0 && stillReporting > 0,
+    isPending: status.isPending,
+    isRefreshing: status.isRefreshing,
+    error: contractMismatch ? "当前应用版本暂不支持这份用量数据。" : status.error,
     refresh,
+  };
+}
+
+export interface FdGatewayUsageView {
+  readonly supported: boolean;
+  readonly summary: FdUsageSummary | null;
+  readonly isPending: boolean;
+  readonly isRefreshing: boolean;
+  readonly error: string | null;
+  readonly refresh: () => void;
+}
+
+/**
+ * Desktop-only usage source. Credentials stay in the Electron main process;
+ * the renderer receives only the Gateway's already-aggregated account data.
+ */
+export function useFdGatewayUsage(): FdGatewayUsageView {
+  const bridge = typeof window === "undefined" ? undefined : window.desktopBridge;
+  const getSummary = bridge?.getFdUsageSummary;
+  const supported = typeof getSummary === "function";
+  const [summary, setSummary] = useState<FdUsageSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState(supported);
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  useEffect(() => {
+    if (!supported || getSummary === undefined) {
+      setWaiting(false);
+      return;
+    }
+    let mounted = true;
+    setWaiting(true);
+    void getSummary()
+      .then((next) => {
+        if (!mounted) return;
+        setSummary(next);
+        setError(null);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setError("无法读取 Gateway AI 点数，请检查登录状态或网络连接。");
+      })
+      .finally(() => {
+        if (mounted) setWaiting(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, [getSummary, refreshToken, supported]);
+
+  return {
+    supported,
+    summary,
+    isPending: waiting && summary === null,
+    isRefreshing: waiting && summary !== null,
+    error,
+    refresh: useCallback(() => setRefreshToken((value) => value + 1), []),
   };
 }

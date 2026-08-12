@@ -21,7 +21,7 @@ export class PreferredEditorEnvironmentRequiredError extends Schema.TaggedErrorC
   },
 ) {
   override get message(): string {
-    return `Cannot open ${this.targetPath} because no environment is selected.`;
+    return `Cannot open ${this.targetPath} because the local service is unavailable.`;
   }
 }
 
@@ -34,7 +34,7 @@ export class PreferredEditorUnavailableError extends Schema.TaggedErrorClass<Pre
   },
 ) {
   override get message(): string {
-    return `No available editor can open ${this.targetPath} in environment ${this.environmentId}.`;
+    return `No available editor can open ${this.targetPath}.`;
   }
 }
 

@@ -298,7 +298,7 @@ function formatProcessName(command: string): string {
 
 function formatProcessType(process: ServerProcessDiagnosticsEntry): string {
   if (process.depth > 0) return "Subprocess";
-  if (/\b(codex|claude|opencode|cursor)\b/i.test(process.command)) return "Agent";
+  if (/\bfd-deepseek\b/i.test(process.command)) return "Agent";
   return "Process";
 }
 
@@ -868,7 +868,7 @@ export function DiagnosticsSettingsPanel() {
       return;
     }
     if (environmentId === null) {
-      setOpenLogsDirectoryError("No environment is selected.");
+      setOpenLogsDirectoryError("The local service is not available.");
       return;
     }
 

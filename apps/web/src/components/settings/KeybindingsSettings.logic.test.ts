@@ -87,7 +87,7 @@ describe("KeybindingsSettings.logic", () => {
       }),
     ).toBe("editorFocus && !terminalFocus");
 
-    expect(parseWhenExpressionDraft("editorFocus && (!terminalFocus || modelPickerOpen)")).toEqual({
+    expect(parseWhenExpressionDraft("editorFocus && (!terminalFocus || previewFocus)")).toEqual({
       ok: true,
       value: {
         type: "and",
@@ -98,7 +98,7 @@ describe("KeybindingsSettings.logic", () => {
             type: "not",
             node: { type: "identifier", name: "terminalFocus" },
           },
-          right: { type: "identifier", name: "modelPickerOpen" },
+          right: { type: "identifier", name: "previewFocus" },
         },
       },
     });
@@ -107,14 +107,14 @@ describe("KeybindingsSettings.logic", () => {
       message: "Use variables with !, &&, ||, and parentheses.",
     });
 
-    expect(parseWhenExpressionDraft("!(terminalFocus || modelPickerOpen)")).toEqual({
+    expect(parseWhenExpressionDraft("!(terminalFocus || previewFocus)")).toEqual({
       ok: true,
       value: {
         type: "not",
         node: {
           type: "or",
           left: { type: "identifier", name: "terminalFocus" },
-          right: { type: "identifier", name: "modelPickerOpen" },
+          right: { type: "identifier", name: "previewFocus" },
         },
       },
     });
@@ -130,7 +130,7 @@ describe("KeybindingsSettings.logic", () => {
     const options = buildWhenVariableOptions();
 
     expect(options).toEqual(
-      expect.arrayContaining(["terminalFocus", "terminalOpen", "modelPickerOpen", "true", "false"]),
+      expect.arrayContaining(["terminalFocus", "terminalOpen", "previewFocus", "true", "false"]),
     );
     expect(options).not.toContain("customModeActive");
   });

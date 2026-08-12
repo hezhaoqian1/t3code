@@ -60,11 +60,13 @@ export function useThreadActionMenu(input: {
   readonly threadRef: ScopedThreadRef | null;
   /** Fallback for "Copy path" when the thread has no worktree. */
   readonly projectCwd: string | null;
+  readonly technicalActionsVisible: boolean;
   /** PR state feeding auto-settle classification, as resolved by the caller. */
   readonly changeRequestState: ChangeRequestStateLike | null;
   readonly onStartRename: () => void;
 }) {
-  const { threadRef, projectCwd, changeRequestState, onStartRename } = input;
+  const { threadRef, projectCwd, technicalActionsVisible, changeRequestState, onStartRename } =
+    input;
   const {
     settleThread,
     unsettleThread,
@@ -117,6 +119,7 @@ export function useThreadActionMenu(input: {
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
         const items = buildThreadActionMenuItems({
           branch: thread.branch ?? null,
+          technicalActionsVisible,
           isPinned: thread.pinnedAt != null,
           isSettled:
             supports.settlement &&
@@ -288,6 +291,7 @@ export function useThreadActionMenu(input: {
       snoozeThread,
       threadRef,
       timestampFormat,
+      technicalActionsVisible,
       unpinThread,
       unsettleThread,
       unsnoozeThread,

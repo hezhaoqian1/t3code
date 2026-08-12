@@ -1,11 +1,13 @@
 import {
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  AuthReviewWriteScope,
   AuthSessionId,
-  AuthStandardClientScopes,
+  AuthTerminalOperateScope,
   AuthEnvironmentScopes,
   type AuthClientMetadata,
-  type AuthClientSession,
   type AuthEnvironmentScope,
-  type ServerAuthSessionMethod,
+  ServerAuthSessionMethod,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -13,10 +15,8 @@ import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
 import * as Option from "effect/Option";
 
 import * as ServerConfig from "../config.ts";
@@ -37,7 +37,6 @@ export interface IssuedSession {
   readonly client: AuthClientMetadata;
   readonly expiresAt: DateTime.DateTime;
   readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
-  readonly proofKeyThumbprint?: string;
 }
 
 export interface VerifiedSession {
@@ -48,18 +47,7 @@ export interface VerifiedSession {
   readonly expiresAt?: DateTime.DateTime;
   readonly subject: string;
   readonly scopes: ReadonlyArray<AuthEnvironmentScope>;
-  readonly proofKeyThumbprint?: string;
 }
-
-export type SessionCredentialChange =
-  | {
-      readonly type: "clientUpserted";
-      readonly clientSession: AuthClientSession;
-    }
-  | {
-      readonly type: "clientRemoved";
-      readonly sessionId: AuthSessionId;
-    };
 
 export class MalformedSessionTokenError extends Schema.TaggedErrorClass<MalformedSessionTokenError>()(
   "MalformedSessionTokenError",
@@ -300,50 +288,12 @@ export class WebSocketTokenVerificationError extends Schema.TaggedErrorClass<Web
   }
 }
 
-export class ActiveSessionsListError extends Schema.TaggedErrorClass<ActiveSessionsListError>()(
-  "ActiveSessionsListError",
-  {
-    ...sessionCredentialInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to list active sessions.";
-  }
-}
-
-export class SessionRevocationError extends Schema.TaggedErrorClass<SessionRevocationError>()(
-  "SessionRevocationError",
-  {
-    sessionId: AuthSessionId,
-    ...sessionCredentialInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to revoke session.";
-  }
-}
-
-export class OtherSessionsRevocationError extends Schema.TaggedErrorClass<OtherSessionsRevocationError>()(
-  "OtherSessionsRevocationError",
-  {
-    currentSessionId: AuthSessionId,
-    ...sessionCredentialInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to revoke other sessions.";
-  }
-}
-
 export const SessionCredentialInternalError = Schema.Union([
   SessionClaimsEncodingError,
   SessionCredentialIssueError,
   SessionCredentialVerificationError,
   WebSocketTokenIssueError,
   WebSocketTokenVerificationError,
-  ActiveSessionsListError,
-  SessionRevocationError,
-  OtherSessionsRevocationError,
 ]);
 export type SessionCredentialInternalError = typeof SessionCredentialInternalError.Type;
 export const isSessionCredentialInternalError = Schema.is(SessionCredentialInternalError);
@@ -365,7 +315,6 @@ export class SessionStore extends Context.Service<
       readonly method?: ServerAuthSessionMethod;
       readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
       readonly client?: AuthClientMetadata;
-      readonly proofKeyThumbprint?: string;
     }) => Effect.Effect<IssuedSession, SessionCredentialInternalError>;
     readonly verify: (token: string) => Effect.Effect<VerifiedSession, SessionCredentialError>;
     readonly issueWebSocketToken: (
@@ -383,17 +332,6 @@ export class SessionStore extends Context.Service<
     readonly verifyWebSocketToken: (
       token: string,
     ) => Effect.Effect<VerifiedSession, SessionCredentialError>;
-    readonly listActive: () => Effect.Effect<
-      ReadonlyArray<AuthClientSession>,
-      SessionCredentialInternalError
-    >;
-    readonly streamChanges: Stream.Stream<SessionCredentialChange>;
-    readonly revoke: (
-      sessionId: AuthSessionId,
-    ) => Effect.Effect<boolean, SessionCredentialInternalError>;
-    readonly revokeAllExcept: (
-      sessionId: AuthSessionId,
-    ) => Effect.Effect<number, SessionCredentialInternalError>;
     readonly markConnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
     readonly markDisconnected: (sessionId: AuthSessionId) => Effect.Effect<void, never>;
   }
@@ -402,6 +340,12 @@ export class SessionStore extends Context.Service<
 const SIGNING_SECRET_NAME = "server-signing-key";
 const DEFAULT_SESSION_TTL = Duration.days(30);
 const DEFAULT_WEBSOCKET_TOKEN_TTL = Duration.minutes(5);
+const DEFAULT_LOCAL_SESSION_SCOPES = [
+  AuthOrchestrationReadScope,
+  AuthOrchestrationOperateScope,
+  AuthTerminalOperateScope,
+  AuthReviewWriteScope,
+] satisfies ReadonlyArray<AuthEnvironmentScope>;
 
 const SessionClaims = Schema.Struct({
   v: Schema.Literal(1),
@@ -409,8 +353,7 @@ const SessionClaims = Schema.Struct({
   sid: AuthSessionId,
   sub: Schema.String,
   scopes: AuthEnvironmentScopes,
-  method: Schema.Literals(["browser-session-cookie", "bearer-access-token", "dpop-access-token"]),
-  jkt: Schema.optionalKey(Schema.String),
+  method: ServerAuthSessionMethod,
   iat: Schema.Number,
   exp: Schema.Number,
 });
@@ -430,7 +373,7 @@ const decodeWebSocketClaims = Schema.decodeUnknownEffect(Schema.fromJsonString(W
 
 function createDefaultClientMetadata(): AuthClientMetadata {
   return {
-    deviceType: "unknown",
+    deviceType: "desktop",
   };
 }
 
@@ -452,13 +395,6 @@ function toClientMetadata(record: {
   };
 }
 
-function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthClientSession {
-  return {
-    ...input,
-    current: false,
-  };
-}
-
 export const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -466,49 +402,11 @@ export const make = Effect.gen(function* () {
   const authSessions = yield* AuthSessions.AuthSessionRepository;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
-  const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
   const cookieName = resolveSessionCookieName({
     mode: serverConfig.mode,
     port: serverConfig.port,
-    host: serverConfig.host,
     instanceKey: serverConfig.stateDir,
-    development: serverConfig.devUrl !== undefined,
   });
-
-  const emitUpsert = (clientSession: AuthClientSession) =>
-    PubSub.publish(changesPubSub, {
-      type: "clientUpserted",
-      clientSession,
-    }).pipe(Effect.asVoid);
-
-  const emitRemoved = (sessionId: AuthSessionId) =>
-    PubSub.publish(changesPubSub, {
-      type: "clientRemoved",
-      sessionId,
-    }).pipe(Effect.asVoid);
-
-  const loadActiveSession = (sessionId: AuthSessionId) =>
-    Effect.gen(function* () {
-      const row = yield* authSessions.getById({ sessionId });
-      if (Option.isNone(row) || row.value.revokedAt !== null) {
-        return Option.none<AuthClientSession>();
-      }
-
-      const connectedSessions = yield* Ref.get(connectedSessionsRef);
-      return Option.some(
-        toAuthClientSession({
-          sessionId: row.value.sessionId,
-          subject: row.value.subject,
-          scopes: row.value.scopes,
-          method: row.value.method,
-          client: toClientMetadata(row.value.client),
-          issuedAt: row.value.issuedAt,
-          expiresAt: row.value.expiresAt,
-          lastConnectedAt: row.value.lastConnectedAt,
-          connected: connectedSessions.has(row.value.sessionId),
-        }),
-      );
-    });
 
   const markConnected: SessionStore["Service"]["markConnected"] = (sessionId) =>
     Ref.modify(connectedSessionsRef, (current) => {
@@ -529,12 +427,8 @@ export const make = Effect.gen(function* () {
             )
           : Effect.void,
       ),
-      Effect.flatMap(() => loadActiveSession(sessionId)),
-      Effect.flatMap((session) =>
-        Option.isSome(session) ? emitUpsert(session.value) : Effect.void,
-      ),
       Effect.catchCause((cause) =>
-        Effect.logError("Failed to publish connected-session auth update.").pipe(
+        Effect.logError("Failed to persist connected-session timestamp.").pipe(
           Effect.annotateLogs({
             sessionId,
             cause,
@@ -554,21 +448,7 @@ export const make = Effect.gen(function* () {
         next.delete(sessionId);
       }
       return next;
-    }).pipe(
-      Effect.flatMap(() => loadActiveSession(sessionId)),
-      Effect.flatMap((session) =>
-        Option.isSome(session) ? emitUpsert(session.value) : Effect.void,
-      ),
-      Effect.catchCause((cause) =>
-        Effect.logError("Failed to publish disconnected-session auth update.").pipe(
-          Effect.annotateLogs({
-            sessionId,
-            cause,
-          }),
-        ),
-      ),
-      Effect.withSpan("SessionStore.markDisconnected"),
-    );
+    }).pipe(Effect.withSpan("SessionStore.markDisconnected"));
 
   const encodeClaims = Schema.encodeEffect(Schema.fromJsonString(SessionClaims));
   const issue: SessionStore["Service"]["issue"] = Effect.fn("SessionStore.issue")(
@@ -587,9 +467,8 @@ export const make = Effect.gen(function* () {
         kind: "session",
         sid: sessionId,
         sub: input?.subject ?? "browser",
-        scopes: input?.scopes ?? AuthStandardClientScopes,
+        scopes: input?.scopes ?? DEFAULT_LOCAL_SESSION_SCOPES,
         method: input?.method ?? "browser-session-cookie",
-        ...(input?.proofKeyThumbprint ? { jkt: input.proofKeyThumbprint } : {}),
         iat: issuedAt.epochMilliseconds,
         exp: expiresAt.epochMilliseconds,
       };
@@ -628,20 +507,6 @@ export const make = Effect.gen(function* () {
           expiresAt,
         })
         .pipe(Effect.mapError((cause) => new SessionCredentialIssueError({ sessionId, cause })));
-      yield* emitUpsert(
-        toAuthClientSession({
-          sessionId,
-          subject: claims.sub,
-          scopes: claims.scopes,
-          method: claims.method,
-          client,
-          issuedAt,
-          expiresAt,
-          lastConnectedAt: null,
-          connected: false,
-        }),
-      );
-
       return {
         sessionId,
         token: `${encodedPayload}.${signature}`,
@@ -649,7 +514,6 @@ export const make = Effect.gen(function* () {
         client,
         expiresAt: expiresAt,
         scopes: claims.scopes,
-        ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
       } satisfies IssuedSession;
     },
   );
@@ -711,7 +575,6 @@ export const make = Effect.gen(function* () {
         expiresAt: expiresAt.value,
         subject: claims.sub,
         scopes: claims.scopes,
-        ...(claims.jkt ? { proofKeyThumbprint: claims.jkt } : {}),
       } satisfies VerifiedSession;
     },
   );
@@ -820,96 +683,12 @@ export const make = Effect.gen(function* () {
     } satisfies VerifiedSession;
   });
 
-  const listActive: SessionStore["Service"]["listActive"] = Effect.fn("SessionStore.listActive")(
-    function* () {
-      const now = yield* DateTime.now;
-      const connectedSessions = yield* Ref.get(connectedSessionsRef);
-      const rows = yield* authSessions.listActive({ now });
-
-      return rows.map((row) =>
-        toAuthClientSession({
-          sessionId: row.sessionId,
-          subject: row.subject,
-          scopes: row.scopes,
-          method: row.method,
-          client: toClientMetadata(row.client),
-          issuedAt: row.issuedAt,
-          expiresAt: row.expiresAt,
-          lastConnectedAt: row.lastConnectedAt,
-          connected: connectedSessions.has(row.sessionId),
-        }),
-      );
-    },
-    Effect.mapError((cause) => new ActiveSessionsListError({ cause })),
-  );
-
-  const revoke: SessionStore["Service"]["revoke"] = Effect.fn("SessionStore.revoke")(
-    function* (sessionId) {
-      const revokedAt = yield* DateTime.now;
-      const revoked = yield* authSessions
-        .revoke({
-          sessionId,
-          revokedAt,
-        })
-        .pipe(Effect.mapError((cause) => new SessionRevocationError({ sessionId, cause })));
-      if (revoked) {
-        yield* Ref.update(connectedSessionsRef, (current) => {
-          const next = new Map(current);
-          next.delete(sessionId);
-          return next;
-        });
-        yield* emitRemoved(sessionId);
-      }
-      return revoked;
-    },
-  );
-
-  const revokeAllExcept: SessionStore["Service"]["revokeAllExcept"] = Effect.fn(
-    "SessionStore.revokeAllExcept",
-  )(function* (sessionId) {
-    const revokedAt = yield* DateTime.now;
-    const revokedSessionIds = yield* authSessions
-      .revokeAllExcept({
-        currentSessionId: sessionId,
-        revokedAt,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) => new OtherSessionsRevocationError({ currentSessionId: sessionId, cause }),
-        ),
-      );
-    if (revokedSessionIds.length > 0) {
-      yield* Ref.update(connectedSessionsRef, (current) => {
-        const next = new Map(current);
-        for (const revokedSessionId of revokedSessionIds) {
-          next.delete(revokedSessionId);
-        }
-        return next;
-      });
-      yield* Effect.forEach(
-        revokedSessionIds,
-        (revokedSessionId) => emitRemoved(revokedSessionId),
-        {
-          concurrency: "unbounded",
-          discard: true,
-        },
-      );
-    }
-    return revokedSessionIds.length;
-  });
-
   return SessionStore.of({
     cookieName,
     issue,
     verify,
     issueWebSocketToken,
     verifyWebSocketToken,
-    listActive,
-    get streamChanges() {
-      return Stream.fromPubSub(changesPubSub);
-    },
-    revoke,
-    revokeAllExcept,
     markConnected,
     markDisconnected,
   });

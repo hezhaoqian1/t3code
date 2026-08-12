@@ -1,7 +1,7 @@
 import { EventId, ProviderDriverKind, RuntimeRequestId } from "@t3tools/contracts";
 import type { LegacyProviderRuntimeEvent } from "../TestProviderAdapter.integration.ts";
 
-const PROVIDER = ProviderDriverKind.make("codex");
+const PROVIDER = ProviderDriverKind.make("fd-deepseek");
 const SESSION_ID = "fixture-session";
 const THREAD_ID = "fixture-thread";
 const TURN_ID = "fixture-turn";
@@ -19,7 +19,7 @@ function baseEvent(
   };
 }
 
-export const codexTurnTextFixture = [
+export const fdTurnTextFixture = [
   {
     type: "turn.started",
     ...baseEvent("evt-1", "2026-02-23T00:00:00.000Z"),
@@ -58,7 +58,7 @@ export const codexTurnTextFixture = [
   },
 ] satisfies ReadonlyArray<LegacyProviderRuntimeEvent>;
 
-export const codexTurnToolFixture = [
+export const fdTurnToolFixture = [
   {
     type: "turn.started",
     ...baseEvent("evt-11", "2026-02-23T00:01:00.000Z"),
@@ -110,7 +110,7 @@ export const codexTurnToolFixture = [
   },
 ] satisfies ReadonlyArray<LegacyProviderRuntimeEvent>;
 
-export const codexTurnApprovalFixture = [
+export const fdTurnApprovalFixture = [
   {
     type: "turn.started",
     ...baseEvent("evt-21", "2026-02-23T00:02:00.000Z"),

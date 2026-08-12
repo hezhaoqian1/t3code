@@ -134,7 +134,9 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    the variables and Settings -> Appearance can override them at runtime. The
    default stacks are mirrored in `appearanceFonts.ts`. */
 @theme {
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei UI",
+    "Segoe UI", system-ui, sans-serif;
   --font-mono:
     ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -872,17 +874,17 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --toolbar-control-foreground: var(--foreground);
   --toolbar-control-hover: var(--accent);
   --surface-raised: color-mix(in srgb, var(--card) 20%, transparent);
-  --foreground: var(--color-zinc-800);
+  --foreground: var(--color-zinc-900);
   --card: var(--color-white);
-  --card-foreground: var(--color-zinc-800);
+  --card-foreground: var(--color-zinc-900);
   --popover: var(--color-white);
-  --popover-foreground: var(--color-zinc-800);
+  --popover-foreground: var(--color-zinc-900);
   --primary: oklch(0.488 0.217 264);
   --primary-foreground: var(--color-white);
   --secondary: var(--color-zinc-50);
-  --secondary-foreground: var(--color-zinc-800);
+  --secondary-foreground: var(--color-zinc-900);
   --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
+  --muted-foreground: var(--color-zinc-600);
   --placeholder: var(--muted-foreground);
   --secondary-label: var(--muted-foreground);
   --icon-muted: var(--muted-foreground);
@@ -1000,22 +1002,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
    surfaces. */
 [data-app-sidebar] {
   --background: var(--color-zinc-25);
-  --foreground: var(--color-zinc-800);
+  --foreground: var(--color-zinc-900);
   --card: var(--color-white);
-  --card-foreground: var(--color-zinc-800);
+  --card-foreground: var(--color-zinc-900);
   --accent: var(--color-zinc-100);
   --accent-foreground: var(--color-zinc-900);
   --muted: var(--color-zinc-50);
-  --muted-foreground: var(--color-zinc-500);
+  --muted-foreground: var(--color-zinc-600);
   --border: var(--color-zinc-200);
   --input: var(--color-zinc-300);
   --sidebar: var(--color-zinc-50);
-  --sidebar-foreground: var(--color-zinc-800);
-  --sidebar-muted-foreground: var(--color-zinc-500);
+  --sidebar-foreground: var(--color-zinc-900);
+  --sidebar-muted-foreground: var(--color-zinc-600);
   --sidebar-control-surface: var(--color-zinc-100);
-  --sidebar-row-hover: var(--color-zinc-25);
-  --sidebar-row-active: var(--color-white);
-  --sidebar-row-selected: var(--color-white);
+  --sidebar-row-hover: var(--color-zinc-100);
+  --sidebar-row-active: var(--color-zinc-200);
+  --sidebar-row-selected: var(--color-zinc-100);
   --sidebar-border: var(--color-zinc-200);
   --sidebar-stage-fade: var(--sidebar);
   background-color: var(--sidebar);
@@ -1378,6 +1380,7 @@ body {
   /* Reference the theme token (not a literal stack) so the Settings ->
      Appearance runtime override of --font-sans reaches all interface text. */
   font-family: var(--font-sans);
+  letter-spacing: 0;
   margin: 0;
   padding: 0;
 }

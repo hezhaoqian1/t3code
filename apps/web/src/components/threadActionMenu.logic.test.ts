@@ -4,6 +4,7 @@ import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./thread
 
 const baseState: ThreadActionMenuState = {
   branch: null,
+  technicalActionsVisible: true,
   isPinned: false,
   isSettled: false,
   isSnoozed: false,
@@ -37,6 +38,17 @@ describe("buildThreadActionMenuItems", () => {
     expect(ids(baseState)).not.toContain("copy-branch");
   });
 
+  it("hides filesystem and branch actions for office rows", () => {
+    const officeItems = ids({
+      ...baseState,
+      branch: "main",
+      technicalActionsVisible: false,
+    });
+    expect(officeItems).not.toContain("new-thread-on-branch");
+    expect(officeItems).not.toContain("copy-path");
+    expect(officeItems).not.toContain("copy-branch");
+  });
+
   it("flips lifecycle labels with thread state", () => {
     expect(ids({ ...baseState, isPinned: true, isSettled: true, isSnoozed: true })).toEqual(
       expect.arrayContaining(["unpin", "unsettle", "unsnooze"]),
@@ -56,7 +68,7 @@ describe("buildThreadActionMenuItems", () => {
     const item = buildThreadActionMenuItems({ ...baseState, isRegeneratingTitle: true }).find(
       (candidate) => candidate.id === "regenerate-title",
     );
-    expect(item).toMatchObject({ label: "Regenerating…", disabled: true });
+    expect(item).toMatchObject({ label: "正在生成标题…", disabled: true });
   });
 
   it("marks delete as destructive and keeps it last", () => {

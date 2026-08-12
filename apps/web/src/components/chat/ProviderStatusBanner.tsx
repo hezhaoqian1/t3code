@@ -2,7 +2,6 @@ import { type ServerProvider } from "@t3tools/contracts";
 import { memo } from "react";
 import { InfoIcon, XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
-import { formatProviderDriverKindLabel } from "../../providerModels";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export function getProviderStatusBannerKey(status: ServerProvider | null): string | null {
@@ -30,17 +29,13 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
     return null;
   }
 
-  const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
-  const isUnauthenticated = status.status === "error" && status.auth.status === "unauthenticated";
-  const title = isUnauthenticated
-    ? `${providerName} is unauthenticated`
-    : `${providerName} provider status`;
+  const isUnauthenticated = status.auth.status === "unauthenticated";
+  const title = isUnauthenticated ? "需要登录" : "智能服务暂不可用";
   const message = isUnauthenticated
-    ? "Sign in via the CLI to authenticate again."
-    : (status.message ??
-      (status.status === "error"
-        ? `${providerName} provider is unavailable.`
-        : `${providerName} provider has limited availability.`));
+    ? "请登录方德账号后继续。"
+    : status.status === "error"
+      ? "请稍后重试；如持续失败，请联系管理员。"
+      : "部分 FD Skills 暂时不可用，你仍可继续普通对话。";
 
   return (
     <div className="pointer-events-auto mx-auto w-fit max-w-[calc(100%-2rem)] pt-3">
@@ -68,7 +63,7 @@ export const ProviderStatusBanner = memo(function ProviderStatusBanner({
         </div>
         <button
           type="button"
-          aria-label={`Dismiss ${providerName} provider ${status.status}`}
+          aria-label="关闭服务状态提示"
           className="absolute top-2 right-2 inline-flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-foreground/8 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           onClick={onDismiss}
         >

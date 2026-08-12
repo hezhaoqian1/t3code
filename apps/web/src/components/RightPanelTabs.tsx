@@ -54,9 +54,9 @@ interface RightPanelTabsProps {
 }
 
 const SURFACE_DISABLED_REASONS = {
-  browser: "Browser previews are only available in the T3 Code desktop app.",
-  files: "Files are only available when a project is open.",
-  diff: "Diff is only available for server threads in Git repositories.",
+  browser: "浏览器预览仅在方德 AI 桌面端可用。",
+  files: "打开空间后才能查看文件。",
+  diff: "Git 空间中的服务端任务才能查看变更。",
 } as const;
 
 type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
@@ -102,8 +102,8 @@ function RightPanelEmptyState(props: {
 }) {
   const actions = [
     {
-      label: "Browser",
-      description: "Open a local app or URL.",
+      label: "浏览器",
+      description: "打开本地应用或网址。",
       icon: Globe2,
       available: props.browserAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.browser,
@@ -111,8 +111,8 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
-      label: "Terminal",
-      description: "Start a shell in this workspace.",
+      label: "终端",
+      description: "在当前空间中启动终端。",
       icon: TerminalSquare,
       available: true,
       disabledReason: null,
@@ -120,8 +120,8 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
-      label: "Files",
-      description: "Browse and read workspace files.",
+      label: "文件",
+      description: "浏览并读取空间文件。",
       icon: Files,
       available: props.filesAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.files,
@@ -129,8 +129,8 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
-      label: "Diff",
-      description: "Review changes in this thread.",
+      label: "变更",
+      description: "查看这个任务中的文件变更。",
       icon: FileDiff,
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
@@ -138,8 +138,8 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
-      label: "Agents",
-      description: "Watch subagents and workflows run.",
+      label: "Agent",
+      description: "查看子 Agent 和工作流运行情况。",
       icon: Bot,
       available: true,
       disabledReason: null,
@@ -152,7 +152,7 @@ function RightPanelEmptyState(props: {
     <div className="flex min-h-0 flex-1 items-center justify-center p-6">
       <div className="w-full max-w-xl">
         <div className="mb-5 text-center">
-          <h3 className="text-sm font-medium text-foreground">Open a surface</h3>
+          <h3 className="text-sm font-medium text-foreground">打开面板</h3>
           <p className="mt-1 text-xs text-muted-foreground">
             Choose what to show in the right panel.
           </p>
@@ -221,9 +221,9 @@ function surfaceTitle(
 ): string {
   switch (surface.kind) {
     case "diff":
-      return "Diff";
+      return "变更";
     case "files":
-      return "Files";
+      return "文件";
     case "file":
       return surface.relativePath.slice(surface.relativePath.lastIndexOf("/") + 1);
     case "terminal":
@@ -232,15 +232,15 @@ function surfaceTitle(
         getTerminalLabel(surface.activeTerminalId)
       );
     case "agents":
-      return "Agents";
+      return "Agent";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
-      if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
+      if (!snapshot || snapshot.navStatus._tag === "Idle") return "浏览器";
       if (snapshot.navStatus.title.trim().length > 0) return snapshot.navStatus.title;
       try {
-        return new URL(snapshot.navStatus.url).host || "Browser";
+        return new URL(snapshot.navStatus.url).host || "浏览器";
       } catch {
-        return "Browser";
+        return "浏览器";
       }
     }
   }
@@ -315,23 +315,23 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
 
       const items: ContextMenuItem<TabContextMenuAction>[] = [];
       if (surface.kind === "file") {
-        items.push({ id: "copy-path", label: "Copy path" });
+        items.push({ id: "copy-path", label: "复制路径" });
       }
       items.push(
-        { id: "close", label: "Close" },
+        { id: "close", label: "关闭" },
         {
           id: "close-others",
-          label: "Close others",
+          label: "关闭其他面板",
           disabled: props.surfaces.length <= 1,
         },
         {
           id: "close-to-right",
-          label: "Close to the right",
+          label: "关闭右侧面板",
           disabled: surfaceIndex >= props.surfaces.length - 1,
         },
         {
           id: "close-all",
-          label: "Close all",
+          label: "关闭全部面板",
           disabled: props.surfaces.length === 0,
         },
       );
@@ -461,7 +461,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
               <Menu>
                 <MenuTrigger
                   className="cursor-pointer relative inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                  aria-label="Add panel surface"
+                  aria-label="添加面板"
                 >
                   <Plus className="size-3.5" />
                 </MenuTrigger>

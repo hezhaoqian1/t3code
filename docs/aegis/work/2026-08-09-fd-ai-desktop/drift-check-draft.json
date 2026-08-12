@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-08-09-fd-ai-desktop",
+  "taskIntentRef": "docs/aegis/work/2026-08-09-fd-ai-desktop/task-intent-draft.json",
+  "baselineRefs": [
+    "docs/aegis/specs/2026-08-09-fd-ai-local-desktop-design.md",
+    "docs/aegis/plans/2026-08-09-fd-ai-desktop-implementation.md"
+  ],
+  "scopeStatus": "Task 11A remains inside the approved T3 UI/local-state, Codex ordinary-runtime, FD identity, and Enterprise Agent ownership boundary; Task 12 was not entered.",
+  "compatStatus": "All local protocol, routing, projection, Skill, owner-lock, invalidation, and resume tests pass; exact live FD App Server execution is still unverified.",
+  "retirementStatus": "FdAgentKernel, FdResponsesClient, FdDeepSeekTextGeneration, and AI SDK dependencies remain transitional and must not be removed until the gated real test passes and the compatibility evidence is reviewed.",
+  "newRiskSignals": [
+    "The branch routes ordinary turns through Codex but is uncommitted and must not ship until the live gate runs.",
+    "The installed global codex command is unusable because @openai/codex-darwin-x64 is missing."
+  ],
+  "decision": "needs-verification"
+}

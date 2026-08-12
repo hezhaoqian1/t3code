@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import * as ServerConfig from "../config.ts";
-import { isRemoteReachableHost, resolveSessionCookieName } from "./utils.ts";
+import { resolveSessionCookieName } from "./utils.ts";
 
 export class EnvironmentAuthPolicy extends Context.Service<
   EnvironmentAuthPolicy,
@@ -15,34 +15,18 @@ export class EnvironmentAuthPolicy extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
-  const isRemoteReachable = isRemoteReachableHost(config.host);
-
-  const policy =
-    config.mode === "desktop"
-      ? isRemoteReachable
-        ? "remote-reachable"
-        : "desktop-managed-local"
-      : isRemoteReachable
-        ? "remote-reachable"
-        : "loopback-browser";
-
-  const bootstrapMethods: ServerAuthDescriptor["bootstrapMethods"] =
-    policy === "desktop-managed-local"
-      ? ["desktop-bootstrap"]
-      : config.mode === "desktop" && policy === "remote-reachable"
-        ? ["desktop-bootstrap", "one-time-token"]
-        : ["one-time-token"];
+  const bootstrapMethods: ServerAuthDescriptor["bootstrapMethods"] = config.desktopBootstrapToken
+    ? ["desktop-bootstrap"]
+    : [];
 
   const descriptor: ServerAuthDescriptor = {
-    policy,
+    policy: "desktop-managed-local",
     bootstrapMethods,
-    sessionMethods: ["browser-session-cookie", "bearer-access-token", "dpop-access-token"],
+    sessionMethods: ["browser-session-cookie", "bearer-access-token"],
     sessionCookieName: resolveSessionCookieName({
       mode: config.mode,
       port: config.port,
-      host: config.host,
       instanceKey: config.stateDir,
-      development: config.devUrl !== undefined,
     }),
   };
 

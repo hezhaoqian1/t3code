@@ -9,11 +9,7 @@ import * as EnvironmentRegistry from "../connection/registry.ts";
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import { AVAILABLE_CONNECTION_STATE } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
-import {
-  createAtomCommandScheduler,
-  createRuntimeCommand,
-  followStreamInEnvironment,
-} from "./runtime.ts";
+import { createRuntimeCommand, followStreamInEnvironment } from "./runtime.ts";
 
 export interface EnvironmentCatalogState {
   readonly isReady: boolean;
@@ -28,8 +24,6 @@ export const EMPTY_ENVIRONMENT_CATALOG_STATE: EnvironmentCatalogState = Object.f
 export function createEnvironmentCatalogAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry.EnvironmentRegistry | R, E>,
 ) {
-  const commandScheduler = createAtomCommandScheduler();
-  const serial = { mode: "serial" as const, key: () => "environment-catalog" };
   const catalogAtom = runtime.atom(
     Stream.unwrap(
       EnvironmentRegistry.EnvironmentRegistry.pipe(
@@ -77,39 +71,9 @@ export function createEnvironmentCatalogAtoms<R, E>(
     ),
   );
 
-  const register = createRuntimeCommand(runtime, {
-    label: "environment-catalog:register",
-    scheduler: commandScheduler,
-    concurrency: serial,
-    execute: (
-      target: Parameters<EnvironmentRegistry.EnvironmentRegistry["Service"]["register"]>[0],
-    ) =>
-      EnvironmentRegistry.EnvironmentRegistry.pipe(
-        Effect.flatMap((registry) => registry.register(target)),
-      ),
-  });
-  const remove = createRuntimeCommand(runtime, {
-    label: "environment-catalog:remove",
-    scheduler: commandScheduler,
-    concurrency: serial,
-    execute: (environmentId: EnvironmentIdType) =>
-      EnvironmentRegistry.EnvironmentRegistry.pipe(
-        Effect.flatMap((registry) => registry.remove(environmentId)),
-      ),
-  });
-  const removeRelayEnvironments = createRuntimeCommand(runtime, {
-    label: "environment-catalog:remove-relay-environments",
-    scheduler: commandScheduler,
-    concurrency: serial,
-    execute: (_input: void) =>
-      EnvironmentRegistry.EnvironmentRegistry.pipe(
-        Effect.flatMap((registry) => registry.removeRelayEnvironments()),
-      ),
-  });
   const retryNow = createRuntimeCommand(runtime, {
     label: "environment-catalog:retry-now",
-    scheduler: commandScheduler,
-    concurrency: serial,
+    concurrency: { mode: "singleFlight", key: (environmentId) => environmentId },
     execute: (environmentId: EnvironmentIdType) =>
       EnvironmentRegistry.EnvironmentRegistry.pipe(
         Effect.flatMap((registry) => registry.retryNow(environmentId)),
@@ -122,9 +86,6 @@ export function createEnvironmentCatalogAtoms<R, E>(
     networkStatusAtom,
     networkStatusValueAtom,
     stateAtom,
-    register,
-    remove,
-    removeRelayEnvironments,
     retryNow,
   };
 }

@@ -314,6 +314,7 @@ function mapProjectShellRow(
     id: row.projectId,
     title: row.title,
     workspaceRoot: row.workspaceRoot,
+    projectPurpose: row.projectPurpose ?? "workspace",
     repositoryIdentity,
     defaultModelSelection: row.defaultModelSelection,
     defaultThreadEnvMode: row.defaultThreadEnvMode,

@@ -24,6 +24,7 @@ export type ThreadActionMenuId =
 
 export interface ThreadActionMenuState {
   readonly branch: string | null;
+  readonly technicalActionsVisible: boolean;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
   readonly isSnoozed: boolean;
@@ -47,19 +48,19 @@ export function buildThreadActionMenuItems(
   state: ThreadActionMenuState,
 ): ReadonlyArray<ContextMenuItem<ThreadActionMenuId>> {
   return [
-    ...(state.branch
+    ...(state.technicalActionsVisible && state.branch
       ? [
           {
             id: "new-thread-on-branch" as const,
-            label: `New thread on ${state.branch}`,
+            label: `在 ${state.branch} 上新建任务`,
           },
         ]
       : []),
     ...(state.supports.pinning
       ? [
           state.isPinned
-            ? { id: "unpin" as const, label: "Unpin thread" }
-            : { id: "pin" as const, label: "Pin thread" },
+            ? { id: "unpin" as const, label: "取消置顶" }
+            : { id: "pin" as const, label: "置顶任务" },
         ]
       : []),
     // Both lifecycle actions stay available on pinned threads: settling
@@ -68,17 +69,17 @@ export function buildThreadActionMenuItems(
     ...(state.supports.settlement
       ? [
           state.isSettled
-            ? { id: "unsettle" as const, label: "Un-settle thread" }
-            : { id: "settle" as const, label: "Settle thread" },
+            ? { id: "unsettle" as const, label: "撤销归纳任务" }
+            : { id: "settle" as const, label: "归纳任务" },
         ]
       : []),
     ...(state.supports.snooze
       ? [
           state.isSnoozed
-            ? { id: "unsnooze" as const, label: "Wake thread" }
+            ? { id: "unsnooze" as const, label: "唤醒任务" }
             : {
                 id: "snooze" as const,
-                label: "Snooze",
+                label: "稍后提醒",
                 disabled: !state.canSnoozeNow,
                 children: state.snoozePresets.map((preset) => ({
                   id: `snooze:${preset.id}` as const,
@@ -87,19 +88,23 @@ export function buildThreadActionMenuItems(
               },
         ]
       : []),
-    { id: "rename", label: "Rename thread" },
+    { id: "rename", label: "重命名任务" },
     ...(state.supports.titleRegeneration
       ? [
           {
             id: "regenerate-title" as const,
-            label: state.isRegeneratingTitle ? "Regenerating…" : "Regenerate title",
+            label: state.isRegeneratingTitle ? "正在生成标题…" : "重新生成标题",
             disabled: state.isRegeneratingTitle,
           },
         ]
       : []),
-    { id: "mark-unread", label: "Mark unread" },
-    { id: "copy-path", label: "Copy path", icon: "copy" },
-    ...(state.branch ? [{ id: "copy-branch" as const, label: "Copy branch", icon: "copy" }] : []),
-    { id: "delete", label: "Delete", destructive: true, icon: "trash" },
+    { id: "mark-unread", label: "标为未读" },
+    ...(state.technicalActionsVisible
+      ? [{ id: "copy-path" as const, label: "复制路径", icon: "copy" as const }]
+      : []),
+    ...(state.technicalActionsVisible && state.branch
+      ? [{ id: "copy-branch" as const, label: "复制分支", icon: "copy" as const }]
+      : []),
+    { id: "delete", label: "删除任务", destructive: true, icon: "trash" },
   ];
 }

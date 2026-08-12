@@ -1,7 +1,6 @@
 import { type CSSProperties, memo } from "react";
 import { type ProviderDriverKind } from "@t3tools/contracts";
 
-import { PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import { cn } from "~/lib/utils";
 
 export function providerInstanceInitials(label: string): string {
@@ -26,7 +25,6 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   statusDotClassName?: string;
   indicatorBackground?: string;
 }) {
-  const Icon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
   const indicatorBackground = props.indicatorBackground ?? "var(--card)";
   const accentStyle = props.accentColor
     ? ({ "--provider-accent": props.accentColor } as CSSProperties)
@@ -42,13 +40,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       style={accentStyle}
       data-provider-accent-color={props.accentColor}
     >
-      {Icon ? (
-        <Icon className={cn("size-5 shrink-0", props.iconClassName)} aria-hidden />
-      ) : (
-        <span className={cn("text-[10px] font-semibold leading-none", props.iconClassName)}>
-          {providerInstanceInitials(props.displayName)}
-        </span>
-      )}
+      <span className={cn("text-[10px] font-semibold leading-none", props.iconClassName)}>
+        {providerInstanceInitials(props.displayName)}
+      </span>
       {props.statusDotClassName ? (
         <span
           className={cn(

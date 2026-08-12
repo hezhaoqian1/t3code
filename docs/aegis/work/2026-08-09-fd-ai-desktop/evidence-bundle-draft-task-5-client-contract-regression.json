@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-5-client-contract-regression",
+  "type": "test",
+  "source": "vp focused Task 5 tests and package typechecks",
+  "summary": "24 focused files and 236 tests passed; contracts, client-runtime, Desktop, and server typechecks passed. Web diagnostics remain only in explicitly queued Task 6 renderer retirement callers.",
+  "verifier": "Vitest 4.1.9 and tsgo exit code 0"
+}

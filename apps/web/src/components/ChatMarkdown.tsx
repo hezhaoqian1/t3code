@@ -1351,7 +1351,7 @@ function ChatMarkdown({
           AsyncResult.failure<void, BrowserPreviewUnavailableError>(
             Cause.fail(
               new BrowserPreviewUnavailableError({
-                message: "Environment is not connected.",
+                message: "The local service is not connected.",
               }),
             ),
           ),

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-2-release-smoke",
+  "type": "test",
+  "source": "pnpm exec node scripts/release-smoke.ts",
+  "summary": "Desktop-only release manifest fixture regenerated its lockfile and all release smoke checks passed.",
+  "verifier": "release-smoke exit code 0"
+}

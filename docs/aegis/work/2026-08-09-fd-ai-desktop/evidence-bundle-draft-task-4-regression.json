@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-4-regression",
+  "type": "test",
+  "source": "latest controller verification",
+  "summary": "Latest direct verification: server.test.ts 93/93; 15 focused files 159/159; t3, contracts, desktop, and scripts typechecks pass. One over-parallelized subscribeShell timeout was isolated: the test passed in 240ms and the full server file passed 93/93, so no production timing patch was added.",
+  "verifier": "codex-controller"
+}

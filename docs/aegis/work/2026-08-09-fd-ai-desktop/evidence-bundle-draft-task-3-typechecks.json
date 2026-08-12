@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-3-typechecks",
+  "type": "typecheck",
+  "source": "vp run Desktop, contracts, and client-runtime typechecks",
+  "summary": "Desktop and contracts typechecks passed; client-runtime typecheck passed with one pre-existing non-blocking Effect suggestion.",
+  "verifier": "tsgo exit code 0 for all three packages"
+}

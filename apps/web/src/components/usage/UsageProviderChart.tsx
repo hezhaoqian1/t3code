@@ -1,7 +1,7 @@
 import type { UsageProviderKind } from "@t3tools/contracts";
 import { useCallback, useMemo, useRef, useState } from "react";
 
-import type { DailyTotals } from "../../usage/usageMerge";
+import type { DailyTotals } from "../../usage/usageSummary";
 import { formatDayShort, formatTokens, formatUsd } from "../../usage/usageFormat";
 import { PROVIDER_COLOR, PROVIDER_LABEL, PROVIDER_MARK, PROVIDER_ORDER } from "./usageProviders";
 
@@ -277,7 +277,7 @@ export function UsageProviderChart({ days, daily, metric }: UsageProviderChartPr
             viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
             preserveAspectRatio="none"
             role="img"
-            aria-label={`Daily ${metric === "tokens" ? "processed tokens" : "cost"} by provider`}
+            aria-label={`按服务统计的每日${metric === "tokens" ? "已处理 Token" : "成本"}`}
           >
             {ticks.map((tick) => {
               const y = toY(tick);
@@ -351,7 +351,7 @@ export function UsageProviderChart({ days, daily, metric }: UsageProviderChartPr
                 );
               })}
               <div className="mt-1 flex items-center justify-between gap-3 border-t border-border pt-1">
-                <span className="text-muted-foreground">Total</span>
+                <span className="text-muted-foreground">合计</span>
                 <span className="text-foreground tabular-nums">
                   {format(hoveredColumn?.total ?? 0)}
                 </span>

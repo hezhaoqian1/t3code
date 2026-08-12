@@ -2,7 +2,7 @@ import Mime from "@effect/platform-node/Mime";
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  EnvironmentHttpApi,
+  LocalEnvironmentHttpApi,
 } from "@t3tools/contracts";
 import { isDevProxiedPath } from "@t3tools/shared/devProxy";
 import { decodeOtlpTraceRecords } from "@t3tools/shared/observability";
@@ -30,7 +30,6 @@ import * as ServerConfig from "./config.ts";
 import { ASSET_ROUTE_PREFIX, resolveAsset } from "./assets/AssetAccess.ts";
 import * as BrowserTraceCollector from "./observability/BrowserTraceCollector.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import { traceRelayRequest } from "./cloud/traceRelayRequest.ts";
 import {
   annotateEnvironmentRequest,
   failEnvironmentScopeRequired,
@@ -41,8 +40,7 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from "./httpCors.ts";
 
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
-const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
-const DESKTOP_RENDERER_ORIGINS = ["t3code://app", "t3code-dev://app"];
+const DESKTOP_RENDERER_ORIGINS = ["fdai://app", "fdai-dev://app"];
 export const httpCompressionLayer = HttpRouter.middleware(HttpMiddleware.compression(), {
   global: true,
 });
@@ -50,21 +48,13 @@ export const httpCompressionLayer = HttpRouter.middleware(HttpMiddleware.compres
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;
-    const devOrigin = config.devUrl?.origin;
-    // Dev uses credentialed requests from Vite or the Electron custom origin, so both must be
-    // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
-    //
-    // T3CODE_DEV_ALLOWED_ORIGINS covers dev servers reached from a second
-    // origin — a tailnet name, a LAN IP, a phone. Browser dev normally proxies
-    // through Vite and is same-origin (no preflight at all), so this is a
-    // safety net for the desktop renderer and any direct-to-backend caller.
+    const devOrigin =
+      config.devUrl && ServerConfig.isLoopbackHttpUrl(config.devUrl)
+        ? config.devUrl.origin
+        : undefined;
     return HttpRouter.cors({
-      ...(devOrigin
-        ? {
-            allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS, ...config.devAllowedOrigins],
-            credentials: true,
-          }
-        : {}),
+      allowedOrigins: [...DESKTOP_RENDERER_ORIGINS, ...(devOrigin ? [devOrigin] : [])],
+      credentials: true,
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
       maxAge: 600,
@@ -73,11 +63,7 @@ export const browserApiCorsLayer = Layer.unwrap(
 );
 
 export function isLoopbackHostname(hostname: string): boolean {
-  const normalizedHostname = hostname
-    .trim()
-    .toLowerCase()
-    .replace(/^\[(.*)\]$/, "$1");
-  return LOOPBACK_HOSTNAMES.has(normalizedHostname);
+  return ServerConfig.isLoopbackHostname(hostname);
 }
 
 export function resolveDevRedirectUrl(devUrl: URL, requestUrl: URL): string {
@@ -108,7 +94,7 @@ const authenticateRawRouteWithScope = (
   });
 
 export const serverEnvironmentHttpApiLayer = HttpApiBuilder.group(
-  EnvironmentHttpApi,
+  LocalEnvironmentHttpApi,
   "metadata",
   Effect.fnUntraced(function* (handlers) {
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -117,7 +103,7 @@ export const serverEnvironmentHttpApiLayer = HttpApiBuilder.group(
       Effect.fn("environment.metadata.descriptor")(function* (args) {
         yield* annotateEnvironmentRequest(args.endpoint.name);
         return yield* serverEnvironment.getDescriptor;
-      }, traceRelayRequest),
+      }),
     );
   }),
 );
@@ -229,18 +215,20 @@ export const staticAndDevRouteLayer = HttpRouter.add(
     }
 
     const config = yield* ServerConfig.ServerConfig;
-    if (config.devUrl && isDevProxiedPath(url.value.pathname)) {
+    const devUrl =
+      config.devUrl && ServerConfig.isLoopbackHttpUrl(config.devUrl) ? config.devUrl : undefined;
+    if (devUrl && isDevProxiedPath(url.value.pathname)) {
       return HttpServerResponse.text("Not Found", { status: 404 });
     }
 
-    if (config.devUrl && isLoopbackHostname(url.value.hostname)) {
-      return HttpServerResponse.redirect(resolveDevRedirectUrl(config.devUrl, url.value), {
+    if (devUrl && isLoopbackHostname(url.value.hostname)) {
+      return HttpServerResponse.redirect(resolveDevRedirectUrl(devUrl, url.value), {
         status: 302,
       });
     }
 
     const staticDir =
-      config.staticDir ?? (config.devUrl ? yield* ServerConfig.resolveStaticDir() : undefined);
+      config.staticDir ?? (devUrl ? yield* ServerConfig.resolveStaticDir() : undefined);
     if (!staticDir) {
       return HttpServerResponse.text("No static directory configured and no dev URL set.", {
         status: 503,

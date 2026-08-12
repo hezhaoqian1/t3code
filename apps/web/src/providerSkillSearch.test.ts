@@ -56,4 +56,16 @@ describe("searchProviderSkills", () => {
 
     expect(searchProviderSkills(skills, "ui").map((skill) => skill.name)).toEqual([]);
   });
+
+  it("keeps managed FD Skills out of the native skill menu", () => {
+    const skills = [
+      makeSkill({ name: "fd-database", displayName: "管理部数据查询", scope: "fd-managed" }),
+      makeSkill({ name: "local-reports", displayName: "Local Reports" }),
+    ];
+
+    expect(searchProviderSkills(skills, "fd").map((skill) => skill.name)).toEqual([]);
+    expect(searchProviderSkills(skills, "reports").map((skill) => skill.name)).toEqual([
+      "local-reports",
+    ]);
+  });
 });

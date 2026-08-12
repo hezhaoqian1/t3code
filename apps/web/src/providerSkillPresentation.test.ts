@@ -28,7 +28,7 @@ describe("formatProviderSkillInstallSource", () => {
   it("marks plugin-backed skills as app installs", () => {
     expect(
       formatProviderSkillInstallSource({
-        path: "/Users/julius/.codex/plugins/cache/openai-curated/github/skills/gh-fix-ci/SKILL.md",
+        path: "/Users/julius/.agents/plugins/cache/curated/github/skills/gh-fix-ci/SKILL.md",
         scope: "user",
       }),
     ).toBe("App");
@@ -43,13 +43,13 @@ describe("formatProviderSkillInstallSource", () => {
     ).toBe("Personal");
     expect(
       formatProviderSkillInstallSource({
-        path: "/usr/local/share/codex/skills/imagegen/SKILL.md",
+        path: "/usr/local/share/agents/skills/imagegen/SKILL.md",
         scope: "system",
       }),
     ).toBe("System");
     expect(
       formatProviderSkillInstallSource({
-        path: "/workspace/.codex/skills/review-follow-up/SKILL.md",
+        path: "/workspace/.agents/skills/review-follow-up/SKILL.md",
         scope: "project",
       }),
     ).toBe("Project");

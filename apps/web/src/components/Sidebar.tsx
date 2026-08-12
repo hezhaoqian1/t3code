@@ -33,13 +33,16 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
+  ArchiveIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronRightIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   CircleDashedIcon,
   ClockIcon,
   FolderIcon,
+  FolderOpenIcon,
   FolderPlusIcon,
   GitBranchIcon,
   EllipsisIcon,
@@ -47,9 +50,9 @@ import {
   PinIcon,
   PlusIcon,
   SearchIcon,
-  ServerIcon,
   SquarePenIcon,
   TerminalIcon,
+  Trash2Icon,
   Undo2Icon,
   XIcon,
 } from "lucide-react";
@@ -64,7 +67,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { useParams, useRouter } from "@tanstack/react-router";
+import { useLocation, useParams, useRouter } from "@tanstack/react-router";
 
 import {
   isAtomCommandInterrupted,
@@ -82,7 +85,6 @@ import {
 } from "../keybindings";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
 import { useOpenPrLink } from "../lib/openPullRequestLink";
@@ -101,8 +103,8 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useNowMinute } from "../hooks/useNowMinute";
-import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useThreadShells } from "../state/entities";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { usePrimaryProjects, usePrimaryThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
@@ -153,17 +155,27 @@ import { ProjectFavicon } from "./ProjectFavicon";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
-import { primaryServerProvidersAtom } from "../state/server";
+import { primaryServerProvidersAtom, primaryServerWelcomeAtom } from "../state/server";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuRadioGroup,
+  MenuRadioItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "./ui/menu";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { useComposerDraftStore } from "../composerDraftStore";
+import { isGeneratedTaskWorkspaceRoot, isOfficeWorkspaceShellContext } from "../officeMode";
+import { projectEnvironment } from "../state/projects";
 
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
@@ -171,8 +183,12 @@ const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
 
 function compactSidebarTimeLabel(label: string): string {
-  if (label === "just now") return "now";
-  return label.endsWith(" ago") ? label.slice(0, -4) : label;
+  if (label === "just now") return "刚刚";
+  const compact = label.endsWith(" ago") ? label.slice(0, -4) : label;
+  const match = /^(\d+)([mhdw])$/.exec(compact);
+  if (!match) return compact;
+  const [, amount, unit] = match;
+  return `${amount}${unit === "m" ? "分钟" : unit === "h" ? "小时" : unit === "d" ? "天" : "周"}`;
 }
 
 function threadTimeLabel(thread: SidebarThreadSummary): string {
@@ -230,18 +246,17 @@ function SidebarThreadTooltip({
   thread,
   projectTitle,
   projectCwd,
-  environmentLabel,
   driverKind,
   modelInstanceId,
   modelLabel,
   branchMismatch,
   terminalStatus,
   terminalProcessCount,
+  officeMode,
 }: {
   thread: SidebarThreadSummary;
   projectTitle: string | null;
   projectCwd: string | null;
-  environmentLabel: string | null;
   driverKind: ProviderInstanceEntry["driverKind"] | null;
   modelInstanceId: string;
   modelLabel: string;
@@ -251,6 +266,7 @@ function SidebarThreadTooltip({
   } | null;
   terminalStatus: TerminalStatusIndicator | null;
   terminalProcessCount: number;
+  officeMode: boolean;
 }) {
   return (
     <TooltipPopup
@@ -265,7 +281,7 @@ function SidebarThreadTooltip({
           {thread.title}
         </div>
         <div className="grid gap-1.5 pl-0.5 text-xs text-muted-foreground">
-          {projectTitle ? (
+          {!officeMode && projectTitle ? (
             <div className="flex min-w-0 items-center gap-2">
               <ProjectFavicon
                 environmentId={thread.environmentId}
@@ -275,19 +291,13 @@ function SidebarThreadTooltip({
               <div className="min-w-0 truncate text-foreground/75">{projectTitle}</div>
             </div>
           ) : null}
-          {environmentLabel ? (
-            <div className="flex min-w-0 items-center gap-2">
-              <ServerIcon className="size-3 shrink-0 stroke-muted-foreground" />
-              <div className="min-w-0 truncate text-foreground/75">{environmentLabel}</div>
-            </div>
-          ) : null}
-          {thread.branch ? (
+          {!officeMode && thread.branch ? (
             <div className="flex min-w-0 items-center gap-2">
               <GitBranchIcon className="size-3 shrink-0 stroke-muted-foreground" />
               <div className="min-w-0 truncate text-foreground/75">{thread.branch}</div>
             </div>
           ) : null}
-          {branchMismatch ? (
+          {!officeMode && branchMismatch ? (
             <div className="flex min-w-0 items-start gap-2 text-warning">
               <CircleAlertIcon aria-hidden className="mt-0.5 size-3 shrink-0 stroke-current" />
               <div className="min-w-0 flex-1 wrap-break-word leading-5">
@@ -295,7 +305,7 @@ function SidebarThreadTooltip({
               </div>
             </div>
           ) : null}
-          {driverKind ? (
+          {!officeMode && driverKind ? (
             <div className="flex min-w-0 items-center gap-2">
               <ProviderInstanceIcon
                 driverKind={driverKind}
@@ -305,7 +315,7 @@ function SidebarThreadTooltip({
               <div className="min-w-0 truncate text-foreground/75">{modelLabel}</div>
             </div>
           ) : null}
-          {terminalStatus ? (
+          {!officeMode && terminalStatus ? (
             <div className="flex min-w-0 items-center gap-2">
               <TerminalIcon
                 aria-hidden
@@ -319,7 +329,7 @@ function SidebarThreadTooltip({
           {thread.session?.lastError ? (
             <div className="flex min-w-0 items-center gap-2 text-red-600 dark:text-red-400">
               <CircleAlertIcon className="size-3 shrink-0 stroke-current" />
-              <div className="min-w-0 truncate">Error occurred</div>
+              <div className="min-w-0 truncate">发生错误</div>
             </div>
           ) : null}
         </div>
@@ -352,7 +362,7 @@ function SnoozePopoverButton(props: {
         render={
           <button
             type="button"
-            aria-label="Snooze thread"
+            aria-label="稍后提醒"
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
             className="inline-flex h-full cursor-pointer items-center gap-0.5 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
@@ -435,10 +445,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   wokeAt: string | null;
   isActive: boolean;
   jumpLabel: string | null;
-  currentEnvironmentId: string | null;
-  environmentLabel: string | null;
   projectCwd: string | null;
   projectTitle: string | null;
+  officeMode: boolean;
+  nested?: boolean;
+  showProjectIcon?: boolean;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   timestampFormat: TimestampFormat;
   onThreadClick: (event: ReactMouseEvent, threadRef: ScopedThreadRef) => void;
@@ -497,7 +508,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const gitCwd = thread.worktreePath ?? props.projectCwd;
   const gitStatus = useEnvironmentQuery(
-    (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    !props.officeMode && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -546,7 +557,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const topStatus =
     status === "working"
       ? {
-          label: "Working",
+          label: "处理中",
           icon: "working" as const,
           // No shimmer: a label that animates forever is noise in a sidebar
           // full of them (and repaints every vsync on high-refresh displays).
@@ -559,37 +570,37 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         ? {
             // Monitoring is calm background presence, not active progress
             // (monitoring-pill D6), so it keeps the label at full strength.
-            label: "Monitoring",
+            label: "检查中",
             icon: null,
             className: "text-sky-600 dark:text-sky-400",
           }
         : status === "approval"
           ? {
-              label: "Approval",
+              label: "待确认",
               icon: null,
               className: "text-amber-700 dark:text-amber-300",
             }
           : status === "input"
             ? {
-                label: "Input",
+                label: "等待回复",
                 icon: null,
                 className: "text-indigo-600 dark:text-indigo-300",
               }
             : status === "failed"
               ? {
-                  label: "Failed",
+                  label: "失败",
                   icon: null,
                   className: "text-red-700 dark:text-red-300",
                 }
               : isWoke
                 ? {
-                    label: "Woke",
+                    label: "有新进展",
                     icon: "woke" as const,
                     className: "text-amber-700 dark:text-amber-300",
                   }
                 : isUnread
                   ? {
-                      label: "Done",
+                      label: "已完成",
                       icon: "done" as const,
                       className: "text-emerald-700 dark:text-emerald-300",
                     }
@@ -620,21 +631,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     ? getTriggerDisplayModelLabel(selectedModel)
     : thread.modelSelection.model;
 
-  const isRemote =
-    props.currentEnvironmentId !== null && thread.environmentId !== props.currentEnvironmentId;
-
   const detailsTooltip = (
     <SidebarThreadTooltip
       thread={thread}
       projectTitle={props.projectTitle}
       projectCwd={props.projectCwd}
-      environmentLabel={props.environmentLabel}
       driverKind={driverKind}
       modelInstanceId={modelInstanceId}
       modelLabel={modelLabel}
       branchMismatch={branchMismatch}
       terminalStatus={terminalStatus}
       terminalProcessCount={terminalProcessCount}
+      officeMode={props.officeMode}
     />
   );
 
@@ -788,7 +796,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     <input
       autoFocus
       value={renamingTitle}
-      aria-label="Thread title"
+      aria-label="任务标题"
       onChange={(event) => onRenameTitleChange(event.target.value)}
       onFocus={(event) => event.currentTarget.select()}
       onKeyDown={handleRenameKeyDown}
@@ -814,12 +822,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     : "text-foreground/90",
             )
           : cn(
-              "truncate group-hover/sidebar-row:text-foreground",
-              props.isActive || isWoke
-                ? "text-foreground"
-                : isUnread
-                  ? "text-muted-foreground"
-                  : "text-secondary-label/70",
+              "truncate text-sidebar-foreground group-hover/sidebar-row:text-foreground",
+              props.isActive || isWoke || isUnread
+                ? "font-medium text-foreground"
+                : "font-normal text-sidebar-foreground/90",
             ),
         isRegeneratingTitle && "opacity-[0.55]",
       )}
@@ -873,7 +879,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 tabIndex={0}
                 data-testid="sidebar-row-slim"
                 aria-busy={isRegeneratingTitle || undefined}
-                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                className={cn(
+                  rowSurfaceClassName,
+                  "flex h-8 items-center gap-2 px-2.5",
+                  props.nested && "ps-8",
+                )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -883,25 +893,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           >
             {/* Settled history recedes: dimmed favicon at rest, restored on
               hover so the tail stays scannable when you're hunting. */}
-            <span
-              className={cn(
-                "shrink-0 transition-opacity",
-                !props.isActive &&
-                  "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
-              )}
-            >
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                className="size-4"
-                fallbackIcon={MessageSquareIcon}
-              />
-            </span>
+            {props.showProjectIcon === false ? null : (
+              <span
+                className={cn(
+                  "shrink-0 transition-opacity",
+                  !props.isActive &&
+                    "opacity-55 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
+                )}
+              >
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  className="size-4"
+                  fallbackIcon={MessageSquareIcon}
+                />
+              </span>
+            )}
             {title}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
-                Regenerating title
+                正在生成标题
               </span>
             ) : null}
             {/* The PR badge stays outside the hover-fading slot: it must
@@ -911,7 +923,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
               <span
                 className={cn(
-                  "inline-flex justify-end tabular-nums text-secondary-label transition-opacity",
+                  "inline-flex justify-end tabular-nums text-sidebar-muted-foreground transition-opacity",
                   !isWoke && "group-hover/sidebar-row:opacity-0",
                 )}
               >
@@ -926,13 +938,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   // merged while snoozed); the signal must survive the trip.
                   <button
                     type="button"
-                    aria-label="Dismiss Woke notification"
-                    title="Dismiss Woke notification"
+                    aria-label="忽略唤醒通知"
+                    title="忽略唤醒通知"
                     onClick={handleAcknowledgeWokeClick}
                     className="inline-flex cursor-pointer items-center gap-1 rounded-sm text-xs font-medium text-amber-700 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring dark:text-amber-300"
                   >
                     <AlarmClockIcon aria-hidden className="size-3" />
-                    <span role="status">Woke</span>
+                    <span role="status">已唤醒</span>
                   </button>
                 ) : (
                   <span className="text-xs">
@@ -946,7 +958,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 !props.snoozeSupported ? null : (
                   <button
                     type="button"
-                    aria-label="Wake thread now"
+                    aria-label="立即唤醒任务"
                     onClick={handleUnsnoozeClick}
                     className={cn(
                       "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
@@ -959,10 +971,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : !props.settlementSupported ? null : variantAction === "unsettle" ? (
                 <button
                   type="button"
-                  aria-label="Un-settle thread"
+                  aria-label="撤销归纳"
                   onClick={handleUnsettleClick}
                   className={cn(
-                    "pointer-events-none absolute inset-y-0 right-0 -mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
+                    "pointer-events-none absolute right-0 top-1/2 inline-flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border border-sidebar-foreground/25 bg-sidebar-control-surface text-sidebar-foreground opacity-0 shadow-sm transition-[color,background-color,border-color,opacity] hover:border-sidebar-foreground/45 hover:bg-background focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
                     isWoke && "group-hover/sidebar-row:static",
                   )}
                 >
@@ -971,10 +983,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <button
                   type="button"
-                  aria-label="Settle thread"
+                  aria-label="归纳任务"
                   onClick={handleSettleClick}
                   className={cn(
-                    "pointer-events-none absolute inset-y-0 right-0 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-2 text-xs text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
+                    "pointer-events-none absolute right-0 top-1/2 inline-flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border border-sidebar-foreground/25 bg-sidebar-control-surface text-sidebar-foreground opacity-0 shadow-sm transition-[color,background-color,border-color,opacity] hover:border-sidebar-foreground/45 hover:bg-background focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100",
                     isWoke && "group-hover/sidebar-row:static",
                   )}
                 >
@@ -1050,8 +1062,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 props.pinningSupported ? (
                   <button
                     type="button"
-                    aria-label="Unpin thread"
-                    title="Unpin thread"
+                    aria-label="取消置顶"
+                    title="取消置顶"
                     onClick={handleUnpinClick}
                     className="inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                   >
@@ -1059,7 +1071,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   </button>
                 ) : (
                   <PinIcon
-                    aria-label="Pinned"
+                    aria-label="已置顶"
                     role="img"
                     className="size-3 shrink-0 text-muted-foreground/65"
                   />
@@ -1086,8 +1098,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     isWokeStatus ? (
                       <button
                         type="button"
-                        aria-label="Dismiss Woke notification"
-                        title="Dismiss Woke notification"
+                        aria-label="忽略唤醒提醒"
+                        title="忽略唤醒提醒"
                         onClick={handleAcknowledgeWokeClick}
                         className={cn(
                           "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
@@ -1147,12 +1159,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     {props.settlementSupported ? (
                       <button
                         type="button"
-                        aria-label="Settle thread"
+                        aria-label="归纳任务"
                         onClick={handleSettleClick}
-                        className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                        className="inline-flex h-6 cursor-pointer items-center gap-1 rounded-md border border-sidebar-foreground/25 bg-sidebar-control-surface px-2 text-xs text-sidebar-foreground shadow-sm hover:border-sidebar-foreground/45 hover:bg-background"
                       >
                         <CheckIcon className="size-3.5" />
-                        Settle
+                        归纳
                       </button>
                     ) : null}
                   </span>
@@ -1163,7 +1175,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {title}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
-                  Regenerating title
+                  正在生成标题
                 </span>
               ) : null}
             </div>
@@ -1171,14 +1183,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               {/* Always the branch. The plan step used to take this slot while
                   working, but it truncated to a half-sentence and dropped the
                   branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
+              {!props.officeMode && thread.branch ? (
                 <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
               ) : (
                 <span className="flex-1" />
               )}
-              {terminalStatusIcon}
-              {prBadge}
-              {diff ? (
+              {!props.officeMode ? terminalStatusIcon : null}
+              {!props.officeMode ? prBadge : null}
+              {!props.officeMode && diff ? (
                 <span className="shrink-0 font-mono">
                   <span className="text-emerald-600 dark:text-emerald-400">+{diff.insertions}</span>{" "}
                   <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
@@ -1188,12 +1200,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 aria-hidden
                 className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
               >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <ServerIcon aria-hidden className="size-3.5" />
-                  </span>
-                ) : null}
-                {driverKind ? (
+                {!props.officeMode && driverKind ? (
                   <span className="inline-flex shrink-0 items-center opacity-60">
                     <ProviderInstanceIcon
                       driverKind={driverKind}
@@ -1226,7 +1233,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   thread: SidebarThreadSummary;
   projectCwd: string | null;
   projectTitle: string | null;
-  environmentLabel: string | null;
+  officeMode: boolean;
   providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
   isHighlighted: boolean;
   isRouteActive: boolean;
@@ -1239,7 +1246,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   // and the hover card is how you disambiguate identically-titled results.
   const gitCwd = thread.worktreePath ?? props.projectCwd;
   const gitStatus = useEnvironmentQuery(
-    (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    !props.officeMode && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: thread.environmentId,
           input: { cwd: gitCwd },
@@ -1309,13 +1316,13 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
           thread={thread}
           projectTitle={props.projectTitle}
           projectCwd={props.projectCwd}
-          environmentLabel={props.environmentLabel}
           driverKind={driverKind}
           modelInstanceId={modelInstanceId}
           modelLabel={modelLabel}
           branchMismatch={branchMismatch}
           terminalStatus={terminalStatus}
           terminalProcessCount={runningTerminalIds.length}
+          officeMode={props.officeMode}
         />
       </Tooltip>
     </li>
@@ -1323,9 +1330,11 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
 });
 
 export default function Sidebar() {
-  const projects = useProjects();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const projects = usePrimaryProjects();
+  const primaryServerWelcome = useAtomValue(primaryServerWelcomeAtom);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
-  const threads = useThreadShells();
+  const threads = usePrimaryThreadShells();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1347,11 +1356,12 @@ export default function Sidebar() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
       toastManager.add({
         type: "success",
-        title: "Path copied",
+        title: "路径已复制",
         description: path,
       });
     },
@@ -1359,7 +1369,7 @@ export default function Sidebar() {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Failed to copy path",
+          title: "复制路径失败",
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
@@ -1370,7 +1380,7 @@ export default function Sidebar() {
     onCopy: ({ branch }) => {
       toastManager.add({
         type: "success",
-        title: "Branch copied",
+        title: "分支已复制",
         description: branch,
       });
     },
@@ -1378,7 +1388,7 @@ export default function Sidebar() {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Failed to copy branch",
+          title: "复制分支失败",
           description: error instanceof Error ? error.message : "An error occurred.",
         }),
       );
@@ -1386,12 +1396,30 @@ export default function Sidebar() {
   });
   const [projectScopeMenuOpen, setProjectScopeMenuOpen] = useState(false);
   const newThreadContext = useHandleNewThread();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const activeContextProjectId =
+    newThreadContext.activeThread?.projectId ?? newThreadContext.activeDraftThread?.projectId;
+  const activeContextEnvironmentId =
+    newThreadContext.activeThread?.environmentId ??
+    newThreadContext.activeDraftThread?.environmentId;
+  const activeContextProjectPurpose = projects.find(
+    (project) =>
+      project.id === activeContextProjectId && project.environmentId === activeContextEnvironmentId,
+  )?.projectPurpose;
+  const activeOfficeMode =
+    isOfficeWorkspaceShellContext({
+      isDesktop: isElectron,
+      pathname,
+      projectId: activeContextProjectId,
+      projectEnvironmentId: activeContextEnvironmentId,
+      projectPurpose: activeContextProjectPurpose,
+      bootstrapProjectId: primaryServerWelcome?.bootstrapProjectId,
+      bootstrapEnvironmentId: primaryServerWelcome?.environment.environmentId,
+    }) || newThreadContext.activeDraftThread?.taskArea === true;
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
     [],
   );
-  const { environments } = useEnvironments();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
@@ -1406,7 +1434,7 @@ export default function Sidebar() {
   );
   const routeTarget = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
+    select: (params) => resolveThreadRouteTarget(params, primaryEnvironmentId),
   });
   const routeDraftThread = useComposerDraftStore((store) =>
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,
@@ -1424,13 +1452,6 @@ export default function Sidebar() {
   const routeThreadKeyRef = useRef(routeThreadKey);
   routeThreadKeyRef.current = routeThreadKey;
 
-  const environmentLabelById = useMemo(
-    () =>
-      new Map(
-        environments.map((environment) => [environment.environmentId, environment.label] as const),
-      ),
-    [environments],
-  );
   const orderedProjects = useMemo(
     () =>
       orderItemsByPreferredIds({
@@ -1444,20 +1465,35 @@ export default function Sidebar() {
       }),
     [projectOrder, projects],
   );
+  const navigationProjects = useMemo(
+    () =>
+      projects.filter(
+        (project) =>
+          project.projectPurpose !== "task" &&
+          !isGeneratedTaskWorkspaceRoot(project.workspaceRoot) &&
+          !(
+            isElectron &&
+            project.id === primaryServerWelcome?.bootstrapProjectId &&
+            project.environmentId === primaryServerWelcome.environment.environmentId
+          ),
+      ),
+    [primaryServerWelcome, projects],
+  );
   const unsortedProjectGroups = useMemo(
     () =>
       buildSidebarProjectSnapshots({
-        projects: sidebarProjectSortOrder === "manual" ? orderedProjects : projects,
+        projects:
+          sidebarProjectSortOrder === "manual"
+            ? orderedProjects.filter((project) => navigationProjects.includes(project))
+            : navigationProjects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
-        resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
       }),
     [
-      environmentLabelById,
       orderedProjects,
+      navigationProjects,
       primaryEnvironmentId,
       projectGroupingSettings,
-      projects,
       sidebarProjectSortOrder,
     ],
   );
@@ -1495,6 +1531,22 @@ export default function Sidebar() {
         ),
       ),
     [projectGroups],
+  );
+  const taskProjectKeys = useMemo(
+    () =>
+      new Set(
+        projects
+          .filter(
+            (project) =>
+              project.projectPurpose === "task" ||
+              isGeneratedTaskWorkspaceRoot(project.workspaceRoot) ||
+              (isElectron &&
+                project.id === primaryServerWelcome?.bootstrapProjectId &&
+                project.environmentId === primaryServerWelcome.environment.environmentId),
+          )
+          .map((project) => `${project.environmentId}:${project.id}`),
+      ),
+    [primaryServerWelcome, projects],
   );
 
   // now is quantized to the minute so effectiveSettled memoization doesn't
@@ -1684,6 +1736,36 @@ export default function Sidebar() {
     () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
     [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
   );
+  // The main navigation only contains work that is still actionable. Settled
+  // history remains searchable, but lives behind its own archive shelf.
+  const mainThreads = useMemo(
+    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads],
+    [activeThreads, pinnedThreads, snoozedThreads],
+  );
+  const taskThreads = useMemo(
+    () =>
+      mainThreads.filter((thread) =>
+        taskProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+      ),
+    [mainThreads, taskProjectKeys],
+  );
+  const workspaceThreadsByProjectKey = useMemo(() => {
+    const mapping = new Map<string, EnvironmentThreadShell[]>();
+    for (const projectGroup of projectGroups) {
+      const memberKeys = new Set(
+        projectGroup.memberProjectRefs.map(
+          (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
+        ),
+      );
+      mapping.set(
+        projectGroup.projectKey,
+        mainThreads.filter((thread) =>
+          memberKeys.has(`${thread.environmentId}:${thread.projectId}`),
+        ),
+      );
+    }
+    return mapping;
+  }, [mainThreads, projectGroups]);
   const threadSearchResults = useMemo(
     () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
     [searchableThreads, threadSearchQuery],
@@ -1754,7 +1836,7 @@ export default function Sidebar() {
     () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
     [],
   );
-  const [settledShelfExpanded, setSettledShelfExpanded] = useState(true);
+  const [settledShelfExpanded, setSettledShelfExpanded] = useState(false);
   const toggleSettledShelf = useCallback(() => setSettledShelfExpanded((value) => !value), []);
   const renderedSettledThreads = useMemo(() => {
     if (settledShelfExpanded) return visibleSettledThreads;
@@ -1786,8 +1868,13 @@ export default function Sidebar() {
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...taskThreads,
+      ...projectGroups.flatMap(
+        (projectGroup) => workspaceThreadsByProjectKey.get(projectGroup.projectKey) ?? [],
+      ),
+    ],
+    [projectGroups, taskThreads, workspaceThreadsByProjectKey],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -1869,7 +1956,7 @@ export default function Sidebar() {
         setOpenMobile(false);
       }
       void router.navigate({
-        to: "/$environmentId/$threadId",
+        to: "/$threadId",
         params: buildThreadRouteParams(threadRef),
       });
     },
@@ -1939,7 +2026,7 @@ export default function Sidebar() {
         const trimmed = title.trim();
         setRenamingThreadKey(null);
         if (trimmed.length === 0) {
-          toastManager.add({ type: "warning", title: "Thread title cannot be empty" });
+          toastManager.add({ type: "warning", title: "任务标题不能为空" });
           return;
         }
         if (trimmed === originalTitle) return;
@@ -1952,7 +2039,7 @@ export default function Sidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to rename thread",
+              title: "重命名任务失败",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -2034,7 +2121,7 @@ export default function Sidebar() {
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
-                  title: "Failed to settle thread",
+                  title: "归纳任务失败",
                   description: error instanceof Error ? error.message : "An error occurred.",
                 }),
               );
@@ -2062,7 +2149,7 @@ export default function Sidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to un-settle thread",
+              title: "撤销归纳失败",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -2080,7 +2167,7 @@ export default function Sidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to wake thread",
+              title: "唤醒任务失败",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -2173,7 +2260,7 @@ export default function Sidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to pin thread",
+              title: "置顶任务失败",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -2191,7 +2278,7 @@ export default function Sidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to unpin thread",
+              title: "取消置顶失败",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -2256,7 +2343,7 @@ export default function Sidebar() {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to reorder pinned threads",
+                title: "调整置顶顺序失败",
                 description: error instanceof Error ? error.message : "An error occurred.",
               }),
             );
@@ -2315,9 +2402,9 @@ export default function Sidebar() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to snooze thread",
+              title: "设置稍后提醒失败",
               description:
-                outcome.error instanceof Error ? outcome.error.message : "An error occurred.",
+                outcome.error instanceof Error ? outcome.error.message : "发生未知错误。",
             }),
           );
           return;
@@ -2328,10 +2415,10 @@ export default function Sidebar() {
         toastManager.add(
           stackedThreadToast({
             type: "success",
-            title: `Snoozed until ${snoozeWakeDescription(preset.snoozedUntil, new Date(), timestampFormat)}`,
+            title: `已设置提醒：${snoozeWakeDescription(preset.snoozedUntil, new Date(), timestampFormat)}`,
             timeout: 5_000,
             actionProps: {
-              children: "Undo",
+              children: "撤销",
               onClick: () => attemptUnsnooze(threadRef),
             },
           }),
@@ -2383,12 +2470,12 @@ export default function Sidebar() {
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
-            { id: "settle", label: `Settle (${count})` },
+            { id: "settle", label: `归纳任务 (${count})` },
             ...(canSnoozeSelection
               ? [
                   {
                     id: "snooze",
-                    label: `Snooze (${count})`,
+                    label: `稍后提醒 (${count})`,
                     children: snoozePresets.map((preset) => ({
                       id: `snooze:${preset.id}`,
                       label: `${preset.label} (${preset.whenLabel})`,
@@ -2397,8 +2484,8 @@ export default function Sidebar() {
                 ]
               : []),
             ...(titleRegenerationMenuItem ? [titleRegenerationMenuItem] : []),
-            { id: "mark-unread", label: `Mark unread (${count})` },
-            { id: "delete", label: `Delete (${count})`, destructive: true },
+            { id: "mark-unread", label: `标为未读 (${count})` },
+            { id: "delete", label: `删除任务 (${count})`, destructive: true },
           ],
           position,
         ),
@@ -2435,15 +2522,12 @@ export default function Sidebar() {
                 type: failedCount > 0 ? "warning" : "success",
                 title:
                   failedCount > 0
-                    ? `Snoozed ${snoozedCount} of ${selectedThreads.length} threads`
-                    : `Snoozed ${snoozedCount} thread${snoozedCount === 1 ? "" : "s"}`,
-                description:
-                  failedCount > 0
-                    ? `${failedCount} thread${failedCount === 1 ? "" : "s"} couldn't be snoozed.`
-                    : undefined,
+                    ? `已为 ${selectedThreads.length} 个任务中的 ${snoozedCount} 个设置提醒`
+                    : `已为 ${snoozedCount} 个任务设置提醒`,
+                description: failedCount > 0 ? `${failedCount} 个任务设置失败。` : undefined,
                 timeout: 5_000,
                 actionProps: {
-                  children: "Undo",
+                  children: "撤销",
                   onClick: () => {
                     for (const threadRef of snoozedThreadRefs) attemptUnsnooze(threadRef);
                   },
@@ -2455,9 +2539,8 @@ export default function Sidebar() {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to snooze threads",
-                description:
-                  firstError instanceof Error ? firstError.message : "An error occurred.",
+                title: "批量设置稍后提醒失败",
+                description: firstError instanceof Error ? firstError.message : "发生未知错误。",
               }),
             );
           }
@@ -2476,8 +2559,8 @@ export default function Sidebar() {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to regenerate thread titles",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                title: "批量重新生成标题失败",
+                description: error instanceof Error ? error.message : "发生未知错误。",
               }),
             );
           }
@@ -2513,10 +2596,7 @@ export default function Sidebar() {
       if (confirmThreadDelete) {
         const confirmed = await settlePromise(() =>
           api.dialogs.confirm(
-            [
-              `Delete ${count} thread${count === 1 ? "" : "s"}?`,
-              "This permanently clears conversation history for these threads.",
-            ].join("\n"),
+            [`删除 ${count} 个任务？`, "此操作会永久清除这些任务的对话历史。"].join("\n"),
           ),
         );
         if (confirmed._tag === "Failure" || !confirmed.value) return;
@@ -2538,8 +2618,8 @@ export default function Sidebar() {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to delete threads",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                title: "批量删除任务失败",
+                description: error instanceof Error ? error.message : "发生未知错误。",
               }),
             );
           }
@@ -2578,6 +2658,7 @@ export default function Sidebar() {
         }
         const thread = threadByKeyRef.current.get(threadKey);
         if (!thread) return;
+        const isOfficeThread = taskProjectKeys.has(`${thread.environmentId}:${thread.projectId}`);
         const threadWorkspacePath =
           thread.worktreePath ??
           projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
@@ -2606,6 +2687,7 @@ export default function Sidebar() {
           api.contextMenu.show(
             buildThreadActionMenuItems({
               branch: thread.branch ?? null,
+              technicalActionsVisible: !isOfficeThread,
               isPinned,
               isSettled,
               isSnoozed,
@@ -2647,7 +2729,7 @@ export default function Sidebar() {
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
-                  title: "Could not create thread",
+                  title: "无法新建任务",
                   description: error instanceof Error ? error.message : "An error occurred.",
                 }),
               );
@@ -2683,7 +2765,7 @@ export default function Sidebar() {
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
-                  title: "Failed to regenerate thread title",
+                  title: "重新生成标题失败",
                   description: error instanceof Error ? error.message : "An error occurred.",
                 }),
               );
@@ -2694,12 +2776,13 @@ export default function Sidebar() {
             markThreadUnread(threadKey, thread.latestTurn?.completedAt);
             return;
           case "copy-path":
+            if (isOfficeThread) return;
             if (!threadWorkspacePath) {
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
-                  title: "Path unavailable",
-                  description: "This thread does not have a workspace path to copy.",
+                  title: "路径不可用",
+                  description: "这个任务没有可复制的工作空间路径。",
                 }),
               );
               return;
@@ -2715,10 +2798,9 @@ export default function Sidebar() {
             if (confirmThreadDelete) {
               const confirmed = await settlePromise(() =>
                 api.dialogs.confirm(
-                  [
-                    `Delete thread "${thread.title}"?`,
-                    "This permanently clears conversation history for this thread.",
-                  ].join("\n"),
+                  [`删除任务“${thread.title}”？`, "此操作会永久清除这个任务的对话历史。"].join(
+                    "\n",
+                  ),
                 ),
               );
               if (confirmed._tag === "Failure" || !confirmed.value) return;
@@ -2729,8 +2811,8 @@ export default function Sidebar() {
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
-                  title: "Failed to delete thread",
-                  description: error instanceof Error ? error.message : "An error occurred.",
+                  title: "删除任务失败",
+                  description: error instanceof Error ? error.message : "发生未知错误。",
                 }),
               );
               return;
@@ -2756,6 +2838,7 @@ export default function Sidebar() {
       handleMultiSelectContextMenu,
       markThreadUnread,
       projectCwdByKey,
+      primaryServerWelcome,
       serverConfigs,
       startThreadRename,
       updateThreadMetadata,
@@ -2778,7 +2861,6 @@ export default function Sidebar() {
         context: {
           terminalFocus: isTerminalFocused(),
           terminalOpen: routeTerminalOpen,
-          modelPickerOpen: isModelPickerOpen(),
         },
       });
       const navigateToThreadKey = (targetThreadKey: string | null) => {
@@ -2839,6 +2921,11 @@ export default function Sidebar() {
   // uses. The command palette already offers a "New thread in..." submenu
   // for multi-project setups.
   const handleNewThreadClick = useCallback(() => {
+    if (isElectron) {
+      if (isMobile) setOpenMobile(false);
+      void newThreadContext.handleNewTask();
+      return;
+    }
     // One project: nothing to pick, create immediately.
     if (projectGroups.length <= 1) {
       if (isMobile) setOpenMobile(false);
@@ -2853,6 +2940,100 @@ export default function Sidebar() {
     if (isMobile) setOpenMobile(false);
     openCommandPalette({ open: "new-thread-in" });
   }, [isMobile, newThreadContext, projectGroups.length, setOpenMobile]);
+
+  const [tasksExpanded, setTasksExpanded] = useState(true);
+  const [spacesExpanded, setSpacesExpanded] = useState(true);
+  const [collapsedSpaceKeys, setCollapsedSpaceKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleSpace = useCallback((projectKey: string) => {
+    setCollapsedSpaceKeys((current) => {
+      const next = new Set(current);
+      if (next.has(projectKey)) {
+        next.delete(projectKey);
+      } else {
+        next.add(projectKey);
+      }
+      return next;
+    });
+  }, []);
+  const handleNewThreadInSpace = useCallback(
+    (projectGroup: SidebarProjectSnapshot) => {
+      if (isMobile) setOpenMobile(false);
+      void newThreadContext.handleNewThread(
+        scopeProjectRef(projectGroup.environmentId, projectGroup.id),
+      );
+    },
+    [isMobile, newThreadContext, setOpenMobile],
+  );
+  const handleOpenSpaceFolder = useCallback(async (projectGroup: SidebarProjectSnapshot) => {
+    const api = readLocalApi();
+    if (!api) return;
+    try {
+      await api.shell.openPath(projectGroup.workspaceRoot);
+    } catch (error) {
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "无法打开文件夹",
+          description: error instanceof Error ? error.message : projectGroup.workspaceRoot,
+        }),
+      );
+    }
+  }, []);
+  const handleRemoveSpace = useCallback(
+    async (projectGroup: SidebarProjectSnapshot) => {
+      const api = readLocalApi();
+      if (!api) return;
+      const projectThreadCount =
+        workspaceThreadsByProjectKey.get(projectGroup.projectKey)?.length ?? 0;
+      const confirmed = await settlePromise(() =>
+        api.dialogs.confirm(
+          [
+            `从空间列表中移除“${projectGroup.displayName}”？`,
+            projectThreadCount > 0
+              ? `该空间中的 ${projectThreadCount} 个任务记录也会被清除。`
+              : "该空间当前没有任务记录。",
+            `本地文件不会删除：${projectGroup.workspaceRoot}`,
+          ].join("\n"),
+        ),
+      );
+      if (confirmed._tag === "Failure" || !confirmed.value) return;
+
+      const draftStore = useComposerDraftStore.getState();
+      for (const member of projectGroup.memberProjects) {
+        const memberHasThreads = threads.some(
+          (thread) =>
+            thread.environmentId === member.environmentId && thread.projectId === member.id,
+        );
+        const result = await deleteProject({
+          environmentId: member.environmentId,
+          input: {
+            projectId: member.id,
+            ...(memberHasThreads ? { force: true } : {}),
+          },
+        });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: `无法移除“${projectGroup.displayName}”`,
+                description: error instanceof Error ? error.message : "操作失败。",
+              }),
+            );
+          }
+          return;
+        }
+        const projectRef = scopeProjectRef(member.environmentId, member.id);
+        const draft = draftStore.getDraftThreadByProjectRef(projectRef);
+        if (draft) draftStore.clearDraftThread(draft.draftId);
+        draftStore.clearProjectDraftThreadId(projectRef);
+      }
+    },
+    [deleteProject, threads, workspaceThreadsByProjectKey],
+  );
 
   // The button mirrors chat.new: in multi-project setups both route through
   // the command palette's "New thread in..." picker, and in single-project
@@ -2884,8 +3065,8 @@ export default function Sidebar() {
                     setActiveSearchResultIndex(0);
                   }}
                   onKeyDown={handleThreadSearchKeyDown}
-                  placeholder="Search"
-                  aria-label="Search threads"
+                  placeholder="搜索任务"
+                  aria-label="搜索任务"
                   role="combobox"
                   aria-autocomplete="list"
                   aria-expanded={isSearchingThreads && threadSearchResults.length > 0}
@@ -2907,7 +3088,7 @@ export default function Sidebar() {
                     size="icon-xs"
                     variant="ghost"
                     className="size-5 shrink-0 rounded-sm text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
-                    aria-label="Clear thread search"
+                    aria-label="清除任务搜索"
                     onClick={() => {
                       clearThreadSearch();
                       threadSearchInputRef.current?.focus();
@@ -2926,8 +3107,10 @@ export default function Sidebar() {
                         type="button"
                         className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                         onClick={handleNewThreadClick}
-                        disabled={projects.length === 0}
-                        aria-label="New thread"
+                        disabled={
+                          isElectron ? !newThreadContext.canStartTask : projects.length === 0
+                        }
+                        aria-label="新建任务"
                       />
                     }
                   >
@@ -2938,108 +3121,11 @@ export default function Sidebar() {
                     />
                   </TooltipTrigger>
                   <TooltipPopup side="right">
-                    {newThreadShortcutLabel
-                      ? `New thread (${newThreadShortcutLabel})`
-                      : "New thread"}
+                    {newThreadShortcutLabel ? `新建任务 (${newThreadShortcutLabel})` : "新建任务"}
                   </TooltipPopup>
                 </Tooltip>
               </div>
             </div>
-            {projectGroups.length > 0 ? (
-              <div className="flex items-center gap-1">
-                <Menu open={projectScopeMenuOpen} onOpenChange={setProjectScopeMenuOpen}>
-                  <MenuTrigger
-                    render={
-                      <SidebarMenuButton
-                        aria-label="Filter threads by project"
-                        className="min-w-0 flex-1 ps-[calc(var(--sidebar-row-content-inset)-1px)] focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                      />
-                    }
-                  >
-                    {scopedProjectGroup ? (
-                      <ProjectFavicon
-                        environmentId={scopedProjectGroup.environmentId}
-                        cwd={scopedProjectGroup.workspaceRoot}
-                        className="size-4 shrink-0"
-                      />
-                    ) : (
-                      <FolderIcon className="size-4 shrink-0" />
-                    )}
-                    <span className="min-w-0 flex-1 truncate">
-                      {scopedProjectGroup?.displayName ?? "All projects"}
-                    </span>
-                    <ChevronDownIcon className="-mr-px size-4 shrink-0" />
-                  </MenuTrigger>
-                  <MenuPopup align="start" className="w-(--anchor-width)">
-                    <MenuRadioGroup
-                      value={projectScopeKey ?? "all"}
-                      onValueChange={(value) =>
-                        setProjectScopeKey(value === "all" ? null : (value as string))
-                      }
-                    >
-                      <MenuRadioItem
-                        value="all"
-                        closeOnClick
-                        className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-                      >
-                        <FolderIcon className="size-4 shrink-0" />
-                        <span className="min-w-0 truncate text-sm">All projects</span>
-                      </MenuRadioItem>
-                      {projectGroups.map((project) => {
-                        const scopeKey = project.projectKey;
-                        return (
-                          <MenuRadioItem
-                            key={scopeKey}
-                            value={scopeKey}
-                            closeOnClick
-                            className="h-8 min-h-8 px-1 py-0 text-sm font-medium [&>span:last-child]:flex [&>span:last-child]:min-w-0 [&>span:last-child]:items-center [&>span:last-child]:gap-2"
-                          >
-                            <ProjectFavicon
-                              environmentId={project.environmentId}
-                              cwd={project.workspaceRoot}
-                              className="size-4 shrink-0"
-                            />
-                            <span className="min-w-0 truncate text-sm">{project.displayName}</span>
-                            <button
-                              type="button"
-                              aria-label={`Project actions for ${project.displayName}`}
-                              title={`Project actions for ${project.displayName}`}
-                              className="ml-auto inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-icon-muted outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                              onPointerDown={(event) => event.stopPropagation()}
-                              onClick={(event) => {
-                                void handleProjectActions(event, project);
-                              }}
-                            >
-                              <EllipsisIcon className="size-3.5" />
-                            </button>
-                          </MenuRadioItem>
-                        );
-                      })}
-                    </MenuRadioGroup>
-                  </MenuPopup>
-                </Menu>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={openAddProjectCommandPalette}
-                        type="button"
-                        aria-label="New project"
-                      />
-                    }
-                  >
-                    <FolderPlusIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">New project</TooltipPopup>
-                </Tooltip>
-              </div>
-            ) : null}
           </SidebarGroup>
         }
       >
@@ -3055,7 +3141,7 @@ export default function Sidebar() {
                 <ul
                   id="sidebar-thread-search-results"
                   role="listbox"
-                  aria-label="Thread search results"
+                  aria-label="任务搜索结果"
                   className="flex flex-col gap-px"
                 >
                   {threadSearchResults.map((thread, index) => {
@@ -3074,7 +3160,9 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
+                        officeMode={taskProjectKeys.has(
+                          `${thread.environmentId}:${thread.projectId}`,
+                        )}
                         providerEntryByInstanceId={providerEntryByInstanceId}
                         isHighlighted={activeSearchResultIndex === index}
                         isRouteActive={routeThreadKey === threadKey}
@@ -3091,7 +3179,7 @@ export default function Sidebar() {
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                No threads found
+                未找到任务
               </p>
             )
           ) : null}
@@ -3104,41 +3192,18 @@ export default function Sidebar() {
             >
               <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
                 {(() => {
-                  const renderThreadRow = (
-                    thread: EnvironmentThreadShell,
-                    section: "pinned" | "active" | "snoozed" | "settled",
-                    sortable?: SortablePinnedRowBag,
-                  ) => {
+                  const renderThreadRow = (thread: EnvironmentThreadShell, nested = false) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
-                    // Settled and snoozed are the ONLY things that collapse a
-                    // row: every other thread is a full card. Density comes
-                    // from users (or the auto rules) actually parking work,
-                    // not from the sidebar second-guessing what still matters.
-                    const isCard = section === "active" || section === "pinned";
-                    const rowVariant = isCard ? "card" : "slim";
+                    const isSnoozed = snoozedThreadKeys.has(threadKey);
+                    const isSettled = settledThreadKeys.has(threadKey);
                     return (
                       <SidebarThreadRow
-                        // Keyed per variant on purpose: when a thread settles,
-                        // the card fades out in place and the slim row fades
-                        // in at its settled position instead of one element
-                        // FLIP-sliding through every row in between (rows here
-                        // are translucent, so a crossing row reads as text
-                        // painted over text).
-                        key={`${threadKey}:${rowVariant}`}
+                        key={`${threadKey}:compact`}
                         thread={thread}
-                        variant={rowVariant}
-                        // Snoozed rows wake; settled rows un-settle (explicit
-                        // settles clear the override, auto-settled rows get
-                        // pinned active); cards settle.
-                        variantAction={
-                          section === "snoozed"
-                            ? "unsnooze"
-                            : section === "settled"
-                              ? "unsettle"
-                              : "settle"
-                        }
+                        variant="slim"
+                        variantAction={isSnoozed ? "unsnooze" : isSettled ? "unsettle" : "settle"}
                         settlementSupported={
                           serverConfigs.get(thread.environmentId)?.environment.capabilities
                             .threadSettlement === true
@@ -3151,24 +3216,17 @@ export default function Sidebar() {
                           serverConfigs.get(thread.environmentId)?.environment.capabilities
                             .threadPinning === true
                         }
-                        isPinned={section === "pinned"}
-                        sortable={sortable}
+                        isPinned={thread.pinnedAt !== null}
                         snoozeWakeLabelText={
-                          section === "snoozed" && thread.snoozedUntil != null
+                          isSnoozed && thread.snoozedUntil != null
                             ? snoozeWakeLabel(thread.snoozedUntil, {
                                 now: new Date().toISOString(),
                               })
                             : null
                         }
-                        // All sections: a woken thread can classify straight
-                        // into the settled tail (PR merged while snoozed), and
-                        // the wake signal must survive the trip. Still-snoozed
-                        // rows resolve to null on their own.
                         wokeAt={threadWokeAt(thread, { now: snoozeNow })}
                         isActive={routeThreadKey === threadKey}
                         jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
-                        currentEnvironmentId={primaryEnvironmentId}
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
                         projectCwd={
                           projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
                         }
@@ -3177,6 +3235,11 @@ export default function Sidebar() {
                             `${thread.environmentId}:${thread.projectId}`,
                           ) ?? null
                         }
+                        officeMode={taskProjectKeys.has(
+                          `${thread.environmentId}:${thread.projectId}`,
+                        )}
+                        nested={nested}
+                        showProjectIcon={false}
                         providerEntryByInstanceId={providerEntryByInstanceId}
                         timestampFormat={timestampFormat}
                         onThreadClick={handleThreadClick}
@@ -3198,172 +3261,203 @@ export default function Sidebar() {
                       />
                     );
                   };
-                  // Pinned block: full cards above the inbox, closed by a
-                  // thin divider (the pin glyphs carry the meaning, so no
-                  // header text). Vanishes entirely at count 0.
-                  // Rows render in the one shared pinned order; only
-                  // reorder-capable rows register as sortable (legacy-server
-                  // pins render in place as plain rows).
-                  const items: ReactNode[] = [
-                    <DndContext
-                      key="pinned-dnd"
-                      sensors={pinnedDndSensors}
-                      collisionDetection={closestCenter}
-                      modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
-                      onDragEnd={handlePinnedDragEnd}
-                    >
-                      <SortableContext
-                        items={orderedPinnedThreads
-                          .map((thread) =>
-                            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
-                          )
-                          .filter((threadKey) => reorderablePinnedKeys.has(threadKey))}
-                        strategy={verticalListSortingStrategy}
-                      >
-                        {orderedPinnedThreads.map((thread) => {
-                          const threadKey = scopedThreadKey(
-                            scopeThreadRef(thread.environmentId, thread.id),
-                          );
-                          if (!reorderablePinnedKeys.has(threadKey)) {
-                            return renderThreadRow(thread, "pinned");
-                          }
-                          return (
-                            <SortablePinnedThreadRow key={threadKey} id={threadKey}>
-                              {(bag) => renderThreadRow(thread, "pinned", bag)}
-                            </SortablePinnedThreadRow>
-                          );
-                        })}
-                      </SortableContext>
-                    </DndContext>,
-                  ];
-                  if (pinnedThreads.length > 0) {
-                    items.push(
-                      <li
-                        key="pinned-divider"
-                        aria-hidden
-                        data-testid="sidebar-pinned-divider"
-                        className="mx-2.5 my-1.5 h-px list-none bg-sidebar-border/60"
-                      />,
-                    );
-                  }
-                  for (const thread of activeThreads) {
-                    items.push(renderThreadRow(thread, "active"));
-                  }
-                  // Snoozed shelf: between the inbox and Settled — out of the
-                  // way, never gone. The header always renders while anything
-                  // is snoozed (the count is the whole footprint when
-                  // collapsed); rows only when expanded. Vanishes entirely at
-                  // count 0.
-                  if (snoozedThreads.length > 0) {
-                    items.push(
-                      <li
-                        key="snoozed-shelf-header"
-                        data-thread-selection-safe
-                        className="list-none"
-                      >
+
+                  return (
+                    <>
+                      <li className="list-none pt-1" data-thread-selection-safe>
                         <button
                           type="button"
-                          onClick={toggleSnoozedShelf}
-                          aria-expanded={snoozedShelfExpanded}
-                          data-testid="sidebar-snoozed-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
+                          aria-expanded={tasksExpanded}
+                          onClick={() => setTasksExpanded((expanded) => !expanded)}
+                          className="flex h-7 w-full cursor-pointer items-center gap-1.5 px-2.5 text-left text-[12px] font-semibold text-sidebar-muted-foreground hover:text-sidebar-foreground"
                         >
-                          <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                            {snoozedShelfExpanded
-                              ? "Snoozed"
-                              : `Snoozed (${snoozedThreads.length})`}
-                          </span>
-                          <span className="h-px flex-1 bg-blue-500/20 dark:bg-blue-400/15" />
-                          <ChevronDownIcon
+                          <span>任务 ({taskThreads.length})</span>
+                          <ChevronRightIcon
                             aria-hidden
                             className={cn(
-                              "size-3 text-blue-600 transition-transform dark:text-blue-400",
-                              snoozedShelfExpanded && "rotate-180",
+                              "size-3 transition-transform",
+                              tasksExpanded && "rotate-90",
                             )}
                           />
                         </button>
-                      </li>,
-                    );
-                    for (const thread of visibleSnoozedThreads) {
-                      items.push(renderThreadRow(thread, "snoozed"));
-                    }
-                  }
-                  if (settledThreads.length > 0) {
-                    items.push(
-                      <li
-                        key="settled-shelf-header"
-                        data-thread-selection-safe
-                        className="list-none"
-                      >
-                        <button
-                          type="button"
-                          onClick={toggleSettledShelf}
-                          aria-expanded={settledShelfExpanded}
-                          data-testid="sidebar-settled-shelf-toggle"
-                          className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
-                        >
-                          <span className="text-xs font-medium text-muted-foreground/50">
-                            {settledShelfExpanded
-                              ? "Settled"
-                              : `Settled (${settledThreads.length})`}
-                          </span>
-                          <span className="h-px flex-1 bg-sidebar-border/60" />
-                          <ChevronDownIcon
-                            aria-hidden
-                            className={cn(
-                              "size-3 text-muted-foreground/50 transition-transform",
-                              settledShelfExpanded && "rotate-180",
-                            )}
-                          />
-                        </button>
-                      </li>,
-                    );
-                  }
-                  for (const thread of renderedSettledThreads) {
-                    items.push(renderThreadRow(thread, "settled"));
-                  }
-                  return items;
+                      </li>
+                      {tasksExpanded ? taskThreads.map((thread) => renderThreadRow(thread)) : null}
+                      {tasksExpanded && taskThreads.length === 0 ? (
+                        <li className="list-none px-2.5 pb-2 text-xs text-sidebar-muted-foreground">
+                          暂无任务
+                        </li>
+                      ) : null}
+
+                      <li className="list-none pt-3" data-thread-selection-safe>
+                        <div className="flex h-7 items-center px-2.5">
+                          <button
+                            type="button"
+                            aria-expanded={spacesExpanded}
+                            onClick={() => setSpacesExpanded((expanded) => !expanded)}
+                            className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left text-[12px] font-semibold text-sidebar-muted-foreground hover:text-sidebar-foreground"
+                          >
+                            <span>空间 ({projectGroups.length})</span>
+                            <ChevronRightIcon
+                              aria-hidden
+                              className={cn(
+                                "size-3 transition-transform",
+                                spacesExpanded && "rotate-90",
+                              )}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="添加空间"
+                            title="添加空间"
+                            onClick={openAddProjectCommandPalette}
+                            className="inline-flex size-6 items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                          >
+                            <PlusIcon className="size-3.5" />
+                          </button>
+                        </div>
+                      </li>
+                      {spacesExpanded
+                        ? projectGroups.map((projectGroup) => {
+                            const spaceExpanded = !collapsedSpaceKeys.has(projectGroup.projectKey);
+                            const spaceThreads =
+                              workspaceThreadsByProjectKey.get(projectGroup.projectKey) ?? [];
+                            return (
+                              <li
+                                key={projectGroup.projectKey}
+                                className="group/space list-none"
+                                data-thread-selection-safe
+                              >
+                                <div className="flex h-8 items-center rounded-md px-2 text-sidebar-foreground hover:bg-sidebar-row-hover">
+                                  <button
+                                    type="button"
+                                    aria-expanded={spaceExpanded}
+                                    onClick={() => toggleSpace(projectGroup.projectKey)}
+                                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                                  >
+                                    <FolderIcon className="size-4 shrink-0 text-sidebar-muted-foreground" />
+                                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                                      {projectGroup.displayName}
+                                    </span>
+                                    <ChevronDownIcon
+                                      aria-hidden
+                                      className={cn(
+                                        "size-3.5 shrink-0 text-sidebar-muted-foreground transition-transform",
+                                        !spaceExpanded && "-rotate-90",
+                                      )}
+                                    />
+                                  </button>
+                                  <div className="ml-1 flex shrink-0 items-center opacity-0 transition-opacity group-hover/space:opacity-100 group-focus-within/space:opacity-100">
+                                    <Menu>
+                                      <MenuTrigger
+                                        render={
+                                          <button
+                                            type="button"
+                                            aria-label={`${projectGroup.displayName} 空间菜单`}
+                                            title="空间菜单"
+                                            className="inline-flex size-6 items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
+                                          />
+                                        }
+                                      >
+                                        <EllipsisIcon className="size-3.5" />
+                                      </MenuTrigger>
+                                      <MenuPopup align="start" side="right" className="min-w-40">
+                                        <MenuItem
+                                          onClick={() => void handleOpenSpaceFolder(projectGroup)}
+                                        >
+                                          <FolderOpenIcon />
+                                          打开文件夹
+                                        </MenuItem>
+                                        <MenuSeparator />
+                                        <MenuItem
+                                          variant="destructive"
+                                          onClick={() => void handleRemoveSpace(projectGroup)}
+                                        >
+                                          <Trash2Icon />
+                                          从列表中移除
+                                        </MenuItem>
+                                      </MenuPopup>
+                                    </Menu>
+                                    <button
+                                      type="button"
+                                      aria-label={`在 ${projectGroup.displayName} 中新建任务`}
+                                      title="在此空间新建任务"
+                                      onClick={() => handleNewThreadInSpace(projectGroup)}
+                                      className="inline-flex size-6 items-center justify-center rounded-md text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
+                                    >
+                                      <PlusIcon className="size-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                                {spaceExpanded ? (
+                                  <ul role="list" className="flex flex-col gap-px">
+                                    {spaceThreads.map((thread) => renderThreadRow(thread, true))}
+                                    {spaceThreads.length === 0 ? (
+                                      <li className="list-none">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleNewThreadInSpace(projectGroup)}
+                                          className="flex h-8 w-full items-center ps-8 pe-2.5 text-left text-xs text-sidebar-muted-foreground hover:text-sidebar-foreground"
+                                        >
+                                          开始新任务
+                                        </button>
+                                      </li>
+                                    ) : null}
+                                  </ul>
+                                ) : null}
+                              </li>
+                            );
+                          })
+                        : null}
+                      {settledThreads.length > 0 ? (
+                        <li className="list-none pt-3" data-thread-selection-safe>
+                          <button
+                            type="button"
+                            aria-expanded={settledShelfExpanded}
+                            onClick={toggleSettledShelf}
+                            className="flex min-h-12 w-full items-center gap-3 rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 text-left transition-colors hover:bg-sidebar-row-hover"
+                          >
+                            <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-muted-foreground">
+                              <ArchiveIcon className="size-3.5" aria-hidden />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-xs font-semibold text-sidebar-foreground">
+                                已归纳任务
+                              </span>
+                              <span className="block text-[11px] text-sidebar-muted-foreground">
+                                {settledThreads.length} 个已完成任务
+                              </span>
+                            </span>
+                            <ChevronRightIcon
+                              aria-hidden
+                              className={cn(
+                                "size-3.5 shrink-0 text-sidebar-muted-foreground transition-transform",
+                                settledShelfExpanded && "rotate-90",
+                              )}
+                            />
+                          </button>
+                          {settledShelfExpanded ? (
+                            <ul role="list" className="mt-1 flex flex-col gap-px">
+                              {renderedSettledThreads.map((thread) => renderThreadRow(thread))}
+                              {hiddenSettledCount > 0 ? (
+                                <li className="list-none">
+                                  <button
+                                    type="button"
+                                    onClick={showMoreSettled}
+                                    className="flex h-8 w-full items-center px-2.5 text-left text-xs text-sidebar-muted-foreground hover:text-sidebar-foreground"
+                                  >
+                                    再显示 {hiddenSettledCount} 个
+                                  </button>
+                                </li>
+                              ) : null}
+                            </ul>
+                          ) : null}
+                        </li>
+                      ) : null}
+                    </>
+                  );
                 })()}
-                {settledShelfExpanded && hiddenSettledCount > 0 ? (
-                  <li className="list-none">
-                    <button
-                      type="button"
-                      onClick={showMoreSettled}
-                      className="flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm text-sidebar-muted-foreground/55 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                    >
-                      <PlusIcon aria-hidden className="size-4 shrink-0" />
-                      Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                    </button>
-                  </li>
-                ) : null}
               </ul>
             </TooltipProvider>
-          ) : null}
-          {!isSearchingThreads &&
-          pinnedThreads.length +
-            activeThreads.length +
-            snoozedThreads.length +
-            settledThreads.length ===
-            0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
-                <>
-                  <span>No projects yet</span>
-                  <button
-                    type="button"
-                    onClick={openAddProjectCommandPalette}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                  >
-                    <PlusIcon className="-mx-0.5 size-3" />
-                    Add project
-                  </button>
-                </>
-              ) : scopedProjectGroup ? (
-                `No threads in ${scopedProjectGroup.displayName} yet`
-              ) : (
-                "No threads yet"
-              )}
-            </div>
           ) : null}
         </SidebarGroup>
       </SidebarContent>

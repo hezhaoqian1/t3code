@@ -60,8 +60,6 @@ export const hydrateCachedProvider = (input: {
   const hydratedProvider: ServerProvider = {
     ...fallbackWithoutMessage,
     models: mergeProviderModels(input.fallbackProvider.models, input.cachedProvider.models),
-    installed: input.cachedProvider.installed,
-    version: input.cachedProvider.version,
     status: input.cachedProvider.status,
     auth: input.cachedProvider.auth,
     checkedAt: input.cachedProvider.checkedAt,
@@ -82,7 +80,7 @@ export const hydrateCachedProvider = (input: {
  * `defaultInstanceIdForDriver(kind).toString() === kind`), so existing
  * cached snapshots remain readable without any rename step.
  *
- * Non-default instances (e.g. `codex_personal`) land in their own files and
+ * Non-default instances (e.g. `fd_deepseek_staging`) land in their own files and
  * never collide with other instances.
  *
  * Cache contents must still carry matching `instanceId` + `driver` identity
@@ -145,9 +143,8 @@ export const writeProviderStatusCache = (input: {
   readonly filePath: string;
   readonly provider: ServerProvider;
 }) => {
-  const { updateState: _updateState, ...cacheableProvider } = input.provider;
   return writeFileStringAtomically({
     filePath: input.filePath,
-    contents: `${JSON.stringify(cacheableProvider, null, 2)}\n`,
+    contents: `${JSON.stringify(input.provider, null, 2)}\n`,
   });
 };

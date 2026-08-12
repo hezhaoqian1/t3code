@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-3-desktop-regression",
+  "type": "test",
+  "source": "vp test focused Desktop local-environment suite",
+  "summary": "13 files and 79 tests passed for production loopback port selection, backend configuration/lifecycle, local auth, pool, environment, IPC, settings, updates, menu, window, and IPC contracts.",
+  "verifier": "Vitest 4.1.9 exit code 0"
+}

@@ -148,10 +148,11 @@ describe("descriptor helpers", () => {
 });
 
 describe("model slug normalization", () => {
-  it("preserves exact custom slugs instead of expanding provider aliases", () => {
-    const claude = ProviderDriverKind.make("claudeAgent");
+  it("preserves the exact FD model slug without expanding aliases", () => {
+    const fdDeepSeek = ProviderDriverKind.make("fd-deepseek");
 
-    expect(normalizeModelSlug("opus", claude)).toBe("claude-opus-5");
-    expect(normalizeCustomModelSlug(" opus ")).toBe("opus");
+    expect(normalizeModelSlug(" deepseek-v4-flash ", fdDeepSeek)).toBe("deepseek-v4-flash");
+    expect(normalizeModelSlug("flash", fdDeepSeek)).toBe("flash");
+    expect(normalizeCustomModelSlug(" deepseek-v4-flash ")).toBe("deepseek-v4-flash");
   });
 });

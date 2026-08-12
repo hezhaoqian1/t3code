@@ -5,6 +5,7 @@ import {
   type OrchestrationThreadDetailPage,
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
+  type OrchestrationVolatileThreadOverlay,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -131,6 +132,27 @@ function shouldPersistThread(thread: OrchestrationThread): boolean {
   return status !== "starting" && status !== "running";
 }
 
+function mergeVolatileOverlay(
+  thread: OrchestrationThread,
+  overlay: OrchestrationVolatileThreadOverlay,
+): OrchestrationThread {
+  const mergeById = <T extends { readonly id: string; readonly createdAt: string }>(
+    base: ReadonlyArray<T>,
+    volatile: ReadonlyArray<T>,
+  ): ReadonlyArray<T> => {
+    const volatileIds = new Set(volatile.map((row) => row.id));
+    return [...base.filter((row) => !volatileIds.has(row.id)), ...volatile].sort(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+    );
+  };
+  return {
+    ...thread,
+    messages: mergeById(thread.messages, overlay.messages),
+    activities: mergeById(thread.activities, overlay.activities),
+  };
+}
+
 export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make")(function* (
   threadId: ThreadIdType,
 ) {
@@ -152,6 +174,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     ),
   );
   const cachedThread = Option.map(cached, (snapshot) => snapshot.thread);
+  const persistedThread = yield* Ref.make(cachedThread);
+  const volatileOverlay = yield* Ref.make<OrchestrationVolatileThreadOverlay>({
+    threadId,
+    revision: 0,
+    messages: [],
+    activities: [],
+  });
+  const awaitingInitialVolatileSnapshot = yield* Ref.make(true);
   const state = yield* SubscriptionRef.make<EnvironmentThreadState>({
     data: cachedThread,
     status: statusWithoutLiveData(cachedThread),
@@ -258,9 +288,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     // recent turns); a snapshot or merged page passes its own page state.
     page: Option.Option<EnvironmentThreadPageState> | "keep",
   ) {
+    yield* Ref.set(persistedThread, Option.some(thread));
+    const renderedThread = mergeVolatileOverlay(thread, yield* Ref.get(volatileOverlay));
     const waiting = yield* Ref.get(awaitingCompletion);
     yield* SubscriptionRef.update(state, (current) => ({
-      data: Option.some(thread),
+      data: Option.some(renderedThread),
       status: waiting ? ("synchronizing" as const) : ("live" as const),
       error: Option.none(),
       page: page === "keep" ? current.page : page,
@@ -300,6 +332,8 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       error: Option.none(),
       page: Option.none(),
     });
+    yield* Ref.set(persistedThread, Option.none());
+    yield* Ref.set(volatileOverlay, { threadId, revision: 0, messages: [], activities: [] });
     yield* cache.removeThread(environmentId, threadId).pipe(
       Effect.catch((error) =>
         Effect.logWarning("Could not remove the cached thread.").pipe(
@@ -338,14 +372,52 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       return;
     }
 
+    if (item.kind === "volatile-snapshot") {
+      const initial = yield* Ref.get(awaitingInitialVolatileSnapshot);
+      const current = yield* Ref.get(volatileOverlay);
+      if (!initial && item.overlay.revision <= current.revision) return;
+      // The first snapshot establishes the current server/runtime generation.
+      // Later reset/history snapshots share the live revision sequence and
+      // must not overwrite newer events when merged PubSub delivery reorders.
+      yield* Ref.set(awaitingInitialVolatileSnapshot, false);
+      yield* Ref.set(volatileOverlay, item.overlay);
+      const base = yield* Ref.get(persistedThread);
+      if (Option.isSome(base)) {
+        yield* setThread(base.value, "keep");
+      }
+      return;
+    }
+
+    if (item.kind === "volatile-event") {
+      const base = yield* Ref.get(persistedThread);
+      if (Option.isNone(base)) return;
+      const overlay = yield* Ref.get(volatileOverlay);
+      const revision = item.event.volatileRevision;
+      if (revision === undefined || revision <= overlay.revision) return;
+      const result = applyThreadDetailEvent(
+        { ...base.value, messages: overlay.messages, activities: overlay.activities },
+        item.event,
+      );
+      if (result.kind === "updated") {
+        yield* Ref.set(volatileOverlay, {
+          threadId,
+          revision,
+          messages: result.thread.messages,
+          activities: result.thread.activities,
+        });
+        yield* setThread(base.value, "keep");
+      }
+      return;
+    }
+
     const sequence = yield* SubscriptionRef.get(lastSequence);
     if (item.event.sequence <= sequence) {
       return;
     }
     yield* SubscriptionRef.set(lastSequence, item.event.sequence);
 
-    const current = yield* SubscriptionRef.get(state);
-    if (Option.isNone(current.data)) {
+    const current = yield* Ref.get(persistedThread);
+    if (Option.isNone(current)) {
       if (item.event.type === "thread.deleted") {
         yield* setDeleted();
       }
@@ -360,7 +432,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       // revert reducer's turn filtering fully handles loaded history.
       yield* Ref.update(historyEpoch, (epoch) => epoch + 1);
     }
-    const result = applyThreadDetailEvent(current.data.value, item.event);
+    const result = applyThreadDetailEvent(current.value, item.event);
     if (result.kind === "updated") {
       yield* setThread(result.thread, "keep");
     } else if (result.kind === "deleted") {
@@ -411,54 +483,29 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const mergeOlderPage = Effect.fn("EnvironmentThreadState.mergeOlderPage")(function* (
     snapshot: OrchestrationThreadDetailSnapshot,
   ) {
-    // The merge is built inside the update callback so it composes with
-    // whatever thread value is current at commit time. The applyLock already
-    // serializes this against event application; the atomic build is defense
-    // in depth against future callers outside the lock.
-    let merged: OrchestrationThread | null = null;
-    yield* SubscriptionRef.update(state, (value) => {
-      if (Option.isNone(value.data)) {
-        return value;
-      }
-      const loaded = value.data.value;
-      const older = snapshot.thread;
-      const mergeById = <T extends { readonly id: string }>(
-        olderRows: ReadonlyArray<T>,
-        loadedRows: ReadonlyArray<T>,
-      ): ReadonlyArray<T> => {
-        const seen = new Set(loadedRows.map((row) => row.id));
-        return [...olderRows.filter((row) => !seen.has(row.id)), ...loadedRows];
-      };
-      const seenCheckpoints = new Set(loaded.checkpoints.map((row) => row.turnId));
-      merged = {
-        // Thread metadata stays the loaded (newer) snapshot's; only the
-        // windowed collections gain rows from the older page.
-        ...loaded,
-        messages: mergeById(older.messages, loaded.messages),
-        activities: mergeById(older.activities, loaded.activities),
-        proposedPlans: mergeById(older.proposedPlans, loaded.proposedPlans),
-        checkpoints: [
-          ...older.checkpoints.filter((row) => !seenCheckpoints.has(row.turnId)),
-          ...loaded.checkpoints,
-        ],
-      };
-      return {
-        ...value,
-        data: Option.some(merged),
-        page: pageStateFromSnapshot(snapshot.page),
-      };
-    });
-    // Persist the widened window under the *loaded* watermark: the merged
-    // content is only known consistent with the state it merged into, not
-    // with the page's own (possibly newer) sequence.
-    if (merged !== null && shouldPersistThread(merged)) {
-      const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
-      yield* Queue.offer(persistence, {
-        snapshotSequence,
-        thread: merged,
-        ...(snapshot.page === undefined ? {} : { page: { ...snapshot.page, snapshotSequence } }),
-      });
-    }
+    const current = yield* Ref.get(persistedThread);
+    if (Option.isNone(current)) return;
+    const loaded = current.value;
+    const older = snapshot.thread;
+    const mergeById = <T extends { readonly id: string }>(
+      olderRows: ReadonlyArray<T>,
+      loadedRows: ReadonlyArray<T>,
+    ): ReadonlyArray<T> => {
+      const seen = new Set(loadedRows.map((row) => row.id));
+      return [...olderRows.filter((row) => !seen.has(row.id)), ...loadedRows];
+    };
+    const seenCheckpoints = new Set(loaded.checkpoints.map((row) => row.turnId));
+    const merged: OrchestrationThread = {
+      ...loaded,
+      messages: mergeById(older.messages, loaded.messages),
+      activities: mergeById(older.activities, loaded.activities),
+      proposedPlans: mergeById(older.proposedPlans, loaded.proposedPlans),
+      checkpoints: [
+        ...older.checkpoints.filter((row) => !seenCheckpoints.has(row.turnId)),
+        ...loaded.checkpoints,
+      ],
+    };
+    yield* setThread(merged, pageStateFromSnapshot(snapshot.page));
   });
 
   const loadOlderTurns = Effect.fn("EnvironmentThreadState.loadOlderTurns")(function* () {
@@ -572,6 +619,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         const supportsPagination = config.threadSnapshotPagination === true;
         yield* Ref.set(paginationSupported, supportsPagination);
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
+        yield* Ref.set(awaitingInitialVolatileSnapshot, true);
         yield* setSynchronizing;
 
         let current = yield* SubscriptionRef.get(state);
@@ -663,9 +711,13 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   yield* Effect.addFinalizer(() => Effect.sync(deregister));
 
   yield* Effect.addFinalizer(() =>
-    Effect.all([SubscriptionRef.get(state), SubscriptionRef.get(lastSequence)]).pipe(
-      Effect.flatMap(([current, snapshotSequence]) =>
-        Option.match(current.data, {
+    Effect.all([
+      Ref.get(persistedThread),
+      SubscriptionRef.get(state),
+      SubscriptionRef.get(lastSequence),
+    ]).pipe(
+      Effect.flatMap(([persisted, current, snapshotSequence]) =>
+        Option.match(persisted, {
           onNone: () => Effect.void,
           onSome: (thread) =>
             shouldPersistThread(thread)

@@ -14,11 +14,9 @@ const decodeUpsertKeybindingResult = Schema.decodeUnknownSync(ServerUpsertKeybin
 const decodeAvailableEditors = Schema.decodeUnknownSync(ServerConfig.fields.availableEditors);
 
 const baseProviderSnapshot = {
-  instanceId: "codex",
-  driver: "codex",
+  instanceId: "fd-deepseek",
+  driver: "fd-deepseek",
   enabled: true,
-  installed: true,
-  version: "1.0.0",
   status: "ready",
   auth: { status: "authenticated" },
   checkedAt: "2026-04-10T00:00:00.000Z",
@@ -28,11 +26,9 @@ const baseProviderSnapshot = {
 describe("ServerProvider", () => {
   it("defaults capability arrays when decoding provider snapshots", () => {
     const parsed = decodeServerProvider({
-      instanceId: "codex",
-      driver: "codex",
+      instanceId: "fd-deepseek",
+      driver: "fd-deepseek",
       enabled: true,
-      installed: true,
-      version: "1.0.0",
       status: "ready",
       auth: {
         status: "authenticated",
@@ -43,44 +39,14 @@ describe("ServerProvider", () => {
 
     expect(parsed.slashCommands).toEqual([]);
     expect(parsed.skills).toEqual([]);
-    expect(parsed.versionAdvisory).toBeUndefined();
-    expect(parsed.updateState).toBeUndefined();
-  });
-
-  it("defaults one-click update support when decoding older advisory snapshots", () => {
-    const parsed = decodeServerProvider({
-      instanceId: "codex",
-      driver: "codex",
-      enabled: true,
-      installed: true,
-      version: "1.0.0",
-      status: "ready",
-      auth: {
-        status: "authenticated",
-      },
-      checkedAt: "2026-04-10T00:00:00.000Z",
-      models: [],
-      versionAdvisory: {
-        status: "behind_latest",
-        currentVersion: "1.0.0",
-        latestVersion: "1.0.1",
-        updateCommand: "npm install -g @openai/codex@latest",
-        checkedAt: "2026-04-10T00:00:00.000Z",
-        message: "Update available.",
-      },
-    });
-
-    expect(parsed.versionAdvisory?.canUpdate).toBe(false);
   });
 
   it("decodes continuation group metadata", () => {
     const parsed = decodeServerProvider({
-      instanceId: "codex_personal",
-      driver: "codex",
-      continuation: { groupKey: "codex:home:/Users/julius/.codex" },
+      instanceId: "fd-deepseek",
+      driver: "fd-deepseek",
+      continuation: { groupKey: "fd-deepseek:instance:fd-deepseek" },
       enabled: true,
-      installed: true,
-      version: "1.0.0",
       status: "ready",
       auth: {
         status: "authenticated",
@@ -89,23 +55,30 @@ describe("ServerProvider", () => {
       models: [],
     });
 
-    expect(parsed.continuation?.groupKey).toBe("codex:home:/Users/julius/.codex");
+    expect(parsed.continuation?.groupKey).toBe("fd-deepseek:instance:fd-deepseek");
+  });
+
+  it("decodes an independent provider skill catalog state", () => {
+    const parsed = decodeServerProvider({
+      ...baseProviderSnapshot,
+      skillCatalogState: "error",
+    });
+
+    expect(parsed.skillCatalogState).toBe("error");
   });
 
   it("decodes optional legacy model metadata", () => {
     const parsed = decodeServerProvider({
-      instanceId: "codex",
-      driver: "codex",
+      instanceId: "fd-deepseek",
+      driver: "fd-deepseek",
       enabled: true,
-      installed: true,
-      version: "1.0.0",
       status: "ready",
       auth: { status: "authenticated" },
       checkedAt: "2026-04-10T00:00:00.000Z",
       models: [
         {
-          slug: "gpt-5.4",
-          name: "GPT-5.4",
+          slug: "deepseek-v4-flash",
+          name: "DeepSeek V4 Flash",
           isCustom: false,
           isLegacy: true,
           capabilities: null,

@@ -46,7 +46,7 @@ export class ThreadBackgroundLivenessService extends Context.Service<
   {
     /**
      * Feed one task lifecycle transition. taskType may be absent on
-     * synthesized rows (workflow members, Codex children) — those count as
+     * synthesized rows (workflow members and child agents) — those count as
      * agents. agentId marks a task launched from inside a subagent: its
      * internal shells are covered by the owning agent's liveness, but a
      * NESTED AGENT (agentId + agent-flavored taskType) still counts — it
@@ -119,7 +119,7 @@ export function make(): ThreadBackgroundLivenessService["Service"] {
         return;
       }
 
-      // Idle counts as not-live: a resting (resumable) Codex child isn't
+      // Idle counts as not-live: a resting resumable child agent isn't
       // doing anything, and an all-idle fleet must not pin Working.
       const terminal =
         input.kind === "completed" ||

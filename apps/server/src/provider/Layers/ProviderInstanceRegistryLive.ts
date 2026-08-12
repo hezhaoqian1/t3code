@@ -9,15 +9,8 @@
  *     and calls `driver.create()` inside a fresh child scope. The
  *     resulting `ProviderInstance` is stored keyed by instance id,
  *     alongside its scope so the entry can be torn down independently.
- *   - When the entry's `driver` is unknown to this build (fork, rollback,
- *     in-flight PR branch), the registry emits an `"unavailable"` shadow
- *     `ServerProvider` snapshot instead of failing. This is what makes
- *     downgrades and fork-hopping safe per the
- *     `forward/backward compatibility invariant` in
- *     `packages/contracts/src/providerInstance.ts`.
- *   - When the entry's config fails schema decode, the registry logs and
- *     emits a shadow snapshot with the schema detail — same bucket as an
- *     unknown driver.
+ *   - Unknown drivers and invalid configurations are rejected and logged.
+ *     Fixed FD hydration supplies only the registered sole driver.
  *
  * Unlike the pre-Slice-D layer, the registry now holds mutable state
  * (`Ref`s + `PubSub`) and exposes an internal mutator
@@ -33,12 +26,10 @@
  * @module provider/Layers/ProviderInstanceRegistryLive
  */
 import {
-  defaultInstanceIdForDriver,
   ProviderInstanceId,
   type ProviderInstanceConfig,
   type ProviderInstanceConfigMap,
   type ProviderDriverKind,
-  type ServerProvider,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -51,7 +42,6 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 
-import { buildUnavailableProviderSnapshot } from "../unavailableProviderSnapshot.ts";
 import {
   ProviderInstanceRegistry,
   type ProviderInstanceRegistryShape,
@@ -79,7 +69,6 @@ interface LiveEntry {
  */
 interface RegistryState {
   readonly entries: Ref.Ref<ReadonlyMap<ProviderInstanceId, LiveEntry>>;
-  readonly unavailable: Ref.Ref<ReadonlyMap<ProviderInstanceId, ServerProvider>>;
   readonly changes: PubSub.PubSub<void>;
 }
 
@@ -112,26 +101,16 @@ const buildEntry = <R>(input: {
   readonly instanceId: ProviderInstanceId;
   readonly rawInstanceId: string;
   readonly entry: ProviderInstanceConfig;
-}): Effect.Effect<
-  | { readonly kind: "live"; readonly live: LiveEntry }
-  | { readonly kind: "unavailable"; readonly snapshot: ServerProvider },
-  never,
-  R
-> =>
+}): Effect.Effect<LiveEntry | undefined, never, R> =>
   Effect.gen(function* () {
     const { driversById, parentScope, instanceId, rawInstanceId, entry } = input;
     const driver = driversById.get(entry.driver);
     if (!driver) {
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Driver '${entry.driver}' is not registered in this build.`,
-        }),
-      };
+      yield* Effect.logError("Rejected unregistered provider driver", {
+        instanceId: rawInstanceId,
+        driver: entry.driver,
+      });
+      return undefined;
     }
 
     const decoder = Schema.decodeUnknownEffect(driver.configSchema);
@@ -144,16 +123,7 @@ const buildEntry = <R>(input: {
         driver: entry.driver,
         detail,
       });
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Invalid config for instance '${rawInstanceId}': ${detail}`,
-        }),
-      };
+      return undefined;
     }
 
     const typedConfig = decodeResult.success;
@@ -182,25 +152,13 @@ const buildEntry = <R>(input: {
         detail: createResult.failure.detail,
       });
       yield* Scope.close(childScope, Exit.void).pipe(Effect.ignore);
-      return {
-        kind: "unavailable" as const,
-        snapshot: yield* buildUnavailableProviderSnapshot({
-          driverKind: entry.driver,
-          instanceId,
-          displayName: entry.displayName,
-          accentColor: entry.accentColor,
-          reason: `Driver '${entry.driver}' failed to create instance: ${createResult.failure.detail}`,
-        }),
-      };
+      return undefined;
     }
 
     return {
-      kind: "live" as const,
-      live: {
-        instance: createResult.success,
-        scope: childScope,
-        entry,
-      },
+      instance: createResult.success,
+      scope: childScope,
+      entry,
     };
   });
 
@@ -217,7 +175,6 @@ const makeReconcile = <R>(input: {
   return (configMap: ProviderInstanceConfigMap) =>
     Effect.gen(function* () {
       const previousEntries = yield* Ref.get(state.entries);
-      const previousUnavailable = yield* Ref.get(state.unavailable);
       const nextRaw = Object.entries(configMap);
       const nextKeys = new Set<ProviderInstanceId>(
         nextRaw.map(([raw]) => ProviderInstanceId.make(raw)),
@@ -248,7 +205,6 @@ const makeReconcile = <R>(input: {
       // 2. Build additions and replacements. Walk `nextRaw` so the final
       //    entry order follows settings-author order.
       const builtEntries = new Map<ProviderInstanceId, LiveEntry>();
-      const builtUnavailable = new Map<ProviderInstanceId, ServerProvider>();
       let orderChanged = false;
       const previousOrder = [...previousEntries.keys()];
       const nextOrder: Array<ProviderInstanceId> = [];
@@ -271,11 +227,7 @@ const makeReconcile = <R>(input: {
           rawInstanceId,
           entry,
         });
-        if (result.kind === "live") {
-          builtEntries.set(instanceId, result.live);
-        } else {
-          builtUnavailable.set(instanceId, result.snapshot);
-        }
+        if (result !== undefined) builtEntries.set(instanceId, result);
       }
 
       if (previousOrder.length === nextOrder.length) {
@@ -294,18 +246,9 @@ const makeReconcile = <R>(input: {
         removedIds.length > 0 ||
         replacedIds.size > 0 ||
         builtEntries.size !== previousEntries.size;
-      const unavailableChanged =
-        builtUnavailable.size !== previousUnavailable.size ||
-        [...builtUnavailable].some(([id, snapshot]) => {
-          const prev = previousUnavailable.get(id);
-          return prev === undefined || !Equal.equals(prev, snapshot);
-        }) ||
-        [...previousUnavailable].some(([id]) => !builtUnavailable.has(id));
-
       yield* Ref.set(state.entries, builtEntries);
-      yield* Ref.set(state.unavailable, builtUnavailable);
 
-      if (entriesChanged || unavailableChanged) {
+      if (entriesChanged) {
         yield* PubSub.publish(state.changes, undefined);
       }
     });
@@ -356,11 +299,10 @@ export const makeProviderInstanceRegistry = <R>(input: {
     const driverContext = yield* Effect.context<R>();
 
     const entries = yield* Ref.make<ReadonlyMap<ProviderInstanceId, LiveEntry>>(new Map());
-    const unavailable = yield* Ref.make<ReadonlyMap<ProviderInstanceId, ServerProvider>>(new Map());
     const changes = yield* PubSub.unbounded<void>();
     yield* Effect.addFinalizer(() => PubSub.shutdown(changes));
 
-    const state: RegistryState = { entries, unavailable, changes };
+    const state: RegistryState = { entries, changes };
     const reconcileWithR = makeReconcile({ state, driversById, parentScope });
     const reconcile: ProviderInstanceRegistryMutatorShape["reconcile"] = (configMap) =>
       reconcileWithR(configMap).pipe(Effect.provideContext(driverContext));
@@ -376,9 +318,6 @@ export const makeProviderInstanceRegistry = <R>(input: {
           (map) =>
             Array.from(map.values(), (live) => live.instance) as ReadonlyArray<ProviderInstance>,
         ),
-      ),
-      listUnavailable: Ref.get(unavailable).pipe(
-        Effect.map((map) => Array.from(map.values()) as ReadonlyArray<ServerProvider>),
       ),
       // Getters: each read constructs a fresh Stream / Effect descriptor
       // so multiple consumers don't share a single already-started
@@ -439,5 +378,3 @@ export const ProviderInstanceRegistryMutableLayer = <R>(input: {
       ),
     ),
   ) as Layer.Layer<ProviderInstanceRegistry | ProviderInstanceRegistryMutator, never, R>;
-
-export { defaultInstanceIdForDriver };

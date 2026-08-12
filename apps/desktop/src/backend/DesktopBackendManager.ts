@@ -1,27 +1,4 @@
-// Per-instance backend factory. Replaces the legacy singleton
-// `DesktopBackendManager` Context.Service: each call to
-// `makeBackendInstance(spec)` constructs an isolated backend lifecycle —
-// its own state Ref, mutex, restart loop, and active child process. The
-// returned `DesktopBackendInstance` exposes start/stop/snapshot/wait
-// methods that operate on that single backend.
-//
-// The pool layer (`DesktopBackendPool.ts`) calls this factory once per
-// backend it wants to run. Today that's the Windows primary; follow-up
-// commits add a second call for the WSL instance.
-//
-// Singleton couplings that the legacy service held inline are now
-// parameterized via the spec:
-//   - configResolve replaces the legacy `DesktopBackendConfiguration.resolve`
-//     so each instance can resolve its own start config — the primary wires
-//     `configuration.resolvePrimary`, the WSL orchestrator wires a
-//     `configuration.resolveWsl({ port, distro })` closure.
-//   - onReady / onShutdown drive UI side effects (window auto-open,
-//     readiness latch) only for instances that want them — the primary's
-//     spec passes the window's handleBackendReady/handleBackendNotReady,
-//     other pool instances pass nothing.
-//   - log writes go through a per-instance writer that the factory
-//     pulls from `DesktopBackendOutputLogFactory.forInstance(spec.id)`,
-//     so each instance lands in its own rotating file.
+// Isolated lifecycle for the one Electron-owned local backend.
 
 import * as Brand from "effect/Brand";
 import * as Cause from "effect/Cause";
@@ -52,6 +29,7 @@ import { waitForHttpReady as waitForHttpReadyShared } from "@t3tools/shared/http
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
+import * as FdCredentialPublisher from "../fd-identity/FdCredentialPublisher.ts";
 
 const INITIAL_RESTART_DELAY = Duration.millis(500);
 const MAX_RESTART_DELAY = Duration.seconds(10);
@@ -87,25 +65,16 @@ export type DesktopBackendBootstrapDelivery = "fd3" | "stdin";
 export interface DesktopBackendStartConfig extends BackendProcessContext {
   readonly args: ReadonlyArray<string>;
   readonly env: Record<string, string | undefined>;
-  // When true the spawner merges the desktop process.env on top of `env`;
-  // when false `env` is passed verbatim. WSL mode opts out so a leaking
-  // T3CODE_HOME can't pin the WSL backend to /mnt/c/...\.t3.
+  // When true the spawner merges the desktop process.env on top of `env`.
   readonly extendEnv: boolean;
   readonly bootstrap: DesktopBackendBootstrapValue;
   readonly bootstrapDelivery: DesktopBackendBootstrapDelivery;
   readonly httpBaseUrl: URL;
   readonly captureOutput: boolean;
   readonly preflightFailure: Option.Option<PreflightFailure>;
-  // Present for a WSL run after the configured/default distro has been
-  // resolved to the concrete distro passed to wsl.exe.
-  readonly runningDistro?: string;
 }
 
-// A preflight failure records whether it is fatal. Transient failures (WSL
-// cold-starting, wslpath while the VM boots) keep retrying so the backend can
-// self-heal; fatal ones (no node, wrong version, missing build tools) are
-// surfaced via onPreflightFailed and stop the restart loop after
-// MAX_PREFLIGHT_FAILURE_ATTEMPTS.
+// A preflight failure records whether a bounded startup retry is appropriate.
 export interface PreflightFailure {
   readonly reason: string;
   readonly fatal: boolean;
@@ -217,6 +186,7 @@ export type BackendProcessError = typeof BackendProcessError.Type;
 
 interface RunBackendProcessOptions extends DesktopBackendStartConfig {
   readonly desktopTelemetryStream: Stream.Stream<Uint8Array>;
+  readonly fdCredentialStream?: Stream.Stream<Uint8Array>;
   readonly onDesktopTelemetryControl?: (
     message: DesktopTelemetryControlMessageValue,
   ) => Effect.Effect<void>;
@@ -279,10 +249,9 @@ export interface DesktopBackendInstance {
 export interface BackendInstanceSpec {
   readonly id: BackendInstanceId;
   readonly label: Effect.Effect<string>;
-  // configResolve can now fail with PlatformError because the
-  // bootstrap-token closure inside DesktopBackendConfiguration uses
-  // crypto.randomBytes (Effect 4 beta.73 migration).
-  readonly configResolve: Effect.Effect<DesktopBackendStartConfig, PlatformError.PlatformError>;
+  // Configuration resolution can fail before process startup. The manager only
+  // logs the message and retries, so keep the boundary structural.
+  readonly configResolve: Effect.Effect<DesktopBackendStartConfig, { readonly message: string }>;
   // Receives the *resolved* httpBaseUrl of the run that just became
   // ready. The window service uses this to decide what URL to load
   // (the WSL backend reports its distro IP, the Windows backend reports
@@ -467,6 +436,12 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
         type: "output",
       };
     }
+    if (options.bootstrap.fdRuntimeCredentialFd !== undefined) {
+      additionalFds[`fd${options.bootstrap.fdRuntimeCredentialFd}`] = {
+        type: "input",
+        stream: options.fdCredentialStream ?? Stream.empty,
+      };
+    }
   }
   const command = ChildProcess.make(options.executablePath, options.args, {
     cwd: options.cwd,
@@ -624,6 +599,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
   | HttpClient.HttpClient
   | DesktopObservability.DesktopBackendOutputLogFactory
   | DesktopTelemetryPublisher.DesktopTelemetryPublisher
+  | FdCredentialPublisher.FdCredentialPublisher
   | Scope.Scope
 > {
   const parentScope = yield* Scope.Scope;
@@ -631,6 +607,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
   const backendOutputLogFactory = yield* DesktopObservability.DesktopBackendOutputLogFactory;
   const backendOutputLog = yield* backendOutputLogFactory.forInstance(spec.id);
   const desktopTelemetryPublisher = yield* DesktopTelemetryPublisher.DesktopTelemetryPublisher;
+  const fdCredentialPublisher = yield* FdCredentialPublisher.FdCredentialPublisher;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const httpClient = yield* HttpClient.HttpClient;
   const state = yield* Ref.make(initialState);
@@ -889,6 +866,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         const program = runBackendProcess({
           ...config.value,
           desktopTelemetryStream: desktopTelemetryPublisher.encoded,
+          fdCredentialStream: fdCredentialPublisher.encoded,
           onDesktopTelemetryControl: (message) =>
             desktopTelemetryPublisher.handleControlForSource(spec.id, message),
           onStarted: Effect.fn("desktop.backendInstance.onStarted")(function* (pid) {

@@ -7,7 +7,7 @@
  * provider event stream to callers.
  *
  * Uses Effect `Context.Service` for dependency injection and returns typed
- * domain errors for validation, session, codex, and checkpoint workflows.
+ * domain errors for validation, session, and checkpoint workflows.
  *
  * @module ProviderService
  */

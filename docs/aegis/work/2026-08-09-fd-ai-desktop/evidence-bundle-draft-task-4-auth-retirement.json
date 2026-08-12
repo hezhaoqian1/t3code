@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-4-auth-retirement",
+  "type": "review",
+  "source": "Task 4 spec and code-quality review loops",
+  "summary": "Mounted local APIs retain bootstrap/browser/access-token/session-cookie/WebSocket/RPC auth while removing pairing/access-management/relay scopes; migration 040 removes the retired pairing table; independent spec and code-quality reviews approved.",
+  "verifier": "codex-controller"
+}

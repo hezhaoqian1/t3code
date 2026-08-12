@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "candidateDocs": [
+    "docs/aegis/specs/2026-08-09-fd-ai-local-desktop-design.md",
+    "docs/aegis/plans/2026-08-09-fd-ai-desktop-implementation.md",
+    "docs/aegis/baseline/2026-08-09-initial-baseline.md",
+    "docs/internals/overview.md",
+    "docs/internals/providers.md",
+    "docs/internals/environment-auth.md",
+    "docs/internals/remote.md"
+  ],
+  "whyRelevant": "These refs define approved behavior, current owners, compatibility, retirement, and verification.",
+  "missingAuthority": ["Production signing identities and final FD release-policy endpoint."]
+}

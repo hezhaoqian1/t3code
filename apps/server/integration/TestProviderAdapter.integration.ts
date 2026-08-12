@@ -224,7 +224,7 @@ function missingSessionEffect(
 
 export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapterHarnessOptions) =>
   Effect.gen(function* () {
-    const provider = options?.provider ?? ProviderDriverKind.make("codex");
+    const provider = options?.provider ?? ProviderDriverKind.make("fd-deepseek");
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     let sessionCount = 0;
     let eventCount = 0;

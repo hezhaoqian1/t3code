@@ -858,7 +858,7 @@ export function ThemeEditorPanel({
     <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3">
       <span className="text-sm font-medium">Sidebar artwork</span>
       <span className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>Show T3 Code environment artwork</span>
+        <span>Show 方德 AI environment artwork</span>
         <Switch
           aria-label="Allow sidebar artwork with this theme"
           checked={sidebarArtwork}

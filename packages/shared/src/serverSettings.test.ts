@@ -1,20 +1,12 @@
-import {
-  DEFAULT_SERVER_SETTINGS,
-  ProviderDriverKind,
-  ProviderInstanceId,
-  type ServerProvider,
-} from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import { describe, expect, it } from "vite-plus/test";
 import { resolveServerBackgroundActivitySettings } from "./backgroundActivitySettings.ts";
-import { createModelSelection } from "./model.ts";
 import {
   applyServerSettingsPatch,
   extractPersistedServerObservabilitySettings,
-  isModelSelectionProviderEnabled,
   normalizePersistedServerSettingString,
   parsePersistedServerObservabilitySettings,
-  resolveSourceControlWriterModelSelection,
 } from "./serverSettings.ts";
 
 describe("serverSettings helpers", () => {
@@ -60,241 +52,6 @@ describe("serverSettings helpers", () => {
     expect(parsePersistedServerObservabilitySettings("{")).toEqual({
       otlpTracesUrl: undefined,
       otlpMetricsUrl: undefined,
-    });
-  });
-
-  it("replaces text generation selection when provider/model are provided", () => {
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      textGenerationModelSelection: createModelSelection(
-        ProviderInstanceId.make("codex"),
-        "gpt-5.4-mini",
-        [
-          { id: "reasoningEffort", value: "high" },
-          { id: "fastMode", value: true },
-        ],
-      ),
-    };
-
-    expect(
-      applyServerSettingsPatch(current, {
-        textGenerationModelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "gpt-5.4-mini",
-        },
-      }).textGenerationModelSelection,
-    ).toEqual({
-      instanceId: "codex",
-      model: "gpt-5.4-mini",
-    });
-  });
-
-  it("still deep merges text generation selection when only options are provided", () => {
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      textGenerationModelSelection: createModelSelection(
-        ProviderInstanceId.make("codex"),
-        "gpt-5.4-mini",
-        [
-          { id: "reasoningEffort", value: "high" },
-          { id: "fastMode", value: true },
-        ],
-      ),
-    };
-
-    expect(
-      applyServerSettingsPatch(current, {
-        textGenerationModelSelection: {
-          options: [{ id: "fastMode", value: false }],
-        },
-      }).textGenerationModelSelection,
-    ).toEqual({
-      instanceId: "codex",
-      model: "gpt-5.4-mini",
-      options: [
-        { id: "reasoningEffort", value: "high" },
-        { id: "fastMode", value: false },
-      ],
-    });
-  });
-
-  it("replaces text generation selection across providers without leaking stale options", () => {
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      textGenerationModelSelection: createModelSelection(
-        ProviderInstanceId.make("codex"),
-        "gpt-5.4-mini",
-        [
-          { id: "reasoningEffort", value: "high" },
-          { id: "fastMode", value: true },
-        ],
-      ),
-    };
-
-    expect(
-      applyServerSettingsPatch(current, {
-        textGenerationModelSelection: {
-          instanceId: ProviderInstanceId.make("opencode"),
-          model: "openai/gpt-5",
-        },
-      }).textGenerationModelSelection,
-    ).toEqual({
-      instanceId: "opencode",
-      model: "openai/gpt-5",
-    });
-  });
-
-  it("accepts array-based text generation selection patches", () => {
-    expect(
-      applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
-        textGenerationModelSelection: {
-          instanceId: ProviderInstanceId.make("opencode"),
-          model: "openai/gpt-5",
-          options: [
-            { id: "variant", value: "prod" },
-            { id: "agent", value: "build" },
-          ],
-        },
-      }).textGenerationModelSelection,
-    ).toEqual({
-      instanceId: "opencode",
-      model: "openai/gpt-5",
-      options: [
-        { id: "variant", value: "prod" },
-        { id: "agent", value: "build" },
-      ],
-    });
-  });
-
-  it("replaces source control writer selection without retaining stale options", () => {
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      sourceControlWriterModelSelection: createModelSelection(
-        ProviderInstanceId.make("codex"),
-        "gpt-5.4-mini",
-        [{ id: "reasoningEffort", value: "high" }],
-      ),
-    };
-
-    expect(
-      applyServerSettingsPatch(current, {
-        sourceControlWriterModelSelection: {
-          instanceId: ProviderInstanceId.make("opencode"),
-          model: "openai/gpt-5",
-        },
-      }).sourceControlWriterModelSelection,
-    ).toEqual({
-      instanceId: "opencode",
-      model: "openai/gpt-5",
-    });
-  });
-
-  it("clears source control writer selection with null", () => {
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      sourceControlWriterModelSelection: createModelSelection(
-        ProviderInstanceId.make("codex"),
-        "gpt-5.4-mini",
-      ),
-    };
-
-    expect(
-      applyServerSettingsPatch(current, {
-        sourceControlWriterModelSelection: null,
-      }).sourceControlWriterModelSelection,
-    ).toBeNull();
-  });
-
-  it("falls back from a disabled source control writer provider without clearing its selection", () => {
-    const instanceId = ProviderInstanceId.make("codex_writer");
-    const sourceControlWriterModelSelection = createModelSelection(instanceId, "gpt-5.4-mini");
-    const settings = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providerInstances: {
-        [instanceId]: {
-          driver: ProviderDriverKind.make("codex"),
-          enabled: false,
-          config: {},
-        },
-      },
-      sourceControlWriterModelSelection,
-    };
-
-    expect(isModelSelectionProviderEnabled(settings, sourceControlWriterModelSelection)).toBe(
-      false,
-    );
-    expect(resolveSourceControlWriterModelSelection(settings)).toBe(
-      settings.textGenerationModelSelection,
-    );
-    expect(settings.sourceControlWriterModelSelection).toBe(sourceControlWriterModelSelection);
-  });
-
-  it("falls back from an unavailable source control writer provider", () => {
-    const instanceId = ProviderInstanceId.make("missing_writer");
-    const sourceControlWriterModelSelection = createModelSelection(instanceId, "missing-model");
-    const settings = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providerInstances: {
-        [instanceId]: {
-          driver: ProviderDriverKind.make("missing-driver"),
-          config: {},
-        },
-      },
-      sourceControlWriterModelSelection,
-    };
-    const unavailableProvider = {
-      instanceId,
-      driver: ProviderDriverKind.make("missing-driver"),
-      enabled: false,
-      installed: false,
-      version: null,
-      status: "disabled",
-      auth: { status: "unknown" },
-      checkedAt: "2026-07-27T00:00:00.000Z",
-      availability: "unavailable",
-      unavailableReason: "This provider driver is not available in this build.",
-      models: [],
-      slashCommands: [],
-      skills: [],
-    } satisfies ServerProvider;
-
-    expect(resolveSourceControlWriterModelSelection(settings, [unavailableProvider])).toBe(
-      settings.textGenerationModelSelection,
-    );
-    expect(settings.sourceControlWriterModelSelection).toBe(sourceControlWriterModelSelection);
-  });
-
-  it("replaces providerInstances maps so omitted instance fields are cleared", () => {
-    const codexId = ProviderInstanceId.make("codex");
-    const current = {
-      ...DEFAULT_SERVER_SETTINGS,
-      providerInstances: {
-        [codexId]: {
-          driver: ProviderDriverKind.make("codex"),
-          displayName: "Codex Work",
-          accentColor: "#7c3aed",
-          enabled: true,
-          config: { homePath: "~/.codex" },
-        },
-      },
-    };
-
-    expect(
-      applyServerSettingsPatch(current, {
-        providerInstances: {
-          [codexId]: {
-            driver: ProviderDriverKind.make("codex"),
-            displayName: "Codex Work",
-            enabled: true,
-            config: { homePath: "~/.codex" },
-          },
-        },
-      }).providerInstances[codexId],
-    ).toEqual({
-      driver: ProviderDriverKind.make("codex"),
-      displayName: "Codex Work",
-      enabled: true,
-      config: { homePath: "~/.codex" },
     });
   });
 
@@ -347,10 +104,7 @@ describe("serverSettings helpers", () => {
     };
 
     const next = applyServerSettingsPatch(current, {
-      sourceControlWriterModelSelection: createModelSelection(
-        ProviderInstanceId.make("codex"),
-        "gpt-5.4-mini",
-      ),
+      observability: { otlpTracesUrl: "http://localhost:4318/v1/traces" },
     });
 
     expect(next.backgroundActivity).toEqual({

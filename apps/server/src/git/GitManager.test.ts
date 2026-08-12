@@ -20,13 +20,7 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
-import {
-  DEFAULT_SERVER_SETTINGS,
-  GitCommandError,
-  ProviderDriverKind,
-  ProviderInstanceId,
-  TextGenerationError,
-} from "@t3tools/contracts";
+import { GitCommandError, TextGenerationError } from "@t3tools/contracts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -1693,29 +1687,16 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
-  it.effect("falls back when the dedicated source control writer is unavailable", () =>
+  it.effect("uses the exact FD model for source control text generation", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");
       yield* initRepo(repoDir);
       NodeFS.writeFileSync(NodePath.join(repoDir, "README.md"), "hello\nworld\n");
-      const missingInstanceId = ProviderInstanceId.make("missing_writer");
       let generatedModelSelection:
         | TextGeneration.CommitMessageGenerationInput["modelSelection"]
         | undefined;
 
       const { manager } = yield* makeManager({
-        serverSettings: {
-          providerInstances: {
-            [missingInstanceId]: {
-              driver: ProviderDriverKind.make("missing-driver"),
-              config: {},
-            },
-          },
-          sourceControlWriterModelSelection: {
-            instanceId: missingInstanceId,
-            model: "missing-model",
-          },
-        },
         textGeneration: {
           generateCommitMessage: (input) => {
             generatedModelSelection = input.modelSelection;
@@ -1729,7 +1710,10 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         action: "commit",
       });
 
-      expect(generatedModelSelection).toEqual(DEFAULT_SERVER_SETTINGS.textGenerationModelSelection);
+      expect(generatedModelSelection).toEqual({
+        instanceId: "fd-deepseek",
+        model: "deepseek-v4-flash",
+      });
     }),
   );
 

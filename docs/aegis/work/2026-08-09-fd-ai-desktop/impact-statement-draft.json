@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "affectedLayers": [
+    "workspace",
+    "desktop",
+    "server",
+    "contracts",
+    "renderer",
+    "persistence",
+    "release"
+  ],
+  "owners": [
+    "Electron main identity and process owner",
+    "T3 local server",
+    "FdDeepSeekDriver",
+    "FD New API and Tool Gateway"
+  ],
+  "invariants": [
+    "One authenticated loopback-only Desktop environment.",
+    "Only FD-managed deepseek-v4-flash is callable.",
+    "FD data authorization remains server-side and audited.",
+    "Each turn settles exactly once."
+  ],
+  "compatBoundary": "Retain FD APIs and T3 local workbench; retire all remote, mobile, cloud, Clerk, and third-party provider compatibility.",
+  "nonGoals": [
+    "Remote access or multi-device continuity.",
+    "Employee-configurable providers or API keys."
+  ]
+}
