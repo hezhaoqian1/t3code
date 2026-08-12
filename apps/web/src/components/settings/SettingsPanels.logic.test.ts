@@ -139,7 +139,7 @@ describe("formatDiagnosticsDescription", () => {
         otlpMetricsEnabled: true,
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
       }),
-    ).toBe("Local trace file. Exporting OTEL to http://localhost:4318/v1/{traces,metrics}.");
+    ).toBe("本地跟踪文件。正在导出 OTEL 到 http://localhost:4318/v1/{traces,metrics}。");
   });
 
   it("keeps separate trace and metric URLs when their base paths differ", () => {
@@ -152,7 +152,7 @@ describe("formatDiagnosticsDescription", () => {
         otlpMetricsUrl: "http://localhost:9000/v1/metrics",
       }),
     ).toBe(
-      "Local trace file. Exporting OTEL traces to http://localhost:4318/v1/traces and metrics to http://localhost:9000/v1/metrics.",
+      "本地跟踪文件。正在导出 OTEL 跟踪到 http://localhost:4318/v1/traces，指标到 http://localhost:9000/v1/metrics。",
     );
   });
 
@@ -163,6 +163,6 @@ describe("formatDiagnosticsDescription", () => {
         otlpTracesEnabled: false,
         otlpMetricsEnabled: false,
       }),
-    ).toBe("Local trace file.");
+    ).toBe("本地跟踪文件。");
   });
 });

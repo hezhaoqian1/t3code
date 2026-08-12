@@ -27,7 +27,7 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
       onClick={() => void restoreDefaults()}
     >
       <RotateCcwIcon className="mx-1 size-3.5" />
-      Restore defaults
+      恢复默认设置
     </Button>
   );
 }
