@@ -1,4 +1,4 @@
-name: FD Desktop Release
+name: FD Desktop Internal Release
 
 on:
   workflow_dispatch:
@@ -10,9 +10,6 @@ on:
 
 permissions:
   contents: read
-
-env:
-  TRUSTED_SIGNING_MODULE_VERSION: 0.5.0
 
 jobs:
   preflight:
@@ -38,7 +35,6 @@ jobs:
 
   build:
     needs: preflight
-    environment: production-signing
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -80,144 +76,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Require Apple signing configuration
-        if: matrix.platform == 'mac'
-        shell: bash
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        run: |
-          set -euo pipefail
-          required=(CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER)
-          missing=()
-          for name in "${required[@]}"; do
-            [[ -n "${!name:-}" ]] || missing+=("$name")
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing required production signing secrets: %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-
-      - name: Require Azure signing configuration
-        if: matrix.platform == 'win'
-        shell: bash
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
-          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
-        run: |
-          set -euo pipefail
-          required=(
-            AZURE_TENANT_ID AZURE_CLIENT_ID AZURE_CLIENT_SECRET
-            AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_ACCOUNT_NAME
-            AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME
-            AZURE_TRUSTED_SIGNING_PUBLISHER_NAME
-          )
-          missing=()
-          for name in "${required[@]}"; do
-            [[ -n "${!name:-}" ]] || missing+=("$name")
-          done
-          if (( ${#missing[@]} > 0 )); then
-            printf 'Missing required production signing secrets: %s\n' "${missing[*]}" >&2
-            exit 1
-          fi
-
       - name: Align release versions
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
-      - name: Prepare Apple notarization key
+      - name: Build internal macOS desktop package
         if: matrix.platform == 'mac'
         shell: bash
-        env:
-          APPLE_API_KEY_CONTENT: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-        run: |
-          set -euo pipefail
-          key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-          printf '%s' "$APPLE_API_KEY_CONTENT" > "$key_path"
-          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
-
-      - name: Prepare pinned Azure Trusted Signing
-        if: matrix.platform == 'win'
-        shell: pwsh
-        run: ./scripts/prepare-trusted-signing.ps1
-
-      - name: Build signed macOS desktop package
-        if: matrix.platform == 'mac'
-        shell: bash
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -euo pipefail
           node scripts/build-desktop-artifact.ts \
             --platform mac \
             --target dmg \
             --arch "${{ matrix.arch }}" \
-            --build-version "${{ needs.preflight.outputs.version }}" \
-            --signed
+            --build-version "${{ needs.preflight.outputs.version }}"
 
-      - name: Build signed Windows desktop package
+      - name: Build internal Windows desktop package
         if: matrix.platform == 'win'
         shell: bash
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
-          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
         run: |
           set -euo pipefail
           node scripts/build-desktop-artifact.ts \
             --platform win \
             --target nsis \
             --arch "${{ matrix.arch }}" \
-            --build-version "${{ needs.preflight.outputs.version }}" \
-            --signed
-
-      - name: Verify signed and notarized macOS package
-        if: matrix.platform == 'mac'
-        shell: bash
-        run: |
-          set -euo pipefail
-          dmg="release/FD-Enterprise-AI-${{ needs.preflight.outputs.version }}-mac-${{ matrix.arch }}.dmg"
-          spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg"
-          xcrun stapler validate "$dmg"
-          mount_dir="$RUNNER_TEMP/fd-app-${{ matrix.arch }}"
-          mkdir -p "$mount_dir"
-          device=$(hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mount_dir" | tail -1 | awk '{print $1}')
-          trap 'hdiutil detach "$device"' EXIT
-          app=$(find "$mount_dir" -maxdepth 1 -name '*.app' -print -quit)
-          [[ -n "$app" ]]
-          codesign --verify --deep --strict --verbose=2 "$app"
-          spctl --assess --type execute --verbose=2 "$app"
-          xcrun stapler validate "$app"
-
-      - name: Verify Windows Authenticode publisher
-        if: matrix.platform == 'win'
-        shell: pwsh
-        env:
-          EXPECTED_PUBLISHER: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
-        run: |
-          $installer = "release/FD-Enterprise-AI-${{ needs.preflight.outputs.version }}-win-${{ matrix.arch }}.exe"
-          $signature = Get-AuthenticodeSignature -FilePath $installer
-          if ($signature.Status -ne "Valid") { throw "Invalid Authenticode signature: $($signature.Status)" }
-          $actualPublisher = $signature.SignerCertificate.Subject.Trim()
-          $expectedPublisher = $env:EXPECTED_PUBLISHER.Trim()
-          if (-not [string]::Equals($actualPublisher, $expectedPublisher, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Unexpected Authenticode publisher: $($signature.SignerCertificate.Subject)"
-          }
+            --build-version "${{ needs.preflight.outputs.version }}"
 
       - name: Collect updater assets
         shell: bash
