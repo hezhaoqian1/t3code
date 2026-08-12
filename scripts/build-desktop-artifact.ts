@@ -848,6 +848,13 @@ const runCommand = Effect.fn("runCommand")(function* (
   }
 });
 
+export function desktopReleaseBuildEnvironment(
+  environment: NodeJS.ProcessEnv,
+  appVersion: string,
+): NodeJS.ProcessEnv {
+  return { ...environment, APP_VERSION: appVersion };
+}
+
 const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* (input: {
   readonly repoRoot: string;
   readonly stageResourcesDir: string;
@@ -1422,10 +1429,14 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
 
   if (!options.skipBuild) {
     yield* Effect.log("[desktop-artifact] Building desktop/server/web artifacts...");
-    const spawnCommand = yield* resolveSpawnCommand("vp", ["run", "build:desktop"]);
+    const buildEnvironment = desktopReleaseBuildEnvironment(process.env, appVersion);
+    const spawnCommand = yield* resolveSpawnCommand("vp", ["run", "build:desktop"], {
+      env: buildEnvironment,
+    });
     yield* runCommand(
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {
         cwd: repoRoot,
+        env: buildEnvironment,
         shell: spawnCommand.shell,
       }),
       { label: "vp run build:desktop", verbose: options.verbose },

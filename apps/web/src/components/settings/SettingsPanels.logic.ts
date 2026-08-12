@@ -133,26 +133,26 @@ export function formatDiagnosticsDescription(input: {
   readonly otlpMetricsEnabled: boolean;
   readonly otlpMetricsUrl?: string | undefined;
 }): string {
-  const mode = input.localTracingEnabled ? "Local trace file" : "Terminal logs only";
+  const mode = input.localTracingEnabled ? "本地跟踪文件" : "仅终端日志";
   const tracesUrl = input.otlpTracesEnabled ? input.otlpTracesUrl : undefined;
   const metricsUrl = input.otlpMetricsEnabled ? input.otlpMetricsUrl : undefined;
 
   if (tracesUrl && metricsUrl) {
     const collapsedUrl = collapseOtelSignalsUrl({ tracesUrl, metricsUrl });
     return collapsedUrl
-      ? `${mode}. Exporting OTEL to ${collapsedUrl}.`
-      : `${mode}. Exporting OTEL traces to ${tracesUrl} and metrics to ${metricsUrl}.`;
+      ? `${mode}。正在导出 OTEL 到 ${collapsedUrl}。`
+      : `${mode}。正在导出 OTEL 跟踪到 ${tracesUrl}，指标到 ${metricsUrl}。`;
   }
 
   if (tracesUrl) {
-    return `${mode}. Exporting OTEL traces to ${tracesUrl}.`;
+    return `${mode}。正在导出 OTEL 跟踪到 ${tracesUrl}。`;
   }
 
   if (metricsUrl) {
-    return `${mode}. Exporting OTEL metrics to ${metricsUrl}.`;
+    return `${mode}。正在导出 OTEL 指标到 ${metricsUrl}。`;
   }
 
-  return `${mode}.`;
+  return `${mode}。`;
 }
 
 // ── Background-activity interval helpers ─────────────────────────────

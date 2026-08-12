@@ -16,6 +16,7 @@ import {
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
+  desktopReleaseBuildEnvironment,
   InvalidMockUpdateServerPortError,
   UnsupportedDesktopBuildArchitectureError,
   LinuxIconResizeError,
@@ -38,6 +39,13 @@ import {
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
+
+it("uses the release version for the bundled renderer", () => {
+  assert.deepStrictEqual(
+    desktopReleaseBuildEnvironment({ PATH: "/usr/bin", APP_VERSION: "0.2.0" }, "0.2.2"),
+    { PATH: "/usr/bin", APP_VERSION: "0.2.2" },
+  );
+});
 
 function mockProcess(exitCode: number) {
   return ChildProcessSpawner.makeHandle({
