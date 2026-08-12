@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-6-renderer-regression",
+  "type": "test",
+  "source": "controller-owned Web and Shared tests, six package typechecks, Web production build, diff check, and retirement scan",
+  "summary": "Web passed 192 files and 1760 tests; Shared passed 32 files and 280 tests. Web, Shared, client-runtime, contracts, Desktop, and server typechecks passed. Web production build transformed 4223 modules. Diff check passed, and retirement scan retained only SSH Git clone and unrelated pair terminology.",
+  "verifier": "codex-controller; Vitest 4.1.9, tsgo, and Vite exit code 0"
+}

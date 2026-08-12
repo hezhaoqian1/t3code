@@ -69,7 +69,7 @@ function diagnosticOutput(input: {
   readonly targetBytes: number;
 }): string {
   const chunks: string[] = [];
-  const providerSeed = input.provider === "codex" ? 0x43_4f_44_45 : 0x43_4c_41_55;
+  const providerSeed = 0x46_44_44_53;
   let length = 0;
   let lineIndex = 0;
 
@@ -90,9 +90,8 @@ function diagnosticOutput(input: {
 }
 
 function assistantChunks(provider: ProviderDriverKind, turnIndex: number): ReadonlyArray<string> {
-  const providerName = provider === "codex" ? "Codex" : "Claude";
   const paragraphs: string[] = [
-    `I traced the ${providerName} request through the environment connection and orchestration layers. `,
+    "I traced the FD DeepSeek request through the environment connection and orchestration layers. ",
   ];
   let paragraphIndex = 0;
   while (paragraphs.join("").length < 4_096) {
@@ -145,8 +144,8 @@ function baseEvent(
 }
 
 /**
- * Synthetic canonical events calibrated from heavy local Codex and Claude
- * threads. Ten historical turns produce 9 MB of retained MCP results without
+ * Synthetic canonical events calibrated from heavy local agent threads. Ten
+ * historical turns produce 9 MB of retained MCP results without
  * committing user content. Command output is intentionally modest because the
  * client projection strips it.
  */
@@ -165,17 +164,14 @@ export function makeRecordedTransferTurn(
     ...baseEvent(provider, turnIndex, eventIndex++),
     turnId,
     payload: {
-      model: provider === "codex" ? "gpt-5.4" : "claude-opus-4-1",
-      effort: provider === "codex" ? "high" : "default",
+      model: "deepseek-v4-flash",
+      effort: "default",
     },
   });
 
   for (let toolIndex = 0; toolIndex < toolCount; toolIndex += 1) {
     const itemId = `tool-${turnIndex + 1}-${toolIndex + 1}`;
-    const command =
-      provider === "codex"
-        ? `vp test transfer-budget-${toolIndex + 1}`
-        : `review transfer budget ${toolIndex + 1}`;
+    const command = `inspect transfer budget ${toolIndex + 1}`;
     events.push(
       {
         type: "item.started",

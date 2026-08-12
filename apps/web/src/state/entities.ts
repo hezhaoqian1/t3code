@@ -22,8 +22,9 @@ import { Atom } from "effect/unstable/reactivity";
 import { useMemo } from "react";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentProjects } from "./projects";
+import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { environmentServerConfigsAtom } from "./server";
-import { allEnvironmentShellsBootstrappedAtom } from "./shell";
+import { primaryEnvironmentShellBootstrappedAtom } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
 
 const EMPTY_PROJECT_REFS: ReadonlyArray<ScopedProjectRef> = Object.freeze([]);
@@ -112,6 +113,18 @@ export function useProjects(): ReadonlyArray<EnvironmentProject> {
   return useAtomValue(environmentProjects.projectsAtom);
 }
 
+export function usePrimaryProjects(): ReadonlyArray<EnvironmentProject> {
+  const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
+  const projects = useProjects();
+  return useMemo(
+    () =>
+      primaryEnvironmentId === null
+        ? []
+        : projects.filter((project) => project.environmentId === primaryEnvironmentId),
+    [primaryEnvironmentId, projects],
+  );
+}
+
 export function useServerConfigs(): ReadonlyMap<EnvironmentId, ServerConfig> {
   return useAtomValue(environmentServerConfigsAtom);
 }
@@ -120,8 +133,32 @@ export function useThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
   return useAtomValue(environmentThreadShells.threadShellsAtom);
 }
 
-export function useAllEnvironmentShellsBootstrapped(): boolean {
-  return useAtomValue(allEnvironmentShellsBootstrappedAtom);
+export function usePrimaryThreadShells(): ReadonlyArray<EnvironmentThreadShell> {
+  const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
+  const threads = useThreadShells();
+  return useMemo(
+    () =>
+      primaryEnvironmentId === null
+        ? []
+        : threads.filter((thread) => thread.environmentId === primaryEnvironmentId),
+    [primaryEnvironmentId, threads],
+  );
+}
+
+export function usePrimaryThreadRefs(): ReadonlyArray<ScopedThreadRef> {
+  const primaryEnvironmentId = useAtomValue(primaryEnvironmentIdAtom);
+  const threadRefs = useThreadRefs();
+  return useMemo(
+    () =>
+      primaryEnvironmentId === null
+        ? []
+        : threadRefs.filter((threadRef) => threadRef.environmentId === primaryEnvironmentId),
+    [primaryEnvironmentId, threadRefs],
+  );
+}
+
+export function usePrimaryEnvironmentShellBootstrapped(): boolean {
+  return useAtomValue(primaryEnvironmentShellBootstrappedAtom);
 }
 
 export function useThreadShellsForProjectRefs(

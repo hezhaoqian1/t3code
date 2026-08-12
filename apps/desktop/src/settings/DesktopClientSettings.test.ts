@@ -15,10 +15,8 @@ import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 const clientSettings: ClientSettings = {
   confirmThreadArchive: true,
   confirmThreadDelete: false,
-  dismissedProviderUpdateNotificationKeys: [],
   diffIgnoreWhitespace: true,
   environmentIdentificationMode: "artwork",
-  favorites: [],
   fontFamilyCode: "",
   fontFamilyComposer: "",
   fontFamilySans: "",
@@ -30,7 +28,6 @@ const clientSettings: ClientSettings = {
   fontSmoothing: true,
   glassOpacity: 80,
   planModeEnabled: false,
-  providerModelPreferences: {},
   sidebarAutoSettleAfterDays: 3,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {

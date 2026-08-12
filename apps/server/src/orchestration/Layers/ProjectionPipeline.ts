@@ -166,8 +166,7 @@ function derivePendingUserInputCountFromActivities(
       detail !== null &&
       (detail.includes("stale pending user-input request") ||
         detail.includes("unknown pending user-input request") ||
-        detail.includes("unknown pending user input request") ||
-        detail.includes("unknown pending codex user input request"))
+        detail.includes("unknown pending user input request"))
     ) {
       openRequestIds.delete(requestId);
     }
@@ -494,6 +493,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             projectId: event.payload.projectId,
             title: event.payload.title,
             workspaceRoot: event.payload.workspaceRoot,
+            projectPurpose: event.payload.projectPurpose ?? "workspace",
             defaultModelSelection: event.payload.defaultModelSelection,
             defaultThreadEnvMode: null,
             scripts: event.payload.scripts,

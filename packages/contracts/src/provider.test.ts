@@ -27,6 +27,7 @@ describe("ProviderSessionStartInput", () => {
       provider: "codex",
       cwd: "/tmp/workspace",
       modelSelection: {
+        instanceId: "codex",
         provider: "codex",
         model: "gpt-5.3-codex",
         options: [
@@ -58,6 +59,7 @@ describe("ProviderSessionStartInput", () => {
       provider: "claudeAgent",
       cwd: "/tmp/workspace",
       modelSelection: {
+        instanceId: "claudeAgent",
         provider: "claudeAgent",
         model: "claude-sonnet-4-6",
         options: [
@@ -84,6 +86,7 @@ describe("ProviderSessionStartInput", () => {
       cwd: "/tmp/workspace",
       runtimeMode: "full-access",
       modelSelection: {
+        instanceId: "cursor",
         provider: "cursor",
         model: "composer-2",
         options: [{ id: "fastMode", value: true }],
@@ -115,10 +118,28 @@ describe("ProviderSessionStartInput", () => {
 });
 
 describe("ProviderSendTurnInput", () => {
+  it("preserves one positive FD Skill version id", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      input: "查询客户持仓",
+      fdSkillVersionId: 10004,
+    });
+
+    expect(parsed.fdSkillVersionId).toBe(10004);
+    expect(() =>
+      decodeProviderSendTurnInput({
+        threadId: "thread-1",
+        input: "查询客户持仓",
+        fdSkillVersionId: 0,
+      }),
+    ).toThrow();
+  });
+
   it("accepts codex modelSelection", () => {
     const parsed = decodeProviderSendTurnInput({
       threadId: "thread-1",
       modelSelection: {
+        instanceId: "codex",
         provider: "codex",
         model: "gpt-5.3-codex",
         options: [
@@ -138,6 +159,7 @@ describe("ProviderSendTurnInput", () => {
     const parsed = decodeProviderSendTurnInput({
       threadId: "thread-1",
       modelSelection: {
+        instanceId: "claudeAgent",
         provider: "claudeAgent",
         model: "claude-sonnet-4-6",
         options: [

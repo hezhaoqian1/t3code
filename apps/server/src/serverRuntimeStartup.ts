@@ -1,13 +1,4 @@
-import {
-  CommandId,
-  DEFAULT_MODEL,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
-  type ModelSelection,
-  ProjectId,
-  ProviderInstanceId,
-  ThreadId,
-} from "@t3tools/contracts";
-import * as Console from "effect/Console";
+import { CommandId, type ModelSelection, ProjectId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -23,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 import * as ServerConfig from "./config.ts";
+import { FD_DEEPSEEK_MODEL_SELECTION } from "./fd-agent/FdModelPolicy.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
@@ -32,16 +24,8 @@ import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
-import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
 import * as ProviderSessionReaper from "./provider/Services/ProviderSessionReaper.ts";
 import { forkParked } from "./serverActivation.ts";
-import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
-import {
-  formatHeadlessServeOutput,
-  formatHostForUrl,
-  isWildcardHost,
-  issueHeadlessServeAccessInfo,
-} from "./startupAccess.ts";
 
 export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRuntimeStartupError>()(
   "ServerRuntimeStartupError",
@@ -163,10 +147,8 @@ export const launchStartupHeartbeat = recordStartupHeartbeat.pipe(
   Effect.asVoid,
 );
 
-export const getAutoBootstrapDefaultModelSelection = (): ModelSelection => ({
-  instanceId: ProviderInstanceId.make("codex"),
-  model: DEFAULT_MODEL,
-});
+export const getAutoBootstrapDefaultModelSelection = (): ModelSelection =>
+  FD_DEEPSEEK_MODEL_SELECTION;
 
 export const resolveWelcomeBase = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
@@ -188,7 +170,6 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
   const path = yield* Path.Path;
 
   let bootstrapProjectId: ProjectId | undefined;
-  let bootstrapThreadId: ThreadId | undefined;
 
   if (serverConfig.autoBootstrapProjectFromCwd) {
     yield* Effect.gen(function* () {
@@ -196,75 +177,43 @@ export const resolveAutoBootstrapWelcomeTargets = Effect.gen(function* () {
         serverConfig.cwd,
       );
       let nextProjectId: ProjectId;
-      let nextProjectDefaultModelSelection: ModelSelection;
 
       if (Option.isNone(existingProject)) {
         const createdAt = DateTime.formatIso(yield* DateTime.now);
         nextProjectId = ProjectId.make(yield* randomUUID);
         const bootstrapProjectTitle = path.basename(serverConfig.cwd) || "project";
-        nextProjectDefaultModelSelection = getAutoBootstrapDefaultModelSelection();
+        const nextProjectDefaultModelSelection = getAutoBootstrapDefaultModelSelection();
         yield* orchestrationEngine.dispatch({
           type: "project.create",
           commandId: CommandId.make(yield* randomUUID),
           projectId: nextProjectId,
           title: bootstrapProjectTitle,
           workspaceRoot: serverConfig.cwd,
+          projectPurpose: "workspace",
           defaultModelSelection: nextProjectDefaultModelSelection,
           createdAt,
         });
       } else {
         nextProjectId = existingProject.value.id;
-        nextProjectDefaultModelSelection =
-          existingProject.value.defaultModelSelection ?? getAutoBootstrapDefaultModelSelection();
       }
 
-      const existingThreadId =
-        yield* projectionReadModelQuery.getFirstActiveThreadIdByProjectId(nextProjectId);
-      if (Option.isNone(existingThreadId)) {
-        const createdAt = DateTime.formatIso(yield* DateTime.now);
-        const createdThreadId = ThreadId.make(yield* randomUUID);
-        yield* orchestrationEngine.dispatch({
-          type: "thread.create",
-          commandId: CommandId.make(yield* randomUUID),
-          threadId: createdThreadId,
-          projectId: nextProjectId,
-          title: "New thread",
-          modelSelection: nextProjectDefaultModelSelection,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        });
-        bootstrapProjectId = nextProjectId;
-        bootstrapThreadId = createdThreadId;
-      } else {
-        bootstrapProjectId = nextProjectId;
-        bootstrapThreadId = existingThreadId.value;
-      }
+      bootstrapProjectId = nextProjectId;
     });
   }
 
   return {
     ...(bootstrapProjectId ? { bootstrapProjectId } : {}),
-    ...(bootstrapThreadId ? { bootstrapThreadId } : {}),
   } as const;
 });
 
-const resolveStartupBrowserTarget = Effect.gen(function* () {
+export const resolveStartupBrowserTarget = Effect.gen(function* () {
   const serverConfig = yield* ServerConfig.ServerConfig;
-  const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-  const localUrl = `http://localhost:${serverConfig.port}`;
-  const bindUrl =
-    serverConfig.host && !isWildcardHost(serverConfig.host)
-      ? `http://${formatHostForUrl(serverConfig.host)}:${serverConfig.port}`
-      : localUrl;
-  const baseTarget = serverConfig.devUrl?.toString() ?? bindUrl;
-  return yield* Effect.succeed(serverConfig.mode === "desktop" ? baseTarget : undefined).pipe(
-    Effect.flatMap((target) =>
-      target ? Effect.succeed(target) : serverAuth.issueStartupPairingUrl(baseTarget),
-    ),
-  );
+  if (serverConfig.devUrl && ServerConfig.isLoopbackHttpUrl(serverConfig.devUrl)) {
+    return serverConfig.devUrl.toString();
+  }
+  return serverConfig.mode === "desktop"
+    ? `http://${ServerConfig.LOOPBACK_HOST}:${serverConfig.port}`
+    : undefined;
 });
 
 const maybeOpenBrowser = (target: string) =>
@@ -306,7 +255,6 @@ export const make = (options?: StartupOptions) =>
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
     const crypto = yield* Crypto.Crypto;
-    const launcher = yield* ServiceLauncherClient.ServiceLauncherClient;
 
     const commandGate = yield* makeCommandGate;
     const httpListening = yield* Deferred.make<void>();
@@ -366,7 +314,7 @@ export const make = (options?: StartupOptions) =>
               const bootstrapTargets = yield* resolveAutoBootstrapWelcomeTargets.pipe(
                 Effect.provideService(Crypto.Crypto, crypto),
               );
-              if (!bootstrapTargets.bootstrapProjectId && !bootstrapTargets.bootstrapThreadId) {
+              if (!bootstrapTargets.bootstrapProjectId) {
                 return;
               }
 
@@ -375,7 +323,6 @@ export const make = (options?: StartupOptions) =>
                 cwd: welcomeBase.cwd,
                 projectName: welcomeBase.projectName,
                 bootstrapProjectId: bootstrapTargets.bootstrapProjectId,
-                bootstrapThreadId: bootstrapTargets.bootstrapThreadId,
               });
               yield* lifecycleEvents.publish({
                 version: 1,
@@ -405,19 +352,8 @@ export const make = (options?: StartupOptions) =>
             Effect.withSpan("server.startup.heartbeat.record"),
             Effect.ignoreCause({ log: true }),
           );
-          if (serverConfig.startupPresentation === "headless") {
-            const accessInfo = yield* issueHeadlessServeAccessInfo();
-            yield* runStartupPhase(
-              "headless.output",
-              Console.log(formatHeadlessServeOutput(accessInfo)),
-            );
-          } else {
-            const startupBrowserTarget = yield* resolveStartupBrowserTarget;
-            if (serverConfig.mode !== "desktop") {
-              yield* Effect.logInfo(
-                "Authentication required. Open T3 Code using the pairing URL.",
-              ).pipe(Effect.annotateLogs({ pairingUrl: startupBrowserTarget }));
-            }
+          const startupBrowserTarget = yield* resolveStartupBrowserTarget;
+          if (startupBrowserTarget) {
             yield* runStartupPhase("browser.open", maybeOpenBrowser(startupBrowserTarget));
           }
         }),
@@ -432,7 +368,6 @@ export const make = (options?: StartupOptions) =>
 
       // This is the prepared boundary. Every dependency has been acquired and
       // every runtime root has confirmed that it is parked before this request.
-      const updateOutcome = yield* launcher.prepareTrial;
       yield* runStartupPhase(
         "welcome.publish",
         lifecycleEvents.publish({
@@ -453,7 +388,6 @@ export const make = (options?: StartupOptions) =>
           payload: {
             at: DateTime.formatIso(yield* DateTime.now),
             environment,
-            ...(updateOutcome === undefined ? {} : { updateOutcome }),
           },
         }),
       );
@@ -462,7 +396,7 @@ export const make = (options?: StartupOptions) =>
       Effect.annotateSpans({
         "server.mode": serverConfig.mode,
         "server.port": serverConfig.port,
-        "server.host": serverConfig.host ?? "default",
+        "server.host": serverConfig.host,
       }),
       Effect.withSpan("server.startup", { kind: "server", root: true }),
     );
@@ -473,7 +407,7 @@ export const make = (options?: StartupOptions) =>
           if (Exit.isSuccess(startupExit)) return Effect.void;
           const error = new ServerRuntimeStartupError({
             mode: serverConfig.mode,
-            host: serverConfig.host ?? null,
+            host: serverConfig.host,
             port: serverConfig.port,
             cause: startupExit.cause,
           });

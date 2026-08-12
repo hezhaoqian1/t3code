@@ -13,21 +13,19 @@ import {
   selectProjectGroupingSettings,
 } from "../../logicalProject";
 import type {
-  ModelSelection,
-  ProviderDriverKind,
   SidebarProjectGroupingMode,
   T3ProjectFileScript,
   ThreadEnvMode,
 } from "@t3tools/contracts";
 import { resolveEnvModeLabel } from "../BranchToolbar.logic";
-import { createModelSelection } from "@t3tools/shared/model";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
-import { CopyIcon, FolderIcon, PlusIcon, ServerIcon, SettingsIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, FolderIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { isElectron } from "../../env";
+import { excludeOfficeWorkspaceProjects } from "../../officeMode";
 import {
   useClientSettings,
   useUpdateClientSettings,
@@ -45,28 +43,19 @@ import {
 } from "../../projectScripts";
 import { decodeProjectScriptKeybindingRule } from "../../lib/projectScriptKeybindings";
 import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  resolveDefaultProviderModelSelection,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
-import { getCustomModelOptionsByInstance } from "../../modelSelection";
-import {
   buildSidebarProjectSnapshots,
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
 } from "../../sidebarProjectGrouping";
-import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
-import { useProjects, useThreadShells } from "../../state/entities";
+import { usePrimaryEnvironmentId } from "../../state/environments";
+import { usePrimaryProjects, usePrimaryThreadShells } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import {
   primaryServerKeybindingsAtom,
-  primaryServerProvidersAtom,
+  primaryServerWelcomeAtom,
   serverEnvironment,
 } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
 import { ProjectFavicon } from "../ProjectFavicon";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
@@ -95,26 +84,23 @@ export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, st
 
 /** Logical project groups for the settings page, sorted by display name. */
 export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
-  const projects = useProjects();
+  const projects = usePrimaryProjects();
+  const primaryServerWelcome = useAtomValue(primaryServerWelcomeAtom);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const { environments } = useEnvironments();
-  const environmentLabelById = useMemo(
-    () =>
-      new Map(
-        environments.map((environment) => [environment.environmentId, environment.label] as const),
-      ),
-    [environments],
-  );
   return useMemo(
     () =>
       buildSidebarProjectSnapshots({
-        projects,
+        projects: excludeOfficeWorkspaceProjects({
+          isDesktop: isElectron,
+          projects,
+          bootstrapProjectId: primaryServerWelcome?.bootstrapProjectId,
+          bootstrapEnvironmentId: primaryServerWelcome?.environment.environmentId,
+        }),
         settings: projectGroupingSettings,
         primaryEnvironmentId,
-        resolveEnvironmentLabel: (environmentId) => environmentLabelById.get(environmentId) ?? null,
       }).sort((a, b) => a.displayName.localeCompare(b.displayName)),
-    [environmentLabelById, primaryEnvironmentId, projectGroupingSettings, projects],
+    [primaryEnvironmentId, primaryServerWelcome, projectGroupingSettings, projects],
   );
 }
 
@@ -265,9 +251,8 @@ function ProjectDetail({
   const settings = usePrimarySettings();
   const updateClientSettings = useUpdateClientSettings();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const threads = useThreadShells();
+  const threads = usePrimaryThreadShells();
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
@@ -321,12 +306,11 @@ function ProjectDetail({
     );
   }, []);
 
-  // Group-shared fields (default model, scripts) live on each physical
-  // project record, so a group-level edit fans out to every member.
+  // Group-shared script fields live on each physical project record, so a
+  // group-level edit fans out to every member.
   const updateAllMembers = useCallback(
     async (
       input: Partial<{
-        defaultModelSelection: ModelSelection | null;
         defaultThreadEnvMode: ThreadEnvMode | null;
         scripts: ReadonlyArray<ReturnType<typeof buildProjectScript>>;
       }>,
@@ -341,43 +325,13 @@ function ProjectDetail({
           () => undefined,
         );
         if (result._tag === "Failure") {
-          // A partial fan-out is possible: earlier members already took the
-          // write. Name the environment so the user knows where it stopped.
-          reportFailure(
-            group.memberProjects.length > 1
-              ? `${failureTitle} on ${member.environmentLabel ?? "the current environment"}`
-              : failureTitle,
-            result,
-          );
+          reportFailure(failureTitle, result);
           return result;
         }
       }
       return AsyncResult.success(undefined);
     },
     [group.memberProjects, reportFailure, updateProject],
-  );
-
-  // ----- default model -----
-  const storedSelection = representative.defaultModelSelection;
-  const resolvedSelection = resolveDefaultProviderModelSelection(serverProviders, storedSelection);
-  const instanceEntries = useMemo(
-    () =>
-      sortProviderInstanceEntries(
-        applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
-      ),
-    [serverProviders, settings],
-  );
-  const modelOptionsByInstance = useMemo(
-    () => getCustomModelOptionsByInstance(settings, serverProviders),
-    [serverProviders, settings],
-  );
-  const activeEntry = instanceEntries.find(
-    (entry) => entry.instanceId === resolvedSelection?.instanceId,
-  );
-  const setDefaultModel = useCallback(
-    (selection: ModelSelection | null) =>
-      void updateAllMembers({ defaultModelSelection: selection }, "Failed to update default model"),
-    [updateAllMembers],
   );
 
   // ----- new-thread workspace mode -----
@@ -444,9 +398,6 @@ function ProjectDetail({
           command: keybindingCommand,
         });
         if (!isElectron) return updateResult;
-        const environmentIds = [
-          ...new Set(group.memberProjects.map((member) => member.environmentId)),
-        ];
         const previousTarget = previousKeybinding
           ? decodeProjectScriptKeybindingRule({
               keybinding: previousKeybinding,
@@ -460,26 +411,25 @@ function ProjectDetail({
             previousTarget && previousTarget.key !== keybindingRule.key
               ? { ...keybindingRule, replace: previousTarget }
               : keybindingRule;
-          for (const environmentId of environmentIds) {
-            const result = mapAtomCommandResult(
-              await upsertKeybinding({ environmentId, input }),
-              () => undefined,
-            );
-            if (result._tag === "Failure") {
-              reportFailure("Failed to save keybinding", result);
-              return result;
-            }
+          const result = mapAtomCommandResult(
+            await upsertKeybinding({ environmentId: representative.environmentId, input }),
+            () => undefined,
+          );
+          if (result._tag === "Failure") {
+            reportFailure("Failed to save keybinding", result);
+            return result;
           }
         } else if (previousTarget) {
-          for (const environmentId of environmentIds) {
-            const result = mapAtomCommandResult(
-              await removeKeybinding({ environmentId, input: previousTarget }),
-              () => undefined,
-            );
-            if (result._tag === "Failure") {
-              reportFailure("Failed to remove keybinding", result);
-              return result;
-            }
+          const result = mapAtomCommandResult(
+            await removeKeybinding({
+              environmentId: representative.environmentId,
+              input: previousTarget,
+            }),
+            () => undefined,
+          );
+          if (result._tag === "Failure") {
+            reportFailure("Failed to remove keybinding", result);
+            return result;
           }
         }
         return updateResult;
@@ -489,8 +439,8 @@ function ProjectDetail({
       }
     },
     [
-      group.memberProjects,
       keybindings,
+      representative.environmentId,
       removeKeybinding,
       reportFailure,
       updateAllMembers,
@@ -619,12 +569,7 @@ function ProjectDetail({
               ? `Remove project "${targetLabel}" and delete its ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}?`
               : `Remove project "${targetLabel}"?`,
             ...(singleMember
-              ? [
-                  `Path: ${singleMember.workspaceRoot}`,
-                  ...(singleMember.environmentLabel
-                    ? [`Environment: ${singleMember.environmentLabel}`]
-                    : []),
-                ]
+              ? [`Path: ${singleMember.workspaceRoot}`]
               : [`This removes ${members.length} grouped project entries.`]),
             ...(projectThreads.length > 0
               ? ["This permanently clears conversation history for those threads."]
@@ -684,8 +629,6 @@ function ProjectDetail({
     representative.repositoryIdentity?.displayName ??
     representative.repositoryIdentity?.canonicalKey ??
     "No git remote detected";
-  const environmentCount = new Set(group.memberProjects.map((member) => member.environmentId)).size;
-
   return (
     <SettingsPageContainer className="gap-10">
       <div className="flex items-center gap-3 px-3 sm:px-4">
@@ -704,7 +647,6 @@ function ProjectDetail({
             {group.memberProjects.length === 1
               ? "1 checkout"
               : `${group.memberProjects.length} checkouts`}
-            {environmentCount > 1 ? ` across ${environmentCount} environments` : ""}
             {" · "}
             {groupThreadCount === 1 ? "1 thread" : `${groupThreadCount} threads`}
           </p>
@@ -722,62 +664,6 @@ function ProjectDetail({
           </SelectPopup>
         </Select>
       </div>
-
-      <SettingsSection title="Model">
-        <SettingsRow
-          id="project-default-model"
-          title="Default model"
-          description="New threads in this project start with this model. Applies to every checkout in this group."
-          resetAction={
-            storedSelection !== null ? (
-              <SettingResetButton
-                label="project default model"
-                onClick={() => setDefaultModel(null)}
-              />
-            ) : null
-          }
-          control={
-            resolvedSelection && activeEntry ? (
-              <div className="flex flex-wrap items-center justify-end gap-1.5">
-                <ProviderModelPicker
-                  activeInstanceId={resolvedSelection.instanceId}
-                  model={resolvedSelection.model}
-                  lockedProvider={null}
-                  instanceEntries={instanceEntries}
-                  modelOptionsByInstance={modelOptionsByInstance}
-                  triggerVariant="outline"
-                  triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                  onInstanceModelChange={(instanceId, model) => {
-                    setDefaultModel(createModelSelection(instanceId, model));
-                  }}
-                />
-                <TraitsPicker
-                  provider={activeEntry.driverKind as ProviderDriverKind}
-                  models={activeEntry.models}
-                  model={resolvedSelection.model}
-                  prompt=""
-                  onPromptChange={() => {}}
-                  modelOptions={resolvedSelection.options ?? []}
-                  allowPromptInjectedEffort={false}
-                  triggerVariant="outline"
-                  triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                  onModelOptionsChange={(nextOptions) => {
-                    setDefaultModel(
-                      createModelSelection(
-                        resolvedSelection.instanceId,
-                        resolvedSelection.model,
-                        nextOptions,
-                      ),
-                    );
-                  }}
-                />
-              </div>
-            ) : (
-              <span className="text-sm text-muted-foreground">No providers available</span>
-            )
-          }
-        />
-      </SettingsSection>
 
       <SettingsSection title="New threads">
         <SettingsRow
@@ -940,9 +826,8 @@ function ProjectDetail({
                 className="space-y-3 rounded-lg border border-border/50 p-3"
               >
                 <div className="flex min-w-0 items-center gap-2">
-                  <ServerIcon className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 truncate text-sm font-medium text-foreground">
-                    {member.environmentLabel ?? "Current environment"}
+                    {member.title}
                   </span>
                   <span className="ms-auto shrink-0 text-xs text-muted-foreground">
                     {threadCount === 1 ? "1 thread" : `${threadCount} threads`}
@@ -981,7 +866,7 @@ function ProjectDetail({
                     <span className="text-xs font-medium text-muted-foreground">Name</span>
                     <Input
                       key={`${member.physicalProjectKey}:${member.title}`}
-                      aria-label={`Project name in ${member.environmentLabel ?? "current environment"}`}
+                      aria-label={`Project name for ${member.workspaceRoot}`}
                       defaultValue={member.title}
                       onBlur={(event) => {
                         void renameMember(member, event.currentTarget.value);
@@ -1008,7 +893,7 @@ function ProjectDetail({
                     >
                       <SelectTrigger
                         className="w-full"
-                        aria-label={`Grouping rule for ${member.environmentLabel ?? "current environment"}`}
+                        aria-label={`Grouping rule for ${member.workspaceRoot}`}
                       >
                         <SelectValue>
                           {groupingOverride === "inherit"
@@ -1041,12 +926,10 @@ function ProjectDetail({
 
       <SettingsSection title="Danger">
         <SettingsRow
-          title={
-            group.memberProjects.length > 1 ? "Remove this project everywhere" : "Remove project"
-          }
+          title={group.memberProjects.length > 1 ? "Remove grouped project" : "Remove project"}
           description={
             group.memberProjects.length > 1
-              ? `Deletes all ${group.memberProjects.length} checkout entries and their threads on every machine. Files on disk are not touched.`
+              ? `Deletes all ${group.memberProjects.length} checkout entries and their threads. Files on disk are not touched.`
               : "Deletes the project entry and its threads. Files on disk are not touched."
           }
           control={

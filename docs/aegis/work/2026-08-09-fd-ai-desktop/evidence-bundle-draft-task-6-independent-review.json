@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-6-independent-review",
+  "type": "review",
+  "source": "independent specification and code-quality review loops",
+  "summary": "Specification review approved after retiring the last orphaned provider-maintenance helper. Code-quality review found and verified fixes for unknown single-segment routes blanking an empty workspace and SWR usage refresh replacing existing data with a skeleton. Final re-review found no remaining findings.",
+  "verifier": "independent reviewers Copernicus and Helmholtz"
+}

@@ -2067,7 +2067,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
             payload: {
               requestId: "user-input-request-stale-1",
               detail:
-                "Provider adapter request failed (codex) for item/tool/requestUserInput: Unknown pending Codex user input request: user-input-request-stale-1",
+                "Provider adapter request failed (fd-deepseek) for item/tool/respondToUserInput: Unknown pending user input request: user-input-request-stale-1",
             },
             turnId: null,
             createdAt: "2026-02-26T12:35:03.000Z",

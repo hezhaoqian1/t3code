@@ -159,14 +159,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
         get: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
         load: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
         setMainWindowBounds: () => Effect.die("unexpected main window bounds update"),
-        setServerExposureMode: () => Effect.die("unexpected server exposure update"),
-        setTailscaleServe: () => Effect.die("unexpected Tailscale Serve update"),
         setUpdateChannel: () => Effect.fail(setUpdateChannelError),
-        setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
-        setWslDistro: () => Effect.die("unexpected WSL distro change"),
-        setWslOnly: () => Effect.die("unexpected WSL-only toggle"),
-        applyWslWindowsFallback: Effect.die("unexpected WSL Windows fallback"),
-        applyWslWindowsFallbackInMemory: Effect.die("unexpected WSL Windows fallback"),
       } satisfies DesktopAppSettings.DesktopAppSettings["Service"])
     : DesktopAppSettings.layer;
 
@@ -314,7 +307,7 @@ describe("DesktopUpdates", () => {
             },
             {
               version: "1.2.4-nightly.20260709.765",
-              note: "- [codex] Upgrade Clerk stack by @juliusmarminge in #3821",
+              note: "- [desktop] Improve update reliability by @juliusmarminge in #3821",
             },
           ],
         });
@@ -329,7 +322,7 @@ describe("DesktopUpdates", () => {
           },
           {
             version: "1.2.4-nightly.20260709.765",
-            items: ["[codex] Upgrade Clerk stack by @juliusmarminge in #3821"],
+            items: ["[desktop] Improve update reliability by @juliusmarminge in #3821"],
           },
         ]);
         assert.deepEqual(harness.sentStates.at(-1)?.releaseNotes, state.releaseNotes);

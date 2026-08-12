@@ -68,7 +68,7 @@ export function totalTokens(totals: UsageTokenTotals): number {
  * an order of magnitude.
  */
 export function mightCarryUsage(line: string, provider: UsageProviderKind): boolean {
-  return provider === "claude" ? line.includes('"usage"') : line.includes('"token_count"');
+  return provider === "fd-deepseek" && line.includes('"token_count"');
 }
 
 /* -------------------------------------------------------------------------- */
@@ -119,7 +119,7 @@ export function parseClaudeLine(line: string): UsageRecord | null {
   const cost = record["costUSD"];
 
   return {
-    provider: "claude",
+    provider: "fd-deepseek",
     timestampMs,
     model,
     sessionId: typeof record["sessionId"] === "string" ? record["sessionId"] : "",
@@ -231,7 +231,7 @@ export function parseCodexLine(line: string, state: CodexScanState): UsageRecord
   if (totalTokens(totals) === 0) return null;
 
   return {
-    provider: "codex",
+    provider: "fd-deepseek",
     timestampMs,
     model: state.model,
     sessionId: state.sessionId,

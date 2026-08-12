@@ -39,12 +39,11 @@ import {
   type ProviderCommandReactorShape,
 } from "../Services/ProviderCommandReactor.ts";
 import { forkParked, ServerActivation } from "../../serverActivation.ts";
-import {
-  resolveSourceControlWriterModelSelection,
-  ServerSettingsService,
-} from "../../serverSettings.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { FD_DEEPSEEK_MODEL_SELECTION } from "../../fd-agent/FdModelPolicy.ts";
+import { FdEnterpriseThreadRuntime } from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -109,12 +108,16 @@ function formatThreadTitleSection(message: ThreadTitleMessage): string | undefin
     return undefined;
   }
   const text = message.text.trim();
-  const attachmentSummary = (message.attachments ?? [])
-    .map((attachment) => attachment.name)
-    .join(", ");
+  const imageAttachmentCount = (message.attachments ?? []).filter(
+    (attachment) => attachment.type === "image",
+  ).length;
   const contents = [
     ...(text.length > 0 ? [text] : []),
-    ...(attachmentSummary.length > 0 ? [`[Attachments: ${attachmentSummary}]`] : []),
+    ...(imageAttachmentCount > 0
+      ? [
+          `[${imageAttachmentCount} image attachment${imageAttachmentCount === 1 ? "" : "s"} provided]`,
+        ]
+      : []),
   ].join("\n");
   return contents.length > 0 ? `${message.role.toUpperCase()}:\n${contents}` : undefined;
 }
@@ -268,15 +271,13 @@ function isUnknownPendingUserInputRequestError(cause: Cause.Cause<ProviderServic
     const detail = error.detail.toLowerCase();
     return (
       detail.includes("unknown pending user-input request") ||
-      detail.includes("unknown pending user input request") ||
-      detail.includes("unknown pending codex user input request")
+      detail.includes("unknown pending user input request")
     );
   }
   const message = Cause.pretty(cause).toLowerCase();
   return (
     message.includes("unknown pending user-input request") ||
-    message.includes("unknown pending user input request") ||
-    message.includes("unknown pending codex user input request")
+    message.includes("unknown pending user input request")
   );
 }
 
@@ -320,6 +321,7 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -626,6 +628,7 @@ const make = Effect.gen(function* () {
         ...(preferredProvider ? { provider: preferredProvider } : {}),
         providerInstanceId: desiredInstanceId,
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+        ...(project ? { projectWorkspaceRoot: project.workspaceRoot } : {}),
         modelSelection: desiredModelSelection,
         ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: desiredRuntimeMode,
@@ -674,19 +677,7 @@ const make = Effect.gen(function* () {
         requestedModelSelection !== undefined &&
         activeSession?.providerInstanceId !== requestedModelSelection.instanceId;
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "unsupported";
-      const previousModelSelection = threadModelSelections.get(threadId);
-      const shouldRestartForModelSelectionChange =
-        preferredProvider === "claudeAgent" &&
-        requestedModelSelection !== undefined &&
-        !Equal.equals(previousModelSelection, requestedModelSelection);
-
-      if (
-        !runtimeModeChanged &&
-        !cwdChanged &&
-        !instanceChanged &&
-        !shouldRestartForModelChange &&
-        !shouldRestartForModelSelectionChange
-      ) {
+      if (!runtimeModeChanged && !cwdChanged && !instanceChanged && !shouldRestartForModelChange) {
         return existingSessionThreadId;
       }
 
@@ -709,7 +700,6 @@ const make = Effect.gen(function* () {
         modelChanged,
         instanceChanged,
         shouldRestartForModelChange,
-        shouldRestartForModelSelectionChange,
         hasResumeCursor: resumeCursor !== undefined,
       });
       const restartedSession = yield* startProviderSession(
@@ -735,6 +725,8 @@ const make = Effect.gen(function* () {
   const buildSendTurnRequestForThread = Effect.fnUntraced(function* (input: {
     readonly threadId: ThreadId;
     readonly messageText: string;
+    readonly fdSkillVersionId?: number;
+    readonly idempotencyKey?: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
@@ -785,6 +777,8 @@ const make = Effect.gen(function* () {
 
     return {
       threadId: input.threadId,
+      ...(input.fdSkillVersionId !== undefined ? { fdSkillVersionId: input.fdSkillVersionId } : {}),
+      ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
       ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
@@ -812,20 +806,11 @@ const make = Effect.gen(function* () {
     const cwd = input.worktreePath;
     const attachments = input.attachments ?? [];
     yield* Effect.gen(function* () {
-      const settings = yield* serverSettingsService.getSettings;
-      const modelSelection =
-        settings.sourceControlWriterModelSelection === null
-          ? settings.textGenerationModelSelection
-          : resolveSourceControlWriterModelSelection(
-              settings,
-              yield* providerRegistry.getProviders,
-            );
-
       const generated = yield* textGeneration.generateBranchName({
         cwd,
         message: input.messageText,
         ...(attachments.length > 0 ? { attachments } : {}),
-        modelSelection,
+        modelSelection: FD_DEEPSEEK_MODEL_SELECTION,
       });
       if (!generated) return;
 
@@ -863,14 +848,11 @@ const make = Effect.gen(function* () {
     }) {
       const attachments = input.attachments ?? [];
       yield* Effect.gen(function* () {
-        const { textGenerationModelSelection: modelSelection } =
-          yield* serverSettingsService.getSettings;
-
         const generated = yield* textGeneration.generateThreadTitle({
           cwd: input.cwd,
           message: input.messageText,
           ...(attachments.length > 0 ? { attachments } : {}),
-          modelSelection,
+          modelSelection: FD_DEEPSEEK_MODEL_SELECTION,
         });
         if (!generated) return;
 
@@ -926,14 +908,12 @@ const make = Effect.gen(function* () {
         thread,
         projects: project ? [project] : [],
       }) ?? process.cwd();
-    const { textGenerationModelSelection: modelSelection } =
-      yield* serverSettingsService.getSettings;
     const generated = yield* textGeneration.generateThreadTitle({
       cwd,
       message,
       previousTitle,
       ...(attachments.length > 0 ? { attachments } : {}),
-      modelSelection,
+      modelSelection: FD_DEEPSEEK_MODEL_SELECTION,
     });
     if (generated.title === DEFAULT_THREAD_TITLE || generated.title === previousTitle) {
       return { _tag: "Completed", title: undefined } as const;
@@ -1081,7 +1061,13 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
+    const message =
+      event.payload.fdSkillVersionId !== undefined && Option.isSome(enterpriseRuntime)
+        ? yield* enterpriseRuntime.value.getStagedTurn(
+            event.payload.threadId,
+            event.payload.messageId,
+          )
+        : thread.messages.find((entry) => entry.id === event.payload.messageId);
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1095,6 +1081,7 @@ const make = Effect.gen(function* () {
     }
 
     const isFirstUserMessageTurn =
+      event.payload.fdSkillVersionId === undefined &&
       thread.messages.filter((entry) => entry.role === "user").length === 1;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
@@ -1164,6 +1151,16 @@ const make = Effect.gen(function* () {
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: message.text,
+      ...(event.payload.fdSkillVersionId !== undefined
+        ? {
+            idempotencyKey: `fd-${String(event.commandId ?? event.eventId)
+              .replace(/[^A-Za-z0-9_-]/g, "_")
+              .slice(0, 57)}`,
+          }
+        : {}),
+      ...(event.payload.fdSkillVersionId !== undefined
+        ? { fdSkillVersionId: event.payload.fdSkillVersionId }
+        : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
@@ -1179,9 +1176,17 @@ const make = Effect.gen(function* () {
       return;
     }
 
+    const clearEnterpriseStaging =
+      event.payload.fdSkillVersionId !== undefined && Option.isSome(enterpriseRuntime)
+        ? enterpriseRuntime.value.clearStagedTurn(event.payload.threadId, event.payload.messageId)
+        : Effect.void;
     yield* providerService
       .sendTurn(sendTurnRequest.value)
-      .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
+      .pipe(
+        Effect.catchCause(recoverTurnStartFailure),
+        Effect.ensuring(clearEnterpriseStaging),
+        Effect.forkScoped,
+      );
   });
 
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (

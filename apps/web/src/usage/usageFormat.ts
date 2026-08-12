@@ -5,14 +5,30 @@
  */
 import { UsageDay, type UsageSummaryInput } from "@t3tools/contracts";
 
-const CURRENCY = new Intl.NumberFormat("en-US", {
+const CURRENCY = new Intl.NumberFormat("zh-CN", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
 
-const INTEGER = new Intl.NumberFormat("en-US");
+const INTEGER = new Intl.NumberFormat("zh-CN");
+
+const DEFAULT_QUOTA_PER_UNIT = 500_000;
+const DEFAULT_USD_EXCHANGE_RATE = 7.3;
+const AI_CREDITS_PER_CNY = 10_000;
+
+export function formatQuotaAiCredits(
+  quotaUnits: number,
+  quotaPerUnit = DEFAULT_QUOTA_PER_UNIT,
+  usdExchangeRate = DEFAULT_USD_EXCHANGE_RATE,
+): string {
+  const units = Number.isFinite(quotaUnits) ? Math.max(0, quotaUnits) : 0;
+  const perUnit = quotaPerUnit > 0 ? quotaPerUnit : DEFAULT_QUOTA_PER_UNIT;
+  const exchangeRate = usdExchangeRate > 0 ? usdExchangeRate : DEFAULT_USD_EXCHANGE_RATE;
+  const credits = Math.max(0, Math.round((units / perUnit) * exchangeRate * AI_CREDITS_PER_CNY));
+  return `${INTEGER.format(credits)} AI 点`;
+}
 
 export function formatUsd(value: number): string {
   return CURRENCY.format(value);
@@ -45,25 +61,11 @@ export function formatPercent(share: number, digits = 1): string {
   return `${(share * 100).toFixed(digits)}%`;
 }
 
-/** `2026-08-07` to `Aug 7`. */
+/** `2026-08-07` to `8月7日`. */
 export function formatDayShort(day: string): string {
   const [year, month, dayOfMonth] = day.split("-").map((part) => Number(part));
   if (year === undefined || month === undefined || dayOfMonth === undefined) return day;
-  const MONTHS = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  return `${MONTHS[month - 1] ?? ""} ${dayOfMonth}`;
+  return `${month}月${dayOfMonth}日`;
 }
 
 /** Inclusive day list between two `YYYY-MM-DD` bounds. */

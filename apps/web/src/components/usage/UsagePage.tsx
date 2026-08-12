@@ -1,14 +1,15 @@
-import type { UsageProviderKind } from "@t3tools/contracts";
+import type { FdUsageSummary, UsageProviderKind } from "@t3tools/contracts";
 import { useCanGoBack, useNavigate, useRouter } from "@tanstack/react-router";
-import { ArrowLeftIcon, CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, RefreshCwIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { cn } from "../../lib/utils";
-import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { useFdGatewayUsage, useUsage } from "../../state/usage";
 import {
   enumerateDays,
   formatCount,
   formatDayShort,
+  formatQuotaAiCredits,
   formatPercent,
   formatTokens,
   formatUsd,
@@ -19,9 +20,9 @@ import { UsageChartLegend, UsageProviderChart, type UsageChartMetric } from "./U
 import { PROVIDER_COLOR, PROVIDER_LABEL, PROVIDER_MARK, PROVIDER_ORDER } from "./usageProviders";
 
 const WINDOW_OPTIONS = [
-  { days: 7, label: "7 days" },
-  { days: 30, label: "30 days" },
-  { days: 90, label: "90 days" },
+  { days: 7, label: "近 7 天" },
+  { days: 30, label: "近 30 天" },
+  { days: 90, label: "近 90 天" },
 ] as const;
 
 export function UsagePage() {
@@ -33,14 +34,25 @@ export function UsagePage() {
   const router = useRouter();
 
   // Recomputed only when the window length changes, so a re-render does not
-  // shift the range and refetch every environment.
+  // shift the range and refetch the primary service.
   const window = useMemo(() => makeWindow(windowDays), [windowDays]);
-  const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
+  const { merged, isPending, isRefreshing, error, refresh } = useUsage(window);
+  const gatewayUsage = useFdGatewayUsage();
 
-  // Hold the content until every environment is terminal. Rendering merged
-  // totals while devices are still answering makes every number on the page
-  // jump as each one lands.
-  const settling = isPending || isPartial;
+  if (gatewayUsage.supported) {
+    return (
+      <GatewayUsagePage
+        usage={gatewayUsage}
+        onBack={() => {
+          if (canGoBack) {
+            router.history.back();
+            return;
+          }
+          void navigate({ to: "/" });
+        }}
+      />
+    );
+  }
 
   const days = useMemo(
     () => enumerateDays(window.sinceDay, window.untilDay),
@@ -69,7 +81,7 @@ export function UsagePage() {
           <div className="flex items-start gap-3">
             <button
               type="button"
-              aria-label="Back"
+              aria-label="返回"
               onClick={() => {
                 if (canGoBack) {
                   router.history.back();
@@ -82,9 +94,9 @@ export function UsagePage() {
               <ArrowLeftIcon className="size-3.5" />
             </button>
             <div className="flex flex-col gap-1">
-              <h1 className="text-2xl font-semibold text-foreground">Usage</h1>
+              <h1 className="text-2xl font-semibold text-foreground">用量统计</h1>
               <p className="text-sm text-muted-foreground">
-                {formatDayShort(window.sinceDay)} to {formatDayShort(window.untilDay)}
+                {formatDayShort(window.sinceDay)} 至 {formatDayShort(window.untilDay)}
               </p>
             </div>
           </div>
@@ -109,26 +121,24 @@ export function UsagePage() {
             <button
               type="button"
               onClick={refresh}
-              aria-label="Refresh usage"
-              className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
+              disabled={isPending || isRefreshing}
+              aria-label={isRefreshing ? "正在刷新用量" : "刷新用量"}
+              className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-60"
             >
-              <RefreshCwIcon className="size-3.5" />
+              <RefreshCwIcon className={cn("size-3.5", isRefreshing && "animate-spin")} />
             </button>
           </div>
         </header>
 
-        {settling ? (
-          <>
-            {environments.length > 1 ? <UsageDeviceStrip environments={environments} /> : null}
-            <UsageSkeleton />
-          </>
+        {isPending ? (
+          <UsageSkeleton />
         ) : (
           <>
-            <UsageCoverageNotice
-              environments={environments}
-              duplicateSources={merged.duplicateSources}
-              staleEnvironments={merged.staleEnvironments}
-            />
+            {error ? (
+              <div className="border border-border px-3 py-2 text-xs text-muted-foreground">
+                {error}
+              </div>
+            ) : null}
 
             {/* Cost first: the financial answer, then the provider split. */}
             <section className="grid gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
@@ -137,7 +147,7 @@ export function UsagePage() {
               <div className="flex flex-col gap-5">
                 <div className="flex flex-col gap-1">
                   <span className="text-xs tracking-wide text-muted-foreground uppercase">
-                    {metric === "cost" ? "Raw token cost" : "Processed tokens"}
+                    {metric === "cost" ? "Token 估算成本" : "已处理 Token"}
                   </span>
                   <span className="text-4xl font-semibold text-foreground tabular-nums">
                     {metric === "cost"
@@ -146,8 +156,8 @@ export function UsagePage() {
                   </span>
                   <span className="text-xs text-muted-foreground">
                     {metric === "cost"
-                      ? "* if billed at full API rate"
-                      : `Input, cache reads and output across ${formatCount(merged.sessions)} sessions.`}
+                      ? "* 按完整 API 单价估算，并非实际账单"
+                      : `${formatCount(merged.sessions)} 个会话的输入、缓存读取与输出总量。`}
                   </span>
                 </div>
 
@@ -177,8 +187,8 @@ export function UsagePage() {
                       </div>
                       <span className="text-xs text-muted-foreground">
                         {metric === "cost"
-                          ? `${formatPercent(share)} of cost · ${formatTokens(provider.totalTokens)} tokens`
-                          : `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`}
+                          ? `占成本 ${formatPercent(share)} · ${formatTokens(provider.totalTokens)} Token`
+                          : `占 Token ${formatPercent(share)} · ${formatUsd(provider.costUsd)}`}
                       </span>
                     </div>
                   );
@@ -188,7 +198,7 @@ export function UsagePage() {
               <div className="flex flex-col gap-3">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <h2 className="text-sm font-medium text-foreground">
-                    Daily {metric === "tokens" ? "processed tokens" : "cost"}
+                    每日{metric === "tokens" ? "已处理 Token" : "估算成本"}
                   </h2>
                   <div className="flex items-center gap-4">
                     <div className="flex overflow-hidden rounded-md border border-border">
@@ -204,7 +214,7 @@ export function UsagePage() {
                               : "text-muted-foreground hover:text-foreground",
                           )}
                         >
-                          {option}
+                          {option === "cost" ? "成本" : "Token"}
                         </button>
                       ))}
                     </div>
@@ -217,39 +227,39 @@ export function UsagePage() {
 
             <section className="grid grid-cols-2 gap-px border-y border-border bg-border md:grid-cols-5">
               <Metric
-                label="Processed tokens"
+                label="已处理 Token"
                 value={formatTokens(merged.totalTokens)}
-                detail={`${formatTokens(dailyAverage)} per active day`}
+                detail={`活跃日均 ${formatTokens(dailyAverage)}`}
               />
               <Metric
-                label="Cached input"
+                label="缓存输入"
                 value={formatTokens(merged.cachedInputTokens)}
-                detail={`${formatPercent(cachedShare)} of observed input`}
+                detail={`占已观测输入 ${formatPercent(cachedShare)}`}
               />
               <Metric
-                label="Uncached input"
+                label="非缓存输入"
                 value={formatTokens(merged.uncachedInputTokens)}
-                detail={`${formatTokens(merged.cacheCreationTokens)} cache writes`}
+                detail={`${formatTokens(merged.cacheCreationTokens)} 次缓存写入`}
               />
               <Metric
-                label="Output"
+                label="输出"
                 value={formatTokens(merged.outputTokens)}
-                detail={`includes ${formatTokens(merged.reasoningTokens)} reasoning`}
+                detail={`其中推理 ${formatTokens(merged.reasoningTokens)}`}
               />
               <Metric
-                label="Cache savings"
+                label="缓存节省"
                 value={formatUsd(merged.costQuality.cacheSavingsUsd)}
                 detail={
                   merged.costUsd > 0
-                    ? `${(merged.costQuality.cacheSavingsUsd / merged.costUsd).toFixed(1)}x the raw token cost`
-                    : "vs full input rates"
+                    ? `约为原始 Token 成本的 ${(merged.costQuality.cacheSavingsUsd / merged.costUsd).toFixed(1)} 倍`
+                    : "相对完整输入单价"
                 }
               />
             </section>
 
             <section className="flex flex-col gap-3">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium text-foreground">Breakdown</h2>
+                <h2 className="text-sm font-medium text-foreground">明细</h2>
                 <div className="flex overflow-hidden rounded-md border border-border">
                   {(["model", "day"] as const).map((option) => (
                     <button
@@ -263,7 +273,7 @@ export function UsagePage() {
                           : "text-muted-foreground hover:text-foreground",
                       )}
                     >
-                      {option}
+                      {option === "model" ? "模型" : "日期"}
                     </button>
                   ))}
                 </div>
@@ -273,17 +283,17 @@ export function UsagePage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th className="py-2 font-normal">Model</th>
-                      <th className="py-2 text-right font-normal">Cost</th>
-                      <th className="py-2 text-right font-normal">Share</th>
-                      <th className="py-2 text-right font-normal">Tokens</th>
+                      <th className="py-2 font-normal">模型</th>
+                      <th className="py-2 text-right font-normal">成本</th>
+                      <th className="py-2 text-right font-normal">占比</th>
+                      <th className="py-2 text-right font-normal">Token</th>
                     </tr>
                   </thead>
                   <tbody>
                     {merged.models.length === 0 ? (
                       <tr>
                         <td colSpan={4} className="py-6 text-center text-muted-foreground">
-                          No activity in this window.
+                          当前时间范围内暂无用量。
                         </td>
                       </tr>
                     ) : (
@@ -316,21 +326,21 @@ export function UsagePage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th className="py-2 font-normal">Day</th>
+                      <th className="py-2 font-normal">日期</th>
                       {PROVIDER_ORDER.map((provider) => (
                         <th key={provider} className="py-2 text-right font-normal">
                           {PROVIDER_LABEL[provider]}
                         </th>
                       ))}
-                      <th className="py-2 text-right font-normal">Total</th>
-                      <th className="py-2 text-right font-normal">Tokens</th>
+                      <th className="py-2 text-right font-normal">合计</th>
+                      <th className="py-2 text-right font-normal">Token</th>
                     </tr>
                   </thead>
                   <tbody>
                     {recentDays.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="py-6 text-center text-muted-foreground">
-                          No activity in this window.
+                          当前时间范围内暂无用量。
                         </td>
                       </tr>
                     ) : (
@@ -365,6 +375,197 @@ export function UsagePage() {
   );
 }
 
+function GatewayUsagePage({
+  usage,
+  onBack,
+}: {
+  readonly usage: ReturnType<typeof useFdGatewayUsage>;
+  readonly onBack: () => void;
+}) {
+  const summary = usage.summary;
+  const totalTokens = (summary?.promptTokens ?? 0) + (summary?.completionTokens ?? 0);
+  const formatDate = (timestamp: number) =>
+    timestamp > 0
+      ? new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit" }).format(
+          new Date(timestamp * 1_000),
+        )
+      : "待确认";
+  const percent = (period: FdUsageSummary["dailyQuota"]) => {
+    if (period.unlimited || period.limit <= 0) return 0;
+    return Math.min(100, Math.round(((period.used + period.reserved) / period.limit) * 100));
+  };
+  const quotaCard = (label: string, period: FdUsageSummary["dailyQuota"]) => (
+    <section className="border border-border bg-background p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-foreground">{label} AI 额度</h2>
+          <p className="mt-4 text-3xl font-semibold text-foreground tabular-nums">
+            {period.unlimited
+              ? "不限制"
+              : formatQuotaAiCredits(
+                  period.remaining,
+                  summary?.quotaPerUnit,
+                  summary?.usdExchangeRate,
+                )}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {period.unlimited ? "当前未设置上限" : `已使用 ${percent(period)}%`}
+          </p>
+        </div>
+        <div className="text-right text-xs text-muted-foreground">
+          <div>总额度</div>
+          <div className="mt-1 text-sm text-foreground tabular-nums">
+            {period.unlimited
+              ? "不限制"
+              : formatQuotaAiCredits(period.limit, summary?.quotaPerUnit, summary?.usdExchangeRate)}
+          </div>
+        </div>
+      </div>
+      {!period.unlimited ? (
+        <div className="mt-5 h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className="h-full bg-primary" style={{ width: `${percent(period)}%` }} />
+        </div>
+      ) : null}
+      <div className="mt-5 grid grid-cols-3 gap-3 border-t border-border pt-4 text-xs">
+        <div>
+          <div className="text-muted-foreground">已用</div>
+          <div className="mt-1 text-foreground tabular-nums">
+            {formatQuotaAiCredits(period.used, summary?.quotaPerUnit, summary?.usdExchangeRate)}
+          </div>
+        </div>
+        <div>
+          <div className="text-muted-foreground">预占</div>
+          <div className="mt-1 text-foreground tabular-nums">
+            {formatQuotaAiCredits(period.reserved, summary?.quotaPerUnit, summary?.usdExchangeRate)}
+          </div>
+        </div>
+        <div>
+          <div className="text-muted-foreground">重置时间</div>
+          <div className="mt-1 text-foreground">{formatDate(period.resetsAt)}</div>
+        </div>
+      </div>
+    </section>
+  );
+
+  return (
+    <ScrollArea className="h-full">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6">
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <button
+              type="button"
+              aria-label="返回"
+              onClick={onBack}
+              className="mt-1 cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
+            >
+              <ArrowLeftIcon className="size-3.5" />
+            </button>
+            <div>
+              <h1 className="text-2xl font-semibold text-foreground">用量统计</h1>
+              <p className="mt-1 text-sm text-muted-foreground">Gateway AI 点数 · 近 30 天</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={usage.refresh}
+            disabled={usage.isRefreshing || usage.isPending}
+            aria-label="刷新用量"
+            className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:opacity-60"
+          >
+            <RefreshCwIcon className={cn("size-3.5", usage.isRefreshing && "animate-spin")} />
+          </button>
+        </header>
+
+        {usage.isPending ? (
+          <div className="border border-border px-4 py-10 text-center text-sm text-muted-foreground">
+            正在读取 Gateway 用量…
+          </div>
+        ) : usage.error && summary === null ? (
+          <div className="border border-border px-4 py-10 text-center text-sm text-muted-foreground">
+            {usage.error}
+          </div>
+        ) : summary !== null ? (
+          <>
+            <section className="grid gap-px border border-border bg-border sm:grid-cols-2 lg:grid-cols-6">
+              <UsageMetric
+                label="AI 点数消耗"
+                value={formatQuotaAiCredits(
+                  summary.quota,
+                  summary.quotaPerUnit,
+                  summary.usdExchangeRate,
+                )}
+                detail="近 30 天 Gateway 统计"
+              />
+              <UsageMetric
+                label="模型 Token"
+                value={formatTokens(totalTokens)}
+                detail="输入与输出合计"
+              />
+              <UsageMetric
+                label="模型请求"
+                value={formatCount(summary.requestCount)}
+                detail="近 30 天全量"
+              />
+              <UsageMetric
+                label="当前速率"
+                value={`${formatCount(summary.rpm)} RPM`}
+                detail={`${formatCount(summary.tpm)} TPM`}
+              />
+              <UsageMetric
+                label="失败事件"
+                value={formatCount(summary.failedCount)}
+                detail="错误与异常断流"
+              />
+              <UsageMetric
+                label="平均响应"
+                value={summary.averageUseTime ? `${summary.averageUseTime.toFixed(1)} 秒` : "-"}
+                detail="近 30 天模型请求"
+              />
+            </section>
+            <section className="grid gap-4 lg:grid-cols-2">
+              {quotaCard("今日", summary.dailyQuota)}
+              {quotaCard("本月", summary.monthlyQuota)}
+            </section>
+            <section className="border border-border bg-background p-5">
+              <div>
+                <h2 className="text-sm font-semibold text-foreground">模型使用分布</h2>
+                <p className="mt-1 text-xs text-muted-foreground">按 Gateway 实际 Token 统计</p>
+              </div>
+              {summary.models.length > 0 ? (
+                <div className="mt-4 divide-y divide-border border-y border-border">
+                  {summary.models.map((model) => (
+                    <div
+                      key={model.model}
+                      className="flex items-center justify-between py-3 text-sm"
+                    >
+                      <span className="truncate text-foreground">{model.model}</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {formatTokens(model.tokens)} Token
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-5 text-sm text-muted-foreground">当前时间范围内暂无模型调用。</p>
+              )}
+            </section>
+          </>
+        ) : null}
+      </div>
+    </ScrollArea>
+  );
+}
+
+function UsageMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="flex flex-col gap-1 bg-background px-4 py-4">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-lg font-semibold text-foreground tabular-nums">{value}</span>
+      <span className="text-xs text-muted-foreground">{detail}</span>
+    </div>
+  );
+}
+
 /** Brand mark for the harness a row belongs to. */
 function ProviderMark({
   provider,
@@ -395,112 +596,13 @@ function Metric({
   );
 }
 
-/**
- * Says plainly when the totals are incomplete: an environment that failed, or
- * one whose transcripts another environment already reported. Environments
- * that are still answering never reach this notice; the page shows the
- * loading skeleton until every one is terminal.
- */
-function UsageCoverageNotice({
-  environments,
-  duplicateSources,
-  staleEnvironments,
-}: {
-  readonly environments: readonly EnvironmentUsageStatus[];
-  readonly duplicateSources: readonly string[];
-  readonly staleEnvironments: readonly string[];
-}) {
-  const failed = environments.filter((environment) => environment.error !== null);
-  const stale = environments.filter((environment) =>
-    staleEnvironments.includes(environment.environmentId),
-  );
-  if (failed.length === 0 && stale.length === 0 && duplicateSources.length === 0) {
-    return null;
-  }
-
-  return (
-    <div className="flex flex-col gap-1 border border-border px-3 py-2 text-xs text-muted-foreground">
-      {failed.map((environment) => (
-        <span key={environment.label}>{environment.label} could not report usage.</span>
-      ))}
-      {stale.map((environment) => (
-        <span key={environment.label}>
-          {environment.label} runs an older server version and is excluded from totals.
-        </span>
-      ))}
-      {duplicateSources.length > 0 ? (
-        <span>
-          Counted once across environments sharing a transcript directory:{" "}
-          {duplicateSources.join(", ")}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Per-device progress while the page waits for every environment to answer.
- * Only rendered with two or more devices; a lone device has nothing to
- * enumerate.
- */
-function UsageDeviceStrip({
-  environments,
-}: {
-  readonly environments: readonly EnvironmentUsageStatus[];
-}) {
-  const scanning = environments.filter(
-    (environment) => environment.summary === null && environment.error === null,
-  );
-  return (
-    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border border-border px-3 py-2 text-xs">
-      {environments.map((environment) => {
-        if (environment.summary !== null) {
-          return (
-            <span
-              key={environment.environmentId}
-              className="flex items-center gap-1 text-foreground"
-            >
-              <CheckIcon className="size-3 text-emerald-600 dark:text-emerald-300/90" aria-hidden />
-              {environment.label}
-            </span>
-          );
-        }
-        if (environment.error !== null) {
-          return (
-            <span
-              key={environment.environmentId}
-              className="flex items-center gap-1 text-destructive"
-            >
-              <XIcon className="size-3" aria-hidden />
-              {environment.label}
-            </span>
-          );
-        }
-        return (
-          <span
-            key={environment.environmentId}
-            className="animate-status-pulse text-muted-foreground"
-          >
-            {environment.label}…
-          </span>
-        );
-      })}
-      <span className="ms-auto text-muted-foreground">
-        {scanning.length === 1
-          ? "1 device still scanning"
-          : `${scanning.length} devices still scanning`}
-      </span>
-    </div>
-  );
-}
-
 /** Deterministic bar heights (each unique: they double as keys). */
 const SKELETON_BAR_HEIGHTS = [34, 58, 41, 72, 22, 12, 49, 63, 80, 38, 55, 26, 44, 67];
 
 /**
  * Static stand-in with the loaded page's shape: headline, provider split,
- * chart and metrics strip. No shimmer; blocks fill in exactly once when the
- * last device answers.
+ * chart and metrics strip. No shimmer; blocks fill in once the local summary
+ * answers.
  */
 function UsageSkeleton() {
   return (
@@ -509,7 +611,7 @@ function UsageSkeleton() {
         <div className="flex flex-col gap-5">
           <div className="flex flex-col gap-1">
             <span className="text-xs tracking-wide text-muted-foreground uppercase">
-              Raw token cost
+              Token 估算成本
             </span>
             <div className="my-1.5 h-8 w-36 rounded-sm bg-muted" />
             <div className="h-3 w-28 rounded-sm bg-muted" />
@@ -531,7 +633,7 @@ function UsageSkeleton() {
         </div>
 
         <div className="flex flex-col gap-3">
-          <h2 className="py-1 text-sm font-medium text-foreground">Daily cost</h2>
+          <h2 className="py-1 text-sm font-medium text-foreground">每日估算成本</h2>
           {/* Mirrors the chart's h-56 body and w-14 axis gutter to avoid a
               relayout when the real chart swaps in. */}
           <div className="flex h-56 items-end gap-1 pl-16">
@@ -547,15 +649,13 @@ function UsageSkeleton() {
       </section>
 
       <section className="grid grid-cols-2 gap-px border-y border-border bg-border md:grid-cols-5">
-        {["Processed tokens", "Cached input", "Uncached input", "Output", "Cache savings"].map(
-          (label) => (
-            <div key={label} className="flex flex-col gap-0.5 bg-background px-4 py-3">
-              <span className="text-xs text-muted-foreground">{label}</span>
-              <div className="my-1 h-5 w-16 rounded-sm bg-muted" />
-              <div className="h-3 w-24 rounded-sm bg-muted" />
-            </div>
-          ),
-        )}
+        {["已处理 Token", "缓存输入", "非缓存输入", "输出", "缓存节省"].map((label) => (
+          <div key={label} className="flex flex-col gap-0.5 bg-background px-4 py-3">
+            <span className="text-xs text-muted-foreground">{label}</span>
+            <div className="my-1 h-5 w-16 rounded-sm bg-muted" />
+            <div className="h-3 w-24 rounded-sm bg-muted" />
+          </div>
+        ))}
       </section>
     </>
   );

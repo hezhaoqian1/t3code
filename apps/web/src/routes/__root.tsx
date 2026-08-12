@@ -14,10 +14,6 @@ import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "../branding";
 import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
-import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
-import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
-import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
-import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { Button } from "../components/ui/button";
@@ -39,40 +35,25 @@ import { useUiStateStore } from "../uiStateStore";
 import { syncBrowserChromeTheme } from "../hooks/useTheme";
 import { configureClientTracing } from "../observability/clientTracing";
 import { resolveInitialServerAuthGateState } from "../environments/primary";
-import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
 import { shellEnvironment } from "../state/shell";
 import { useAtomValue } from "@effect/atom-react";
 import { useAtomCommand } from "../state/use-atom-command";
-import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
+import { usePrimaryEnvironment } from "../state/environments";
 import {
   primaryServerConfigAtom,
   primaryServerConfigEventAtom,
   primaryServerWelcomeAtom,
 } from "../state/server";
-import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from "../state/entities";
+import { readProject, setActiveEnvironmentId } from "../state/entities";
 import {
   createKeybindingsUpdateToastController,
   type KeybindingsUpdateToastController,
 } from "../components/KeybindingsUpdateToast.logic";
+import { FdAccountProvider } from "../fd/FdAccountProvider";
+import { FdLoginGate } from "../fd/FdLoginGate";
 
 export const Route = createRootRoute({
-  beforeLoad: async ({ location }) => {
-    if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
-      return {
-        authGateState: {
-          status: "hosted-pairing",
-        } as const,
-      };
-    }
-
-    if (isHostedStaticApp(new URL(window.location.href))) {
-      return {
-        authGateState: {
-          status: "hosted-static",
-        } as const,
-      };
-    }
-
+  beforeLoad: async () => {
     const authGateState = await resolveInitialServerAuthGateState();
     return {
       authGateState,
@@ -86,9 +67,18 @@ export const Route = createRootRoute({
 });
 
 function RootRouteView() {
+  return (
+    <FdAccountProvider>
+      <FdLoginGate>
+        <AuthenticatedRootRouteView />
+      </FdLoginGate>
+    </FdAccountProvider>
+  );
+}
+
+function AuthenticatedRootRouteView() {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { authGateState } = Route.useRouteContext();
-  const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -99,20 +89,11 @@ function RootRouteView() {
     };
   }, [pathname]);
 
-  if (pathname === "/pair" || pathname === "/connect" || pathname.startsWith("/connect/")) {
+  if (authGateState.status !== "authenticated") {
     return (
       <>
         <DocumentTitleSync />
-        <Outlet />
-      </>
-    );
-  }
-
-  if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
-    return (
-      <>
-        <DocumentTitleSync />
-        <Outlet />
+        <LocalBootstrapUnavailable errorMessage={authGateState.errorMessage} />
       </>
     );
   }
@@ -131,20 +112,35 @@ function RootRouteView() {
         <DocumentTitleSync />
         <GlassAppearanceSync />
         <FontAppearanceSync />
-        {primaryEnvironmentAuthenticated ? <AuthenticatedTracingBootstrap /> : null}
-        <RelayClientInstallDialog />
-        <ConnectOnboardingDialog />
-        <SshPasswordPromptDialog />
+        <AuthenticatedTracingBootstrap />
         <SlowRpcRequestToastCoordinator />
-        <HostedStaticEnvironmentBootstrap />
-        {primaryEnvironmentAuthenticated ? <EventRouter /> : null}
-        {primaryEnvironmentAuthenticated ? <ProviderUpdateLaunchNotification /> : null}
+        <EventRouter />
         {appShell}
         {/* Above the router: a theme draft is judged by walking the app, so the
             editor has to survive navigation away from settings. */}
         <ThemeEditorHost />
       </AnchoredToastProvider>
     </ToastProvider>
+  );
+}
+
+function LocalBootstrapUnavailable({
+  errorMessage,
+}: {
+  readonly errorMessage?: string | undefined;
+}) {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+      <section className="w-full max-w-md text-center">
+        <h1 className="text-xl font-semibold">Local service unavailable</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {errorMessage ?? "Restart the Desktop app to reconnect to its local service."}
+        </p>
+        <Button className="mt-5" size="sm" onClick={() => window.location.reload()}>
+          Retry
+        </Button>
+      </section>
+    </div>
   );
 }
 
@@ -203,34 +199,6 @@ function DocumentTitleSync() {
   useEffect(() => {
     document.title = title;
   }, [title]);
-
-  return null;
-}
-
-function HostedStaticEnvironmentBootstrap() {
-  const { environments } = useEnvironments();
-  const activeEnvironmentId = useActiveEnvironmentId();
-
-  useEffect(() => {
-    if (
-      environments.some(
-        (environment) => environment.entry.target._tag === "PrimaryConnectionTarget",
-      )
-    ) {
-      return;
-    }
-
-    if (activeEnvironmentId) {
-      return;
-    }
-
-    const firstSavedEnvironment = environments[0];
-    if (!firstSavedEnvironment) {
-      return;
-    }
-
-    setActiveEnvironmentId(firstSavedEnvironment.environmentId);
-  }, [activeEnvironmentId, environments]);
 
   return null;
 }
@@ -362,9 +330,8 @@ function EventRouter() {
         return;
       }
       await navigate({
-        to: "/$environmentId/$threadId",
+        to: "/$threadId",
         params: {
-          environmentId: payload.environment.environmentId,
           threadId: payload.bootstrapThreadId,
         },
         replace: true,

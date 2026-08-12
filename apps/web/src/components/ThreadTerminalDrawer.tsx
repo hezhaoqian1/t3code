@@ -536,8 +536,8 @@ export function TerminalViewport({
         const clicked = await localApi.contextMenu
           .show(
             [
-              { id: "add-to-chat", label: "Add to chat" },
-              { id: "copy", label: "Copy" },
+              { id: "add-to-chat", label: "添加到对话" },
+              { id: "copy", label: "复制" },
             ],
             nextAction.position,
           )
@@ -1129,21 +1129,19 @@ export default function ThreadTerminalDrawer({
     [cwd, runtimeEnv, terminalLaunchLocationsById, worktreePath],
   );
   const splitTerminalActionLabel = hasReachedSplitLimit
-    ? `Split Terminal Horizontally (max ${MAX_TERMINALS_PER_GROUP} per group)`
+    ? `水平拆分终端（每组最多 ${MAX_TERMINALS_PER_GROUP} 个）`
     : splitShortcutLabel
-      ? `Split Terminal Horizontally (${splitShortcutLabel})`
-      : "Split Terminal Horizontally";
+      ? `水平拆分终端（${splitShortcutLabel}）`
+      : "水平拆分终端";
   const splitTerminalVerticalActionLabel = hasReachedSplitLimit
-    ? `Split Terminal Vertically (max ${MAX_TERMINALS_PER_GROUP} per group)`
+    ? `垂直拆分终端（每组最多 ${MAX_TERMINALS_PER_GROUP} 个）`
     : splitVerticalShortcutLabel
-      ? `Split Terminal Vertically (${splitVerticalShortcutLabel})`
-      : "Split Terminal Vertically";
-  const newTerminalActionLabel = newShortcutLabel
-    ? `New Terminal (${newShortcutLabel})`
-    : "New Terminal";
+      ? `垂直拆分终端（${splitVerticalShortcutLabel}）`
+      : "垂直拆分终端";
+  const newTerminalActionLabel = newShortcutLabel ? `新建终端（${newShortcutLabel}）` : "新建终端";
   const closeTerminalActionLabel = closeShortcutLabel
-    ? `Close Terminal (${closeShortcutLabel})`
-    : "Close Terminal";
+    ? `关闭终端（${closeShortcutLabel}）`
+    : "关闭终端";
   const onSplitTerminalAction = useCallback(() => {
     if (hasReachedSplitLimit) return;
     onSplitTerminal();
@@ -1512,7 +1510,7 @@ export default function ThreadTerminalDrawer({
                           }`}
                           onClick={() => onActiveTerminalChange(groupActiveTerminalId)}
                         >
-                          Group {groupIndex + 1}
+                          组 {groupIndex + 1}
                         </button>
                       )}
 
@@ -1521,8 +1519,8 @@ export default function ThreadTerminalDrawer({
                       >
                         {terminalGroup.terminalIds.map((terminalId) => {
                           const isActive = terminalId === resolvedActiveTerminalId;
-                          const closeTerminalLabel = `Close ${
-                            terminalLabelById.get(terminalId) ?? "terminal"
+                          const closeTerminalLabel = `关闭${
+                            terminalLabelById.get(terminalId) ?? "终端"
                           }${isActive && closeShortcutLabel ? ` (${closeShortcutLabel})` : ""}`;
                           return (
                             <div
@@ -1543,7 +1541,7 @@ export default function ThreadTerminalDrawer({
                               >
                                 <TerminalSquare className="size-3 shrink-0" />
                                 <span className="truncate">
-                                  {terminalLabelById.get(terminalId) ?? "Terminal"}
+                                  {terminalLabelById.get(terminalId) ?? "终端"}
                                 </span>
                               </button>
                               {normalizedTerminalIds.length > 1 && (

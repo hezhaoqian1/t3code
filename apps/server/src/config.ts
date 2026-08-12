@@ -15,12 +15,24 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 export const DEFAULT_PORT = 3773;
+export const LOOPBACK_HOST = "127.0.0.1" as const;
+const LOOPBACK_HOSTNAMES = new Set([LOOPBACK_HOST, "::1", "localhost"]);
+
+export const isLoopbackHostname = (hostname: string): boolean =>
+  LOOPBACK_HOSTNAMES.has(
+    hostname
+      .trim()
+      .toLowerCase()
+      .replace(/^\[(.*)\]$/, "$1"),
+  );
+
+export const isLoopbackHttpUrl = (url: URL): boolean =>
+  (url.protocol === "http:" || url.protocol === "https:") &&
+  url.origin !== "null" &&
+  isLoopbackHostname(url.hostname);
 
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
-
-export const StartupPresentation = Schema.Literals(["browser", "headless"]);
-export type StartupPresentation = typeof StartupPresentation.Type;
 
 /**
  * ServerDerivedPaths - Derived paths from the base directory.
@@ -33,6 +45,8 @@ export interface ServerDerivedPaths {
   readonly providerStatusCacheDir: string;
   readonly worktreesDir: string;
   readonly attachmentsDir: string;
+  /** Provider-neutral root for read-only T3 workflow script inspection. */
+  readonly workflowScriptsDir: string;
   readonly logsDir: string;
   readonly serverLogPath: string;
   readonly serverTracePath: string;
@@ -41,7 +55,6 @@ export interface ServerDerivedPaths {
   readonly terminalLogsDir: string;
   readonly anonymousIdPath: string;
   readonly environmentIdPath: string;
-  readonly serverRuntimeStatePath: string;
   readonly secretsDir: string;
 }
 
@@ -67,22 +80,21 @@ export class ServerConfig extends Context.Service<
     readonly otlpServiceName: string;
     readonly mode: RuntimeMode;
     readonly port: number;
-    readonly host: string | undefined;
+    readonly host: typeof LOOPBACK_HOST;
     readonly cwd: string;
     readonly baseDir: string;
     readonly staticDir: string | undefined;
     readonly devUrl: URL | undefined;
-    readonly devAllowedOrigins: ReadonlyArray<string>;
     readonly noBrowser: boolean;
-    readonly startupPresentation: StartupPresentation;
     readonly desktopBootstrapToken: string | undefined;
+    readonly developmentBootstrapToken?: string | undefined;
     readonly desktopTelemetryFd?: number | undefined;
     readonly desktopTelemetryControlFd?: number | undefined;
+    readonly fdRuntimeCredentialFd?: number | undefined;
     readonly resourceMonitorPath?: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
+    readonly taskWorkspaceRoot?: string | undefined;
     readonly logWebSocketEvents: boolean;
-    readonly tailscaleServeEnabled: boolean;
-    readonly tailscaleServePort: number;
   }
 >()("t3/config/ServerConfig") {
   /** @deprecated Import and use `layerTest` from this module. */
@@ -108,6 +120,7 @@ export const deriveServerPaths = Effect.fn(function* (
   );
   const dbPath = join(stateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
+  const workflowScriptsDir = join(stateDir, "workflow-scripts");
   const logsDir = join(stateDir, "logs");
   const providerLogsDir = join(logsDir, "provider");
   const providerStatusCacheDir = join(baseDir, "caches");
@@ -119,6 +132,7 @@ export const deriveServerPaths = Effect.fn(function* (
     providerStatusCacheDir,
     worktreesDir: join(baseDir, "worktrees"),
     attachmentsDir,
+    workflowScriptsDir,
     logsDir,
     serverLogPath: join(logsDir, "server.log"),
     serverTracePath: join(logsDir, "server.trace.ndjson"),
@@ -127,7 +141,6 @@ export const deriveServerPaths = Effect.fn(function* (
     terminalLogsDir: join(logsDir, "terminals"),
     anonymousIdPath: join(stateDir, "anonymous-id"),
     environmentIdPath: join(stateDir, "environment-id"),
-    serverRuntimeStatePath: join(stateDir, "server-runtime.json"),
     secretsDir: join(stateDir, "secrets"),
   };
 });
@@ -143,12 +156,12 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(derivedPaths.providerLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.terminalLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.workflowScriptsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.worktreesDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.keybindingsConfigPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true }),
       fs.makeDirectory(derivedPaths.providerStatusCacheDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.anonymousIdPath), { recursive: true }),
-      fs.makeDirectory(path.dirname(derivedPaths.serverRuntimeStatePath), { recursive: true }),
     ],
     { concurrency: "unbounded" },
   );
@@ -183,20 +196,19 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     ...derivedPaths,
     mode: "web",
     autoBootstrapProjectFromCwd: false,
+    taskWorkspaceRoot: undefined,
     logWebSocketEvents: false,
-    tailscaleServeEnabled: false,
-    tailscaleServePort: 443,
     port: 0,
-    host: undefined,
+    host: LOOPBACK_HOST,
     desktopBootstrapToken: undefined,
+    developmentBootstrapToken: undefined,
     desktopTelemetryFd: undefined,
     desktopTelemetryControlFd: undefined,
+    fdRuntimeCredentialFd: undefined,
     resourceMonitorPath: undefined,
     staticDir: undefined,
     devUrl,
-    devAllowedOrigins: [],
     noBrowser: false,
-    startupPresentation: "browser",
   });
 });
 

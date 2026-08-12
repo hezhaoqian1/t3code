@@ -30,10 +30,6 @@ type SidebarProject = {
   updatedAt?: string | undefined;
 };
 
-type ScopedSidebarProject = SidebarProject & {
-  environmentId: string;
-};
-
 type ScopedSidebarThread = ThreadSortInput & {
   environmentId: string;
   projectId: string;
@@ -107,13 +103,13 @@ export function buildBulkTitleRegenerationContextMenuItem(input: {
   if (input.actionableCount === 0) {
     return {
       id: "regenerate-title",
-      label: `Regenerating… (${input.supportedCount})`,
+      label: `正在生成标题… (${input.supportedCount})`,
       disabled: true,
     };
   }
   return {
     id: "regenerate-title",
-    label: `Regenerate titles (${input.actionableCount})`,
+    label: `重新生成标题 (${input.actionableCount})`,
   };
 }
 
@@ -884,42 +880,5 @@ export function sortLogicalProjectsForSidebar<
     (project) => threadsByProjectKey.get(project.projectKey) ?? [],
     (left, right) =>
       left.title.localeCompare(right.title) || left.projectKey.localeCompare(right.projectKey),
-  );
-}
-
-/**
- * Sorts the cross-environment project collection used by landing surfaces.
- * Project ids are only unique within an environment, and archived threads
- * must not make a project appear recently active.
- */
-export function sortScopedProjectsForSidebar<
-  TProject extends ScopedSidebarProject,
-  TThread extends ScopedSidebarThread,
->(
-  projects: readonly TProject[],
-  threads: readonly TThread[],
-  sortOrder: SidebarProjectSortOrder,
-): TProject[] {
-  const scopedKey = (environmentId: string, projectId: string) =>
-    `${environmentId}\u0000${projectId}`;
-  const threadsByProject = new Map<string, TThread[]>();
-  for (const thread of threads) {
-    if (thread.archivedAt !== null) {
-      continue;
-    }
-    const key = scopedKey(thread.environmentId, thread.projectId);
-    const existing = threadsByProject.get(key) ?? [];
-    existing.push(thread);
-    threadsByProject.set(key, existing);
-  }
-
-  return sortProjectsByActivity(
-    projects,
-    sortOrder,
-    (project) => threadsByProject.get(scopedKey(project.environmentId, project.id)) ?? [],
-    (left, right) =>
-      left.title.localeCompare(right.title) ||
-      left.environmentId.localeCompare(right.environmentId) ||
-      left.id.localeCompare(right.id),
   );
 }

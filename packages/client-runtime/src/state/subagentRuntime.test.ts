@@ -568,9 +568,9 @@ describe("model and effort attribution", () => {
   });
 
   it("formatSubagentModelLabel compacts ids and appends effort", () => {
-    expect(formatSubagentModelLabel("claude-sonnet-5[1m]", "high")).toBe("sonnet-5[1m] · high");
-    expect(formatSubagentModelLabel("claude-opus-4-20250514", null)).toBe("opus-4");
-    expect(formatSubagentModelLabel("gpt-5.6-sol", "low")).toBe("gpt-5.6-sol · low");
+    expect(formatSubagentModelLabel("deepseek-v4-flash", "high")).toBe("deepseek-v4-flash · high");
+    expect(formatSubagentModelLabel("deepseek-v4-20250514", null)).toBe("deepseek-v4");
+    expect(formatSubagentModelLabel("deepseek-v4-latest", "low")).toBe("deepseek-v4 · low");
     expect(formatSubagentModelLabel(null, "high")).toBeNull();
   });
 });

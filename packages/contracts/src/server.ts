@@ -46,6 +46,9 @@ const ServerConfigIssues = ForwardCompatibleArray(ServerConfigIssue);
 export const ServerProviderState = Schema.Literals(["ready", "warning", "error", "disabled"]);
 export type ServerProviderState = typeof ServerProviderState.Type;
 
+export const ServerProviderSkillCatalogState = Schema.Literals(["loading", "ready", "error"]);
+export type ServerProviderSkillCatalogState = typeof ServerProviderSkillCatalogState.Type;
+
 export const ServerProviderAuthStatus = Schema.Literals([
   "authenticated",
   "unauthenticated",
@@ -96,67 +99,10 @@ export const ServerProviderSkill = Schema.Struct({
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
 
-/**
- * Availability of a configured provider instance from the runtime's POV.
- *
- *  - `available` — the build ships this driver and an instance is wired
- *    up. Default for legacy snapshots produced from the closed
- *    `ServerSettings.providers` map.
- *  - `unavailable` — the user's `ServerSettings.providerInstances` (or a
- *    persisted thread / session binding) references a driver this build
- *    doesn't ship. Common after rolling back from a fork or PR branch
- *    that introduced a new driver. The snapshot is preserved so the UI
- *    can render "missing driver" affordances and so the data round-trips
- *    when the user moves back to the fork.
- *
- * Snapshots with `availability: "unavailable"` MUST set
- * `installed: false` and `enabled: false`; the runtime refuses turn
- * starts against them with a structured error.
- */
-export const ServerProviderAvailability = Schema.Literals(["available", "unavailable"]);
-export type ServerProviderAvailability = typeof ServerProviderAvailability.Type;
-
 export const ServerProviderContinuation = Schema.Struct({
   groupKey: TrimmedNonEmptyString,
 });
 export type ServerProviderContinuation = typeof ServerProviderContinuation.Type;
-
-export const ServerProviderVersionAdvisoryStatus = Schema.Literals([
-  "unknown",
-  "current",
-  "behind_latest",
-]);
-export type ServerProviderVersionAdvisoryStatus = typeof ServerProviderVersionAdvisoryStatus.Type;
-
-export const ServerProviderVersionAdvisory = Schema.Struct({
-  status: ServerProviderVersionAdvisoryStatus,
-  currentVersion: Schema.NullOr(TrimmedNonEmptyString),
-  latestVersion: Schema.NullOr(TrimmedNonEmptyString),
-  updateCommand: Schema.NullOr(TrimmedNonEmptyString),
-  canUpdate: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  checkedAt: Schema.NullOr(IsoDateTime),
-  message: Schema.NullOr(TrimmedNonEmptyString),
-});
-export type ServerProviderVersionAdvisory = typeof ServerProviderVersionAdvisory.Type;
-
-export const ServerProviderUpdateStatus = Schema.Literals([
-  "idle",
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "unchanged",
-]);
-export type ServerProviderUpdateStatus = typeof ServerProviderUpdateStatus.Type;
-
-export const ServerProviderUpdateState = Schema.Struct({
-  status: ServerProviderUpdateStatus,
-  startedAt: Schema.NullOr(IsoDateTime),
-  finishedAt: Schema.NullOr(IsoDateTime),
-  message: Schema.NullOr(TrimmedNonEmptyString),
-  output: Schema.NullOr(Schema.String.check(Schema.isMaxLength(10_000))),
-});
-export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type;
 
 export const ServerProvider = Schema.Struct({
   // Routing key for the configured instance this snapshot represents. This
@@ -172,46 +118,24 @@ export const ServerProvider = Schema.Struct({
   showInteractionModeToggle: Schema.optional(Schema.Boolean),
   requiresNewThreadForModelChange: Schema.optional(Schema.Boolean),
   enabled: Schema.Boolean,
-  installed: Schema.Boolean,
-  version: Schema.NullOr(TrimmedNonEmptyString),
   status: ServerProviderState,
   auth: ServerProviderAuth,
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
-  // Optional for back-compat: every legacy producer omits this field and
-  // an absent value is interpreted as `"available"` by consumers (see
-  // `isProviderAvailable`). New `ProviderInstanceRegistry` outputs set it
-  // explicitly so the UI can render unavailable shadows from
-  // `ServerSettings.providerInstances`.
-  availability: Schema.optional(ServerProviderAvailability),
-  // Human-readable reason populated when `availability === "unavailable"`.
-  // Surfaces in the UI alongside the missing-driver affordance.
-  unavailableReason: Schema.optional(TrimmedNonEmptyString),
+  skillCatalogState: Schema.optional(ServerProviderSkillCatalogState),
   models: Schema.Array(ServerProviderModel),
   slashCommands: Schema.Array(ServerProviderSlashCommand).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
-  versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
-  updateState: Schema.optionalKey(ServerProviderUpdateState),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
-// Provider status kinds grow over time (ServerProviderState,
-// ServerProviderAuthStatus, ServerProviderVersionAdvisoryStatus,
-// ServerProviderUpdateStatus); an older client must not fail the whole config
+// Provider status kinds grow over time (ServerProviderState and
+// ServerProviderAuthStatus); an older client must not fail the whole config
 // decode over one provider it cannot render.
 export const ServerProviders = ForwardCompatibleArray(ServerProvider);
 export type ServerProviders = typeof ServerProviders.Type;
-
-/**
- * Treat the optional `availability` as "available" when absent. This is
- * the rule legacy producers (which omit the field) and new producers
- * (which set it explicitly) agree on so consumers never have to thread
- * `?? "available"` defaults through their code paths.
- */
-export const isProviderAvailable = (snapshot: ServerProvider): boolean =>
-  snapshot.availability !== "unavailable";
 
 export const ServerObservability = Schema.Struct({
   logsDirectoryPath: TrimmedNonEmptyString,
@@ -580,30 +504,6 @@ export const ServerLifecycleStreamEvent = Schema.Union([
   ServerLifecycleStreamReadyEvent,
 ]);
 export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
-
-export const ServerProviderUpdatedPayload = Schema.Struct({
-  providers: ServerProviders,
-});
-export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
-
-export const ServerProviderUpdateInput = Schema.Struct({
-  provider: ProviderDriverKind,
-  instanceId: Schema.optionalKey(ProviderInstanceId),
-});
-export type ServerProviderUpdateInput = typeof ServerProviderUpdateInput.Type;
-
-export class ServerProviderUpdateError extends Schema.TaggedErrorClass<ServerProviderUpdateError>()(
-  "ServerProviderUpdateError",
-  {
-    provider: ProviderDriverKind,
-    reason: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect()),
-  },
-) {
-  override get message(): string {
-    return `Provider update failed for ${this.provider}: ${this.reason}`;
-  }
-}
 
 export const ServerSelfUpdateInput = Schema.Struct({
   /** Exact npm version of the `t3` package to install (never a dist-tag, so

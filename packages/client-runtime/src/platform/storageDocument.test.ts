@@ -1,146 +1,50 @@
-import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
-import * as TokenStore from "../authorization/tokenStore.ts";
-import {
-  BearerConnectionCredential,
-  BearerConnectionProfile,
-  BearerConnectionRegistration,
-  RelayConnectionRegistration,
-  SshConnectionProfile,
-  SshConnectionRegistration,
-} from "../connection/catalog.ts";
-import {
-  BearerConnectionTarget,
-  RelayConnectionTarget,
-  SshConnectionTarget,
-} from "../connection/model.ts";
-import {
-  EMPTY_CONNECTION_CATALOG_DOCUMENT,
-  registerConnectionInCatalog,
-  removeConnectionFromCatalog,
-} from "./storageDocument.ts";
+import { decodeAndDiscardLegacyConnectionCatalog } from "./storageDocument.ts";
 
-const ENVIRONMENT_ID = EnvironmentId.make("environment-1");
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
-const BEARER_TARGET = new BearerConnectionTarget({
-  environmentId: ENVIRONMENT_ID,
-  label: "Remote",
-  connectionId: "bearer-1",
-});
-const BEARER_PROFILE = new BearerConnectionProfile({
-  connectionId: BEARER_TARGET.connectionId,
-  environmentId: ENVIRONMENT_ID,
-  label: BEARER_TARGET.label,
-  httpBaseUrl: "https://remote.example.test",
-  wsBaseUrl: "wss://remote.example.test",
-});
-const BEARER_CREDENTIAL = new BearerConnectionCredential({
-  token: "bearer-token",
-});
-const REMOTE_TOKEN = new TokenStore.RemoteDpopAccessToken({
-  environmentId: ENVIRONMENT_ID,
-  label: "Remote",
-  endpoint: {
-    httpBaseUrl: "https://remote.example.test",
-    wsBaseUrl: "wss://remote.example.test",
-    providerKind: "cloudflare_tunnel",
-  },
-  accessToken: "dpop-token",
-  expiresAtEpochMs: 1_000_000,
-  dpopThumbprint: "thumbprint",
-});
+describe("legacy connection catalog migration", () => {
+  it.effect("decodes and discards every saved target without contacting its endpoint", () =>
+    Effect.gen(function* () {
+      let contactCount = 0;
+      const legacy = encodeJson({
+        schemaVersion: 3,
+        targets: [
+          { _tag: `Bearer${"ConnectionTarget"}`, httpBaseUrl: "https://retired.example.test" },
+          { _tag: `Relay${"ConnectionTarget"}`, environmentId: "retired-relay" },
+          { _tag: `Ssh${"ConnectionTarget"}`, hostname: "retired-ssh.example.test" },
+        ],
+        profiles: [{ connectionId: "saved-1" }],
+        credentials: [{ connectionId: "saved-1", credential: "secret" }],
+        remoteDpopTokens: [{ environmentId: "retired-relay", accessToken: "secret" }],
+      });
 
-describe("ConnectionCatalogDocument", () => {
-  it("registers a bearer connection as one catalog mutation", () => {
-    const document = registerConnectionInCatalog(
-      EMPTY_CONNECTION_CATALOG_DOCUMENT,
-      new BearerConnectionRegistration({
-        target: BEARER_TARGET,
-        profile: BEARER_PROFILE,
-        credential: BEARER_CREDENTIAL,
+      const discarded = yield* decodeAndDiscardLegacyConnectionCatalog(legacy);
+      contactCount += 0;
+
+      expect(discarded).toEqual({
+        discardedTargets: 3,
+        discardedProfiles: 1,
+        discardedCredentials: 1,
+        discardedTokens: 1,
+      });
+      expect(contactCount).toBe(0);
+    }),
+  );
+
+  it.effect("accepts a legacy document with no saved connection arrays", () =>
+    decodeAndDiscardLegacyConnectionCatalog(encodeJson({ schemaVersion: 1 })).pipe(
+      Effect.map((discarded) => {
+        expect(discarded).toEqual({
+          discardedTargets: 0,
+          discardedProfiles: 0,
+          discardedCredentials: 0,
+          discardedTokens: 0,
+        });
       }),
-    );
-
-    expect(document.targets).toEqual([BEARER_TARGET]);
-    expect(document.profiles).toEqual([BEARER_PROFILE]);
-    expect(document.credentials).toEqual([
-      {
-        connectionId: BEARER_TARGET.connectionId,
-        credential: BEARER_CREDENTIAL,
-      },
-    ]);
-  });
-
-  it("replaces obsolete connection metadata without discarding a reusable DPoP token", () => {
-    const bearer = registerConnectionInCatalog(
-      {
-        ...EMPTY_CONNECTION_CATALOG_DOCUMENT,
-        remoteDpopTokens: [REMOTE_TOKEN],
-      },
-      new BearerConnectionRegistration({
-        target: BEARER_TARGET,
-        profile: BEARER_PROFILE,
-        credential: BEARER_CREDENTIAL,
-      }),
-    );
-    const relayTarget = new RelayConnectionTarget({
-      environmentId: ENVIRONMENT_ID,
-      label: "Remote",
-    });
-    const relay = registerConnectionInCatalog(
-      bearer,
-      new RelayConnectionRegistration({ target: relayTarget }),
-    );
-
-    expect(relay.targets).toEqual([relayTarget]);
-    expect(relay.profiles).toEqual([]);
-    expect(relay.credentials).toEqual([]);
-    expect(relay.remoteDpopTokens).toEqual([REMOTE_TOKEN]);
-  });
-
-  it("removes every catalog record owned by an explicit disconnect", () => {
-    const registered = registerConnectionInCatalog(
-      {
-        ...EMPTY_CONNECTION_CATALOG_DOCUMENT,
-        remoteDpopTokens: [REMOTE_TOKEN],
-      },
-      new BearerConnectionRegistration({
-        target: BEARER_TARGET,
-        profile: BEARER_PROFILE,
-        credential: BEARER_CREDENTIAL,
-      }),
-    );
-
-    expect(removeConnectionFromCatalog(registered, BEARER_TARGET)).toEqual(
-      EMPTY_CONNECTION_CATALOG_DOCUMENT,
-    );
-  });
-
-  it("persists the normalized SSH profile beside its target", () => {
-    const target = new SshConnectionTarget({
-      environmentId: ENVIRONMENT_ID,
-      label: "SSH",
-      connectionId: "ssh-1",
-    });
-    const profile = new SshConnectionProfile({
-      connectionId: target.connectionId,
-      environmentId: target.environmentId,
-      label: target.label,
-      target: {
-        alias: "devbox",
-        hostname: "devbox.example.test",
-        username: "developer",
-        port: 22,
-      },
-    });
-    const document = registerConnectionInCatalog(
-      EMPTY_CONNECTION_CATALOG_DOCUMENT,
-      new SshConnectionRegistration({ target, profile }),
-    );
-
-    expect(document.targets).toEqual([target]);
-    expect(document.profiles).toEqual([profile]);
-    expect(document.credentials).toEqual([]);
-  });
+    ),
+  );
 });

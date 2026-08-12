@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
   rememberPreviewUrl: vi.fn(),
-  readPreparedConnection: vi.fn(() => ({ httpBaseUrl: "http://172.25.85.75:3773" })),
+  readPreparedConnection: vi.fn(() => ({ httpBaseUrl: "http://127.0.0.1:3773" })),
   submittedUrl: null as ((url: string) => void) | null,
   emptyStateUrl: null as ((url: string) => void) | null,
   togglePictureInPicture: null as (() => void) | null,
@@ -97,8 +97,7 @@ vi.mock("~/previewStateStore", () => ({
 }));
 
 vi.mock("~/state/environments", () => ({
-  useEnvironment: () => ({ label: "WSL" }),
-  useEnvironmentHttpBaseUrl: () => "http://172.25.85.75:3773",
+  useEnvironmentHttpBaseUrl: () => "http://127.0.0.1:3773",
 }));
 
 vi.mock("~/state/preview", () => ({
@@ -252,7 +251,7 @@ describe("PreviewView navigation", () => {
       "https://localhost:8000/dashboard?mode=test#top",
     ],
     ["localhost:5173/app", "http://localhost:5173/app"],
-  ])("preserves a direct localhost URL in a WSL environment", async (submitted, expected) => {
+  ])("preserves a direct localhost URL", async (submitted, expected) => {
     renderToStaticMarkup(
       <PreviewView
         threadRef={{
@@ -300,7 +299,7 @@ describe("PreviewView navigation", () => {
     });
   });
 
-  it("maps an empty-state localhost server onto the WSL host", async () => {
+  it("opens an empty-state localhost server directly", async () => {
     mocks.showEmptyState = true;
     renderToStaticMarkup(
       <PreviewView
@@ -319,7 +318,7 @@ describe("PreviewView navigation", () => {
     await vi.waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith(
         TEST_RUNTIME_TAB_ID,
-        "http://172.25.85.75:5173/app?mode=test#top",
+        "http://localhost:5173/app?mode=test#top",
       ),
     );
     expect(mocks.rememberPreviewUrl).toHaveBeenCalledWith(
@@ -327,7 +326,7 @@ describe("PreviewView navigation", () => {
         environmentId: "environment-1",
         threadId: "thread-1",
       },
-      "http://172.25.85.75:5173/app?mode=test#top",
+      "http://localhost:5173/app?mode=test#top",
     );
     await vi.waitFor(() =>
       expect(mocks.recordVisitForThread).toHaveBeenCalledWith(

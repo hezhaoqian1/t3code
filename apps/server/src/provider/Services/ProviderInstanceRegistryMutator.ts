@@ -20,8 +20,7 @@
  *      the driver's `create`, and stores the resulting `ProviderInstance`
  *      plus its scope.
  *   4. Publishes one `void` tick on the registry's `streamChanges` PubSub at
- *      the end of the batch — consumers re-pull `listInstances` /
- *      `listUnavailable`.
+ *      the end of the batch so consumers re-pull `listInstances`.
  *
  * `reconcile` is idempotent: calling it with an unchanged config map is a
  * no-op (no scope churn, no pubsub emission).
@@ -37,11 +36,8 @@ export interface ProviderInstanceRegistryMutatorShape {
    * Bring the live registry in line with the supplied config map. See
    * module docs for the add / remove / replace semantics.
    *
-   * The effect never fails: individual driver `create` failures are
-   * captured as "unavailable" shadow snapshots inside the registry, the
-   * same way boot-time failures are handled by
-   * `makeProviderInstanceRegistry`. This keeps settings-watcher loops from
-   * erroring out on a single bad entry.
+   * The effect never fails: individual driver creation failures are logged
+   * and omitted from the live registry.
    */
   readonly reconcile: (configMap: ProviderInstanceConfigMap) => Effect.Effect<void>;
 }

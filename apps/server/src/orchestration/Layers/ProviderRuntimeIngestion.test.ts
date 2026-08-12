@@ -54,6 +54,10 @@ import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts"
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import {
+  FdEnterpriseThreadRuntime,
+  FdEnterpriseThreadRuntimeLive,
+} from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {}) {
   return ServerSettingsService.layerTest(overrides);
@@ -195,7 +199,10 @@ async function waitForThread(
 
 describe("ProviderRuntimeIngestion", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
+    | OrchestrationEngineService
+    | ProviderRuntimeIngestionService
+    | ProjectionSnapshotQuery
+    | FdEnterpriseThreadRuntime,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -244,6 +251,7 @@ describe("ProviderRuntimeIngestion", () => {
       // engine, and the snapshot query (reader).
       Layer.provideMerge(ThreadBackgroundLiveness.layer),
       Layer.provideMerge(ThreadPlanProgress.layer),
+      Layer.provideMerge(FdEnterpriseThreadRuntimeLive),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
@@ -254,6 +262,7 @@ describe("ProviderRuntimeIngestion", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
+    const enterpriseRuntime = await runtime.runPromise(Effect.service(FdEnterpriseThreadRuntime));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(ingestion.drain);
@@ -314,6 +323,7 @@ describe("ProviderRuntimeIngestion", () => {
 
     return {
       engine,
+      enterpriseRuntime,
       dispatch,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       emit: provider.emit,
@@ -362,6 +372,131 @@ describe("ProviderRuntimeIngestion", () => {
     );
     expect(thread.session?.status).toBe("error");
     expect(thread.session?.lastError).toBe("turn failed");
+  });
+
+  it("keeps Enterprise content volatile while durable lifecycle reaches ready", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const provider = ProviderDriverKind.make("fd-deepseek");
+    const turnId = asTurnId("fd-enterprise-turn-1");
+    const assistantItemId = asItemId("fd-enterprise-assistant-1");
+    const toolItemId = asItemId("fd-enterprise-tool-1");
+
+    harness.emit({
+      type: "turn.started",
+      eventId: asEventId("evt-fd-enterprise-turn-started"),
+      provider,
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      payload: { model: "deepseek-v4-flash" },
+    });
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === "running" && thread.session.activeTurnId === turnId,
+    );
+
+    harness.emit({
+      type: "content.delta",
+      persistence: "memory-only",
+      eventId: asEventId("evt-fd-enterprise-assistant-delta"),
+      provider,
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      itemId: assistantItemId,
+      payload: { streamKind: "assistant_text", delta: "客户敏感部分回答" },
+    });
+    harness.emit({
+      type: "item.started",
+      persistence: "memory-only",
+      eventId: asEventId("evt-fd-enterprise-tool-started"),
+      provider,
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      itemId: toolItemId,
+      payload: {
+        itemType: "dynamic_tool_call",
+        status: "inProgress",
+        title: "正在查询客户持仓",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      persistence: "memory-only",
+      eventId: asEventId("evt-fd-enterprise-tool-completed"),
+      provider,
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      itemId: toolItemId,
+      payload: {
+        itemType: "dynamic_tool_call",
+        status: "completed",
+        title: "企业查询已完成",
+        detail: "audit sensitive-audit-id",
+      },
+    });
+    harness.emit({
+      type: "item.completed",
+      persistence: "memory-only",
+      eventId: asEventId("evt-fd-enterprise-assistant-completed"),
+      provider,
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      itemId: assistantItemId,
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        data: { finalText: "客户敏感最终回答" },
+      },
+    });
+    harness.emit({
+      type: "turn.completed",
+      eventId: asEventId("evt-fd-enterprise-turn-completed"),
+      provider,
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      payload: { state: "completed" },
+    });
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.session?.status === "ready" && entry.session.activeTurnId === null,
+    );
+    await harness.drain();
+    const overlay = await Effect.runPromise(
+      harness.enterpriseRuntime.getSnapshot(asThreadId("thread-1")),
+    );
+    const durableEvents = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    );
+    const durableJson = JSON.stringify(durableEvents);
+
+    expect(thread.messages).toEqual([]);
+    expect(overlay.messages).toEqual([
+      expect.objectContaining({
+        id: assistantItemId,
+        role: "assistant",
+        text: "客户敏感最终回答",
+        streaming: false,
+      }),
+    ]);
+    expect(overlay.activities).toEqual([
+      expect.objectContaining({
+        kind: "tool.completed",
+        summary: "企业查询已完成",
+        payload: { detail: "audit sensitive-audit-id" },
+      }),
+    ]);
+    expect(durableJson).not.toContain("客户敏感");
+    expect(durableJson).not.toContain("sensitive-audit-id");
+    expect(durableJson).not.toContain("正在查询客户持仓");
   });
 
   it("applies provider session.state.changed transitions directly", async () => {
@@ -3094,11 +3229,6 @@ describe("ProviderRuntimeIngestion", () => {
           toolUses: 25,
           durationMs: 43_567,
         },
-      },
-      raw: {
-        source: "claude.sdk.message",
-        method: "claude/result/success",
-        payload: {},
       },
     });
 

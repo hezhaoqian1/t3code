@@ -1,5 +1,4 @@
 import type { ServerConfig } from "@t3tools/contracts";
-import * as Option from "effect/Option";
 
 import type { ConnectionCatalogEntry } from "./catalog.ts";
 import type { NetworkStatus, SupervisorConnectionState } from "./model.ts";
@@ -90,20 +89,7 @@ export function presentEnvironmentConnection(
 }
 
 export function connectionCatalogDisplayUrl(entry: ConnectionCatalogEntry): string | null {
-  switch (entry.target._tag) {
-    case "PrimaryConnectionTarget":
-      return entry.target.httpBaseUrl;
-    case "RelayConnectionTarget":
-      return null;
-    case "BearerConnectionTarget":
-      return Option.isSome(entry.profile) && entry.profile.value._tag === "BearerConnectionProfile"
-        ? entry.profile.value.httpBaseUrl
-        : null;
-    case "SshConnectionTarget":
-      return Option.isSome(entry.profile) && entry.profile.value._tag === "SshConnectionProfile"
-        ? `${entry.profile.value.target.username}@${entry.profile.value.target.hostname}`
-        : null;
-  }
+  return entry.target.httpBaseUrl;
 }
 
 export function connectionPhaseMessage(

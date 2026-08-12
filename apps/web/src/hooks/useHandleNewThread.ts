@@ -21,19 +21,23 @@ import {
   selectProjectGroupingSettings,
 } from "../logicalProject";
 import { resolveDefaultThreadEnvMode } from "@t3tools/shared/threadEnvMode";
-import { readThreadShell, useProjects, useThread } from "../state/entities";
+import { readThreadShell, usePrimaryProjects, useThread } from "../state/entities";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import { readT3ProjectFileDefaultThreadEnvMode } from "../lib/t3ProjectFileDefaults";
-import { primaryServerSettingsAtom } from "../state/server";
+import { primaryServerSettingsAtom, primaryServerWelcomeAtom } from "../state/server";
 import { resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { useClientSettings } from "./useSettings";
+import { usePrimaryEnvironmentId } from "../state/environments";
+import { isElectron } from "../env";
+import { findOfficeWorkspaceProject } from "../officeMode";
 
 interface NewThreadWorkspaceOptions {
   branch?: string | null;
   worktreePath?: string | null;
   envMode?: DraftThreadEnvMode;
   startFromOrigin?: boolean;
+  taskArea?: boolean;
 }
 
 // The workspace options the caller passed explicitly, shaped for the draft
@@ -49,19 +53,15 @@ function pickExplicitWorkspaceOptions(options: NewThreadWorkspaceOptions | undef
 }
 
 export function useNewThreadHandler() {
-  const projects = useProjects();
-  // New-thread defaults are a user preference, and the settings UI only ever
-  // edits the primary environment's settings.json. Reading the target
-  // environment's own settings here would silently reset remote projects to
-  // the decoded defaults ("local" mode, current branch), since nothing can
-  // set those values on a remote server.
+  const projects = usePrimaryProjects();
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const router = useRouter();
   const getCurrentRouteTarget = useCallback(() => {
     const currentRouteParams = router.state.matches[router.state.matches.length - 1]?.params ?? {};
-    return resolveThreadRouteTarget(currentRouteParams);
-  }, [router]);
+    return resolveThreadRouteTarget(currentRouteParams, primaryEnvironmentId);
+  }, [primaryEnvironmentId, router]);
 
   return useCallback(
     (
@@ -71,9 +71,13 @@ export function useNewThreadHandler() {
         worktreePath?: string | null;
         envMode?: DraftThreadEnvMode;
         startFromOrigin?: boolean;
+        taskArea?: boolean;
         replace?: boolean;
       },
     ): Promise<void> => {
+      if (primaryEnvironmentId === null || projectRef.environmentId !== primaryEnvironmentId) {
+        return Promise.reject(new Error("The project is not available in the local service."));
+      }
       const {
         getComposerDraft,
         getDraftSessionByLogicalProjectKey,
@@ -142,14 +146,20 @@ export function useNewThreadHandler() {
           globalDefault: primaryServerSettings.defaultThreadEnvMode,
         });
       };
-      const logicalProjectKey = project
-        ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
-        : scopedProjectKey(projectRef);
+      const taskArea = options?.taskArea === true;
+      const taskDraftId = taskArea ? newDraftId() : null;
+      const logicalProjectKey = taskArea
+        ? `task:${taskDraftId}`
+        : project
+          ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
+          : scopedProjectKey(projectRef);
       const hasBranchOption = options?.branch !== undefined;
       const hasWorktreePathOption = options?.worktreePath !== undefined;
       const hasEnvModeOption = options?.envMode !== undefined;
       const hasStartFromOriginOption = options?.startFromOrigin !== undefined;
-      const storedDraftThread = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+      const storedDraftThread = taskArea
+        ? null
+        : getDraftSessionByLogicalProjectKey(logicalProjectKey);
       const storedDraftThreadRef = storedDraftThread
         ? scopeThreadRef(storedDraftThread.environmentId, storedDraftThread.threadId)
         : null;
@@ -263,6 +273,7 @@ export function useNewThreadHandler() {
       }
 
       if (
+        !taskArea &&
         latestActiveDraftThread &&
         currentRouteTarget?.kind === "draft" &&
         latestActiveDraftThread.logicalProjectKey === logicalProjectKey &&
@@ -286,16 +297,18 @@ export function useNewThreadHandler() {
         return Promise.resolve();
       }
 
-      const draftId = newDraftId();
+      const draftId = taskDraftId ?? newDraftId();
       const threadId = newThreadId();
       const createdAt = new Date().toISOString();
       return (async () => {
-        const initialEnvMode = options?.envMode ?? (await resolveDefaultEnvMode());
+        const initialEnvMode = taskArea
+          ? "local"
+          : (options?.envMode ?? (await resolveDefaultEnvMode()));
         // The await yields, so a concurrent invocation may have registered a
         // draft for this logical project in the meantime. Registering ours
         // too would evict that draft while its navigation is in flight —
         // reuse the winner instead, like the synchronous path above does.
-        const racedDraft = getDraftSessionByLogicalProjectKey(logicalProjectKey);
+        const racedDraft = taskArea ? null : getDraftSessionByLogicalProjectKey(logicalProjectKey);
         if (
           racedDraft &&
           readThreadShell(scopeThreadRef(racedDraft.environmentId, racedDraft.threadId)) === null
@@ -325,17 +338,19 @@ export function useNewThreadHandler() {
         setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
           threadId,
           createdAt,
-          branch: options?.branch ?? null,
-          worktreePath: options?.worktreePath ?? null,
+          branch: taskArea ? null : (options?.branch ?? null),
+          worktreePath: taskArea ? null : (options?.worktreePath ?? null),
           envMode: initialEnvMode,
-          startFromOrigin:
-            options?.startFromOrigin ??
-            resolveNewDraftStartFromOrigin({
-              envMode: initialEnvMode,
-              newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
-            }),
+          startFromOrigin: taskArea
+            ? false
+            : (options?.startFromOrigin ??
+              resolveNewDraftStartFromOrigin({
+                envMode: initialEnvMode,
+                newWorktreesStartFromOrigin: primaryServerSettings.newWorktreesStartFromOrigin,
+              })),
           runtimeMode: carryRuntimeMode ?? DEFAULT_RUNTIME_MODE,
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
+          ...(taskArea ? { taskArea: true } : {}),
         });
         applyStickyState(draftId);
         if (carryModelSelection) {
@@ -354,15 +369,23 @@ export function useNewThreadHandler() {
         });
       })();
     },
-    [getCurrentRouteTarget, primaryServerSettings, projectGroupingSettings, projects, router],
+    [
+      getCurrentRouteTarget,
+      primaryEnvironmentId,
+      primaryServerSettings,
+      projectGroupingSettings,
+      projects,
+      router,
+    ],
   );
 }
 
 export function useHandleNewThread() {
   const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const routeTarget = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
+    select: (params) => resolveThreadRouteTarget(params, primaryEnvironmentId),
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
   const activeThread = useThread(routeThreadRef);
@@ -374,7 +397,8 @@ export function useHandleNewThread() {
         : useComposerDraftStore.getState().getDraftSession(routeTarget.draftId)
       : null,
   );
-  const projects = useProjects();
+  const projects = usePrimaryProjects();
+  const primaryServerWelcome = useAtomValue(primaryServerWelcomeAtom);
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -387,6 +411,31 @@ export function useHandleNewThread() {
     });
   }, [projectOrder, projects]);
   const handleNewThread = useNewThreadHandler();
+  const taskStagingProject = useMemo(
+    () =>
+      findOfficeWorkspaceProject({
+        isDesktop: isElectron,
+        projects,
+        bootstrapProjectId: primaryServerWelcome?.bootstrapProjectId,
+        bootstrapEnvironmentId: primaryServerWelcome?.environment.environmentId,
+      }),
+    [primaryServerWelcome, projects],
+  );
+  const handleNewTask = useCallback(
+    (options?: { readonly replace?: boolean }) => {
+      if (!taskStagingProject) {
+        return Promise.reject(new Error("The task staging project is not available."));
+      }
+      return handleNewThread(
+        scopeProjectRef(taskStagingProject.environmentId, taskStagingProject.id),
+        {
+          taskArea: true,
+          ...(options?.replace !== undefined ? { replace: options.replace } : {}),
+        },
+      );
+    },
+    [handleNewThread, taskStagingProject],
+  );
 
   return {
     activeDraftThread,
@@ -395,6 +444,8 @@ export function useHandleNewThread() {
       ? scopeProjectRef(orderedProjects[0].environmentId, orderedProjects[0].id)
       : null,
     handleNewThread,
+    handleNewTask,
+    canStartTask: taskStagingProject !== null,
     routeThreadRef,
   };
 }

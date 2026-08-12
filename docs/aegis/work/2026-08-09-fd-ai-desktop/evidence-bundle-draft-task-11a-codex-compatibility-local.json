@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-11a-codex-compatibility-local",
+  "type": "test, typecheck, build, and credential-boundary inspection",
+  "source": "restored Codex protocol/stdio/client and T3 adapter/session suites; FD routing, owner-lock, orchestration, persistence, managed-home, child-environment, local-Skill, and gated real-runtime tests",
+  "summary": "Local Task 11A verification passed 14 files and 237 tests; the real App Server test was skipped by its explicit gate. Server, contracts, client-runtime, and effect-codex-app-server typechecks passed, as did the Server bundle. The hidden FD provider routes ordinary turns through Codex, preserves resume cursors, projects lifecycle events once, forwards approval/user-input/interrupt, locks both owner directions, and resolves project/personal Skills as structured Codex input. Runtime Token inspection found it only in the child environment; managed config, process arguments, stderr projection, runtime payloads, and restored source paths contain no credential value. Live exact-endpoint proof remains pending because FD_RUN_REAL_APP_SERVER, FD_CODEX_BINARY, and FD_NEW_API_KEY are unset and the global codex install lacks @openai/codex-darwin-x64.",
+  "verifier": "Vitest 4.1.9, tsgo, Vite+ pack/formatter, git diff check, rg boundary scans, and codex --version failure inspection"
+}

@@ -1,8 +1,7 @@
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NodeCrypto from "node:crypto";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import {
   AuthAccessTokenType,
@@ -30,16 +29,9 @@ import {
   ResolvedKeybindingRule,
   ThreadId,
   WS_METHODS,
-  WsRpcGroup,
+  LocalWsRpcGroup,
   EditorId,
 } from "@t3tools/contracts";
-import {
-  computeDpopAccessTokenHash,
-  computeDpopJwkThumbprint,
-  type DpopPublicJwk,
-} from "@t3tools/shared/dpop";
-import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@t3tools/shared/relayJwt";
-import * as RelayClient from "@t3tools/shared/relayClient";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import * as Clock from "effect/Clock";
@@ -113,10 +105,8 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
-import * as ServiceLauncherClient from "./cloud/serviceLauncherClient.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -140,8 +130,6 @@ import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
-import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -410,11 +398,6 @@ const buildAppUnderTest = (options?: {
     repositoryIdentityResolver?: Partial<
       RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]
     >;
-    cloudManagedEndpointRuntime?: Partial<
-      CloudManagedEndpointRuntime.CloudManagedEndpointRuntime["Service"]
-    >;
-    relayClient?: Partial<RelayClient.RelayClient["Service"]>;
-    cloudCliTokenManager?: Partial<CloudCliTokenManager.CloudCliTokenManager["Service"]>;
     nativeTelemetryClient?: Partial<NativeTelemetryClient.NativeTelemetryClient["Service"]>;
     desktopTelemetryReceiver?: Partial<
       DesktopTelemetryReceiver.DesktopTelemetryReceiver["Service"]
@@ -446,14 +429,10 @@ const buildAppUnderTest = (options?: {
       ...derivedPaths,
       staticDir: undefined,
       devUrl,
-      devAllowedOrigins: [],
       noBrowser: true,
-      startupPresentation: "browser",
       desktopBootstrapToken: defaultDesktopBootstrapToken,
       autoBootstrapProjectFromCwd: false,
       logWebSocketEvents: false,
-      tailscaleServeEnabled: false,
-      tailscaleServePort: 443,
       ...options?.config,
     };
     const layerConfig = ServerConfig.layer(config);
@@ -604,17 +583,10 @@ const buildAppUnderTest = (options?: {
         ),
       ),
     );
-    const serviceLauncherClientLayer = ServiceLauncherClient.layer.pipe(
-      Layer.provide(Layer.succeed(HostProcessEnvironment, {})),
-    );
-
-    const servedRoutesLayer = HttpRouter.serve(
-      makeRoutesLayer.pipe(Layer.provide(serviceLauncherClientLayer)),
-      {
-        disableListenLog: true,
-        disableLogger: true,
-      },
-    ).pipe(
+    const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
+      disableListenLog: true,
+      disableLogger: true,
+    }).pipe(
       Layer.provide(
         Layer.mock(Keybindings.Keybindings)({
           loadConfigState: Effect.succeed({
@@ -628,13 +600,6 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(ProviderRegistry.ProviderRegistry)({
           getProviders: Effect.succeed([]),
-          refresh: () => Effect.succeed([]),
-          refreshInstance: () => Effect.succeed([]),
-          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed(
-              makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
-            ),
-          setProviderMaintenanceActionState: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
         }),
@@ -914,38 +879,6 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.repositoryIdentityResolver,
         }),
       ),
-      Layer.provide(
-        Layer.succeed(
-          CloudManagedEndpointRuntime.CloudManagedEndpointRuntime,
-          CloudManagedEndpointRuntime.CloudManagedEndpointRuntime.of({
-            applyConfig: () => Effect.succeed({ status: "disabled" }),
-            ...options?.layers?.cloudManagedEndpointRuntime,
-          }),
-        ),
-      ),
-      Layer.provide(
-        Layer.succeed(
-          RelayClient.RelayClient,
-          RelayClient.RelayClient.of({
-            resolve: Effect.succeed({
-              status: "missing",
-              version: RelayClient.CLOUDFLARED_VERSION,
-            }),
-            install: Effect.die("unused relay-client install"),
-            installWithProgress: () => Effect.die("unused relay-client install"),
-            ...options?.layers?.relayClient,
-          }),
-        ),
-      ),
-      Layer.provide(
-        Layer.mock(CloudCliTokenManager.CloudCliTokenManager)({
-          get: Effect.die(new Error("Unexpected T3 Connect CLI authorization request.")),
-          getExisting: Effect.succeed(Option.none()),
-          hasCredential: Effect.succeed(false),
-          clear: Effect.void,
-          ...options?.layers?.cloudCliTokenManager,
-        }),
-      ),
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(ServerSecretStore.layer),
       Layer.provide(workspaceAndProjectServicesLayer),
@@ -989,7 +922,7 @@ const wsRpcProtocolLayer = (wsUrl: string) => {
   );
 };
 
-const makeWsRpcClient = RpcClient.make(WsRpcGroup);
+const makeWsRpcClient = RpcClient.make(LocalWsRpcGroup);
 type WsRpcClient =
   typeof makeWsRpcClient extends Effect.Effect<infer Client, any, any> ? Client : never;
 
@@ -1069,7 +1002,7 @@ const exchangeAccessToken = (
         requested_token_type: AuthAccessTokenType,
         scope:
           options?.scope ??
-          "orchestration:read orchestration:operate terminal:operate review:write relay:read access:read access:write relay:write",
+          "orchestration:read orchestration:operate terminal:operate review:write",
         ...(options?.clientMetadata?.label ? { client_label: options.clientMetadata.label } : {}),
         ...(options?.clientMetadata?.deviceType
           ? { client_device_type: options.clientMetadata.deviceType }
@@ -1093,123 +1026,6 @@ const exchangeAccessToken = (
       body,
     };
   });
-
-const makeDpopProof = (input: {
-  readonly method: string;
-  readonly url: string;
-  readonly iat: number;
-  readonly accessToken?: string;
-  readonly jti?: string;
-  readonly privateKey?: NodeCrypto.KeyObject;
-  readonly publicJwk?: DpopPublicJwk;
-}) => {
-  const keyPair =
-    input.privateKey && input.publicJwk
-      ? { privateKey: input.privateKey, publicJwk: input.publicJwk }
-      : (() => {
-          const { privateKey, publicKey } = NodeCrypto.generateKeyPairSync("ec", {
-            namedCurve: "P-256",
-          });
-          return { privateKey, publicJwk: publicKey.export({ format: "jwk" }) as DpopPublicJwk };
-        })();
-  const header = Buffer.from(
-    JSON.stringify({
-      typ: "dpop+jwt",
-      alg: "ES256",
-      jwk: keyPair.publicJwk,
-    }),
-  ).toString("base64url");
-  const payload = Buffer.from(
-    JSON.stringify({
-      htm: input.method,
-      htu: input.url,
-      jti: input.jti ?? "proof-1",
-      iat: input.iat,
-      ...(input.accessToken ? { ath: computeDpopAccessTokenHash(input.accessToken) } : {}),
-    }),
-  ).toString("base64url");
-  const signature = NodeCrypto.sign("sha256", Buffer.from(`${header}.${payload}`), {
-    key: keyPair.privateKey,
-    dsaEncoding: "ieee-p1363",
-  }).toString("base64url");
-  return {
-    proof: `${header}.${payload}.${signature}`,
-    thumbprint: computeDpopJwkThumbprint(keyPair.publicJwk),
-    privateKey: keyPair.privateKey,
-    publicJwk: keyPair.publicJwk,
-  };
-};
-
-const makeCloudMintCredentialRequest = (input: {
-  readonly privateKey: string;
-  readonly environmentId: EnvironmentId;
-  readonly clientProofKeyThumbprint: string;
-  readonly issuer?: string;
-  readonly audience?: string;
-  readonly subject?: string;
-  readonly jti?: string;
-  readonly nonce: string;
-  readonly issuedAt: string;
-  readonly expiresAt: string;
-  readonly scope?: ReadonlyArray<"environment:connect">;
-}) => {
-  const payload = {
-    iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
-    sub: input.subject ?? "user_123",
-    jti: input.jti ?? "cloud-mint-jti-1",
-    environmentId: input.environmentId,
-    clientProofKeyThumbprint: input.clientProofKeyThumbprint,
-    cnf: {
-      jkt: input.clientProofKeyThumbprint,
-    },
-    nonce: input.nonce,
-    iat: Math.floor(DateTime.makeUnsafe(input.issuedAt).epochMilliseconds / 1_000),
-    exp: Math.floor(DateTime.makeUnsafe(input.expiresAt).epochMilliseconds / 1_000),
-    scope: input.scope ?? ["environment:connect"],
-  } as const;
-  const header = Buffer.from(
-    JSON.stringify({ alg: "EdDSA", typ: RELAY_MINT_REQUEST_TYP }),
-  ).toString("base64url");
-  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signingInput = `${header}.${encodedPayload}`;
-  return {
-    proof: `${signingInput}.${NodeCrypto.sign(null, Buffer.from(signingInput), input.privateKey).toString("base64url")}`,
-  };
-};
-
-const makeCloudEnvironmentHealthRequest = (input: {
-  readonly privateKey: string;
-  readonly environmentId: EnvironmentId;
-  readonly issuer?: string;
-  readonly audience?: string;
-  readonly subject?: string;
-  readonly jti?: string;
-  readonly nonce: string;
-  readonly issuedAt: string;
-  readonly expiresAt: string;
-  readonly scope?: ReadonlyArray<"environment:status">;
-}) => {
-  const payload = {
-    iss: input.issuer ?? "https://relay.example.test",
-    aud: input.audience ?? `t3-env:${input.environmentId}`,
-    sub: input.subject ?? "user_123",
-    jti: input.jti ?? "cloud-health-jti-1",
-    environmentId: input.environmentId,
-    nonce: input.nonce,
-    iat: Math.floor(DateTime.makeUnsafe(input.issuedAt).epochMilliseconds / 1_000),
-    exp: Math.floor(DateTime.makeUnsafe(input.expiresAt).epochMilliseconds / 1_000),
-    scope: input.scope ?? ["environment:status"],
-  } as const;
-  const header = Buffer.from(
-    JSON.stringify({ alg: "EdDSA", typ: RELAY_HEALTH_REQUEST_TYP }),
-  ).toString("base64url");
-  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signingInput = `${header}.${encodedPayload}`;
-  return {
-    proof: `${signingInput}.${NodeCrypto.sign(null, Buffer.from(signingInput), input.privateKey).toString("base64url")}`,
-  };
-};
 
 const decodeCompactJwtPayload = <A>(token: string): A => {
   const encodedPayload = token.split(".")[1];
@@ -1331,11 +1147,13 @@ const assertBrowserApiCorsResponseHeaders = (
     readonly credentials?: boolean;
   },
 ) => {
-  assert.equal(headers["access-control-allow-origin"], options?.origin ?? "*");
-  assert.equal(
-    headers["access-control-allow-credentials"],
-    options?.credentials ? "true" : undefined,
-  );
+  assert.equal(headers["access-control-allow-origin"], options?.origin);
+  if (options?.credentials !== undefined) {
+    assert.equal(
+      headers["access-control-allow-credentials"],
+      options.credentials ? "true" : undefined,
+    );
+  }
 };
 
 const assertBrowserApiCorsPreflightHeaders = (
@@ -1355,7 +1173,6 @@ const assertBrowserApiCorsPreflightHeaders = (
     "authorization",
     "b3",
     "content-type",
-    "dpop",
     "traceparent",
   ]);
 };
@@ -1544,11 +1361,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(body.authenticated, false);
       assert.equal(body.auth.policy, "desktop-managed-local");
       assert.deepEqual(body.auth.bootstrapMethods, ["desktop-bootstrap"]);
-      assert.deepEqual(body.auth.sessionMethods, [
-        "browser-session-cookie",
-        "bearer-access-token",
-        "dpop-access-token",
-      ]);
+      assert.deepEqual(body.auth.sessionMethods, ["browser-session-cookie", "bearer-access-token"]);
       // Desktop, so port-scoped: instances scan for a free port and share
       // 127.0.0.1, and cookies are not scoped by port.
       assert.isTrue(body.auth.sessionCookieName.startsWith("t3_session_"));
@@ -1588,6 +1401,63 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("bootstraps fresh browser dev only from the exact loopback Vite origin", () =>
+    Effect.gen(function* () {
+      const developmentBootstrapToken = "ephemeral-development-bootstrap";
+      const origin = "http://127.0.0.1:5173";
+      yield* buildAppUnderTest({
+        config: {
+          mode: "web",
+          devUrl: new URL(origin),
+          desktopBootstrapToken: undefined,
+          developmentBootstrapToken,
+        },
+      });
+
+      const accepted = yield* bootstrapBrowserSession(developmentBootstrapToken, {
+        headers: { origin },
+      });
+      assert.equal(accepted.response.status, 200);
+      assert.isDefined(accepted.cookie);
+
+      for (const rejectedHeaders of [
+        {},
+        { origin: "http://localhost:5173" },
+        { origin: "http://192.168.1.20:5173" },
+        { origin: "null" },
+      ]) {
+        const rejected = yield* bootstrapBrowserSession(developmentBootstrapToken, {
+          headers: rejectedHeaders,
+        });
+        assert.equal(rejected.response.status, 401);
+      }
+
+      const tokenExchange = yield* exchangeAccessToken(developmentBootstrapToken, {
+        headers: { origin },
+      });
+      assert.equal(tokenExchange.response.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not enable development browser bootstrap in packaged configuration", () =>
+    Effect.gen(function* () {
+      const developmentBootstrapToken = "ephemeral-development-bootstrap";
+      yield* buildAppUnderTest({
+        config: {
+          mode: "desktop",
+          devUrl: undefined,
+          desktopBootstrapToken: undefined,
+          developmentBootstrapToken,
+        },
+      });
+
+      const result = yield* bootstrapBrowserSession(developmentBootstrapToken, {
+        headers: { origin: "http://127.0.0.1:5173" },
+      });
+      assert.equal(result.response.status, 401);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("exchanges a bootstrap grant for a scoped bearer access token", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
@@ -1599,7 +1469,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(tokenBody.token_type, "Bearer");
       assert.equal(
         tokenBody.scope,
-        "orchestration:read orchestration:operate terminal:operate review:write relay:read access:read access:write relay:write",
+        "orchestration:read orchestration:operate terminal:operate review:write",
       );
       assert.equal(typeof tokenBody.access_token, "string");
 
@@ -1623,1680 +1493,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "orchestration:operate",
         "terminal:operate",
         "review:write",
-        "relay:read",
-        "access:read",
-        "access:write",
-        "relay:write",
       ]);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("persists token exchange client display metadata for authorized-client listings", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        config: {
-          host: "0.0.0.0",
-        },
-      });
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: ownerCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const pairingBody = (yield* pairingResponse.json) as {
-        readonly credential: string;
-      };
-
-      const { response } = yield* exchangeAccessToken(pairingBody.credential, {
-        headers: {
-          "user-agent": "undici",
-        },
-        scope: "orchestration:read orchestration:operate terminal:operate review:write",
-        clientMetadata: {
-          label: "T3 Code Mobile",
-          deviceType: "mobile",
-          os: "iOS",
-        },
-      });
-
-      const clientsResponse = yield* HttpClient.get("/api/auth/clients", {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const clients = (yield* clientsResponse.json) as ReadonlyArray<{
-        readonly current: boolean;
-        readonly client: {
-          readonly label?: string;
-          readonly deviceType: string;
-          readonly ipAddress?: string;
-          readonly os?: string;
-          readonly userAgent?: string;
-        };
-      }>;
-      const mobileClient = clients.find((client) => !client.current);
-
-      assert.equal(pairingResponse.status, 200);
-      assert.equal(response.status, 200);
-      assert.equal(clientsResponse.status, 200);
-      assert.deepInclude(mobileClient?.client, {
-        label: "T3 Code Mobile",
-        deviceType: "mobile",
-        os: "iOS",
-        ipAddress: "127.0.0.1",
-        userAgent: "undici",
-      });
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect(
-    "exchanges a bootstrap credential for a DPoP-bound access token without bearer downgrade",
-    () =>
-      Effect.gen(function* () {
-        yield* buildAppUnderTest();
-
-        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-        const credentialResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-          headers: { cookie: ownerCookie },
-          body: yield* HttpBody.json({}),
-        });
-        const credential = (yield* credentialResponse.json) as { readonly credential: string };
-        const tokenUrl = yield* getHttpServerUrl("/oauth/token");
-        const now = yield* DateTime.now;
-        const tokenProof = makeDpopProof({
-          method: "POST",
-          url: tokenUrl,
-          iat: Math.floor(now.epochMilliseconds / 1_000),
-          jti: "token-exchange-proof",
-        });
-        const tokenResponse = yield* fetchEffect(tokenUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-            dpop: tokenProof.proof,
-          },
-          body: new URLSearchParams({
-            grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
-            subject_token: credential.credential,
-            subject_token_type: "urn:t3:params:oauth:token-type:environment-bootstrap",
-            requested_token_type: "urn:ietf:params:oauth:token-type:access_token",
-            scope: "orchestration:read orchestration:operate terminal:operate review:write",
-          }).toString(),
-        });
-        const token = yield* responseJsonEffect<{
-          readonly access_token: string;
-          readonly token_type: string;
-        }>(tokenResponse);
-
-        assert.equal(tokenResponse.status, 200);
-        assert.equal(tokenResponse.headers["cache-control"], "no-store");
-        assert.equal(token.token_type, "DPoP");
-
-        const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
-        const bearerResponse = yield* fetchEffect(sessionUrl, {
-          headers: { authorization: `Bearer ${token.access_token}` },
-        });
-        const bearerState = yield* responseJsonEffect<{ readonly authenticated: boolean }>(
-          bearerResponse,
-        );
-        assert.equal(bearerState.authenticated, false);
-
-        const sessionProof = makeDpopProof({
-          method: "GET",
-          url: sessionUrl,
-          iat: Math.floor(now.epochMilliseconds / 1_000),
-          jti: "session-proof",
-          accessToken: token.access_token,
-          privateKey: tokenProof.privateKey,
-          publicJwk: tokenProof.publicJwk,
-        });
-        const dpopResponse = yield* fetchEffect(sessionUrl, {
-          headers: {
-            authorization: `DPoP ${token.access_token}`,
-            dpop: sessionProof.proof,
-          },
-        });
-        const dpopState = yield* responseJsonEffect<{
-          readonly authenticated: boolean;
-          readonly sessionMethod?: string;
-        }>(dpopResponse);
-        assert.equal(dpopState.authenticated, true);
-        assert.equal(dpopState.sessionMethod, "dpop-access-token");
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects replayed DPoP proofs across token exchanges", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const firstCredentialResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: ownerCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const firstCredential = (yield* firstCredentialResponse.json) as {
-        readonly credential: string;
-      };
-      const secondCredentialResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: ownerCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const secondCredential = (yield* secondCredentialResponse.json) as {
-        readonly credential: string;
-      };
-      const tokenUrl = yield* getHttpServerUrl("/oauth/token");
-      const now = yield* DateTime.now;
-      const dpop = makeDpopProof({
-        method: "POST",
-        url: tokenUrl,
-        iat: Math.floor(now.epochMilliseconds / 1_000),
-      });
-
-      const firstBootstrap = yield* exchangeAccessToken(firstCredential.credential, {
-        headers: {
-          dpop: dpop.proof,
-        },
-        scope: "orchestration:read orchestration:operate terminal:operate review:write",
-      });
-      const replayBootstrap = yield* exchangeAccessToken(secondCredential.credential, {
-        headers: {
-          dpop: dpop.proof,
-        },
-        scope: "orchestration:read orchestration:operate terminal:operate review:write",
-      });
-
-      assert.equal(firstBootstrap.response.status, 200);
-      assert.equal(replayBootstrap.response.status, 401);
-      assert.equal(replayBootstrap.body._tag, "EnvironmentAuthInvalidError");
-      assert.equal(replayBootstrap.body.code, "auth_invalid");
-      assert.equal(replayBootstrap.body.reason, "invalid_credential");
-      assert.equal(typeof replayBootstrap.body.traceId, "string");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("ignores forwarded host headers when validating token exchange DPoP URLs", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const credentialResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: ownerCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const credential = (yield* credentialResponse.json) as {
-        readonly credential: string;
-      };
-      const tokenUrl = yield* getHttpServerUrl("/oauth/token");
-      const now = yield* DateTime.now;
-      const dpop = makeDpopProof({
-        method: "POST",
-        url: tokenUrl,
-        iat: Math.floor(now.epochMilliseconds / 1_000),
-      });
-
-      const bootstrap = yield* exchangeAccessToken(credential.credential, {
-        headers: {
-          dpop: dpop.proof,
-          "x-forwarded-host": "environment.example.test",
-        },
-        scope: "orchestration:read orchestration:operate terminal:operate review:write",
-      });
-
-      assert.equal(bootstrap.response.status, 200);
-      assert.equal(bootstrap.body.token_type, "DPoP");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects token exchange DPoP proofs bound to spoofed forwarded hosts", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const credentialResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: ownerCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const credential = (yield* credentialResponse.json) as {
-        readonly credential: string;
-      };
-      const tokenUrl = yield* getHttpServerUrl("/oauth/token");
-      const spoofedUrl = new URL(tokenUrl);
-      spoofedUrl.hostname = "environment.example.test";
-      const now = yield* DateTime.now;
-      const dpop = makeDpopProof({
-        method: "POST",
-        url: spoofedUrl.href,
-        iat: Math.floor(now.epochMilliseconds / 1_000),
-      });
-
-      const bootstrap = yield* exchangeAccessToken(credential.credential, {
-        headers: {
-          dpop: dpop.proof,
-          "x-forwarded-host": spoofedUrl.host,
-        },
-        scope: "orchestration:read orchestration:operate terminal:operate review:write",
-      });
-
-      assert.equal(bootstrap.response.status, 401);
-      assert.equal(bootstrap.body._tag, "EnvironmentAuthInvalidError");
-      assert.equal(bootstrap.body.code, "auth_invalid");
-      assert.equal(bootstrap.body.reason, "invalid_credential");
-      assert.equal(typeof bootstrap.body.traceId, "string");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud link proofs for non-loopback managed endpoint origins", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const linkProofResponse = yield* fetchEffect(linkProofUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          challenge: "relay-link-challenge",
-          relayIssuer: "https://relay.example.test",
-          endpoint: {
-            httpBaseUrl: "https://environment.example.test/",
-            wsBaseUrl: "wss://environment.example.test/ws",
-            providerKind: "manual",
-          },
-          origin: {
-            localHttpHost: "192.168.1.42",
-            localHttpPort: 3773,
-          },
-        }),
-      });
-      const body = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(linkProofResponse);
-
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud link proofs for unsupported endpoint providers", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
-      const linkProofResponse = yield* fetchEffect(linkProofUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          challenge: "relay-link-challenge",
-          relayIssuer: "https://relay.example.test",
-          endpoint: {
-            httpBaseUrl: linkProofUrl.replace("/api/connect/link-proof", ""),
-            wsBaseUrl: linkProofUrl
-              .replace("http://", "ws://")
-              .replace("/api/connect/link-proof", "/ws"),
-            // "manual" and "cloudflare_tunnel" are supported; "t3_relay" is not.
-            providerKind: "t3_relay",
-          },
-          origin: {
-            localHttpHost: "127.0.0.1",
-            localHttpPort: serverPort,
-          },
-        }),
-      });
-      const body = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(linkProofResponse);
-
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud link proofs requested through a public managed endpoint", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
-      const linkProofResponse = yield* HttpClient.post("/api/connect/link-proof", {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-          "content-type": "application/json",
-          host: "environment.example.test",
-          "x-forwarded-host": "environment.example.test",
-          "x-forwarded-proto": "https",
-        },
-        body: HttpBody.text(
-          jsonRequestBody({
-            challenge: "relay-link-challenge",
-            relayIssuer: "https://relay.example.test",
-            endpoint: {
-              httpBaseUrl: "https://environment.example.test/",
-              wsBaseUrl: "wss://environment.example.test/ws",
-              providerKind: "manual",
-            },
-            origin: {
-              localHttpHost: "127.0.0.1",
-              localHttpPort: serverPort,
-            },
-          }),
-          "application/json",
-        ),
-      });
-      const body = (yield* linkProofResponse.json) as {
-        readonly _tag?: string;
-        readonly message?: string;
-      };
-
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect(
-    "rejects cloud link proofs when a public request spoofs loopback forwarded headers",
-    () =>
-      Effect.gen(function* () {
-        yield* buildAppUnderTest();
-
-        const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-        const serverPort = Number(new URL(linkProofUrl).port);
-        const linkProofResponse = yield* HttpClient.post("/api/connect/link-proof", {
-          headers: {
-            cookie: yield* getAuthenticatedSessionCookieHeader(),
-            "content-type": "application/json",
-            host: "environment.example.test",
-            "x-forwarded-host": `127.0.0.1:${serverPort}`,
-            "x-forwarded-proto": "http",
-          },
-          body: HttpBody.text(
-            jsonRequestBody({
-              challenge: "relay-link-challenge",
-              relayIssuer: "https://relay.example.test",
-              endpoint: {
-                httpBaseUrl: "https://environment.example.test/",
-                wsBaseUrl: "wss://environment.example.test/ws",
-                providerKind: "manual",
-              },
-              origin: {
-                localHttpHost: "127.0.0.1",
-                localHttpPort: serverPort,
-              },
-            }),
-            "application/json",
-          ),
-        });
-        const body = (yield* linkProofResponse.json) as {
-          readonly _tag?: string;
-          readonly message?: string;
-        };
-
-        assert.equal(linkProofResponse.status, 400);
-        assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-        assert.equal(body.message, "Invalid managed endpoint origin.");
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud link proofs with malformed forwarded request hosts", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
-      const linkProofResponse = yield* HttpClient.post("/api/connect/link-proof", {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-          "content-type": "application/json",
-          host: "bad host",
-          "x-forwarded-host": "bad host",
-          "x-forwarded-proto": "https",
-        },
-        body: HttpBody.text(
-          jsonRequestBody({
-            challenge: "relay-link-challenge",
-            relayIssuer: "https://relay.example.test",
-            endpoint: {
-              httpBaseUrl: "https://environment.example.test/",
-              wsBaseUrl: "wss://environment.example.test/ws",
-              providerKind: "manual",
-            },
-            origin: {
-              localHttpHost: "127.0.0.1",
-              localHttpPort: serverPort,
-            },
-          }),
-          "application/json",
-        ),
-      });
-      const body = (yield* linkProofResponse.json) as {
-        readonly _tag?: string;
-        readonly message?: string;
-      };
-
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects local cloud link proofs for a different loopback port", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const serverPort = Number(new URL(linkProofUrl).port);
-      const linkProofResponse = yield* fetchEffect(linkProofUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          challenge: "relay-link-challenge",
-          relayIssuer: "https://relay.example.test",
-          endpoint: {
-            httpBaseUrl: "https://environment.example.test/",
-            wsBaseUrl: "wss://environment.example.test/ws",
-            providerKind: "manual",
-          },
-          origin: {
-            localHttpHost: "127.0.0.1",
-            localHttpPort: serverPort === 65_535 ? serverPort - 1 : serverPort + 1,
-          },
-        }),
-      });
-      const body = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(linkProofResponse);
-
-      assert.equal(linkProofResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Invalid managed endpoint origin.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("allows standard clients to read managed relay configuration state", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const credentialResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: { cookie: ownerCookie },
-        body: yield* HttpBody.json({}),
-      });
-      const credential = (yield* credentialResponse.json) as { readonly credential: string };
-      const pairedCookie = yield* getAuthenticatedSessionCookieHeader(credential.credential);
-      const linkStateUrl = yield* getHttpServerUrl("/api/connect/link-state");
-      const response = yield* fetchEffect(linkStateUrl, {
-        headers: { cookie: pairedCookie },
-      });
-      const body = yield* responseJsonEffect<{
-        readonly linked?: boolean;
-        readonly publishAgentActivity?: boolean;
-      }>(response);
-
-      assert.equal(response.status, 200);
-      assert.equal(body.linked, false);
-      assert.equal(body.publishAgentActivity, false);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect(
-    "reports relay client status and streams installation progress over environment RPC",
-    () =>
-      Effect.gen(function* () {
-        const installedRelayClient = {
-          status: "available" as const,
-          executablePath: "/tmp/t3/tools/cloudflared",
-          source: "managed" as const,
-          version: RelayClient.CLOUDFLARED_VERSION,
-        };
-        yield* buildAppUnderTest({
-          layers: {
-            relayClient: {
-              resolve: Effect.succeed({
-                status: "missing",
-                version: RelayClient.CLOUDFLARED_VERSION,
-              }),
-              install: Effect.succeed(installedRelayClient),
-              installWithProgress: (report) =>
-                report({ type: "progress", stage: "checking" }).pipe(
-                  Effect.andThen(report({ type: "progress", stage: "downloading" })),
-                  Effect.as(installedRelayClient),
-                ),
-            },
-          },
-        });
-
-        const wsUrl = yield* getWsServerUrl("/ws");
-        const status = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) => client[WS_METHODS.cloudGetRelayClientStatus]({})),
-        );
-        const installEvents = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[WS_METHODS.cloudInstallRelayClient]({}).pipe(Stream.runCollect),
-          ),
-        );
-
-        assert.equal(status.status, "missing");
-        assert.deepEqual(Array.from(installEvents), [
-          { type: "progress", stage: "checking" },
-          { type: "progress", stage: "downloading" },
-          { type: "complete", status: installedRelayClient },
-        ]);
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("requires relay write scope to update agent activity publication", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const preferencesUrl = yield* getHttpServerUrl("/api/connect/preferences");
-      const ownerResponse = yield* fetchEffect(preferencesUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({ publishAgentActivity: true }),
-      });
-      const ownerBody = yield* responseJsonEffect<{
-        readonly publishAgentActivity?: boolean;
-      }>(ownerResponse);
-      assert.equal(ownerResponse.status, 200);
-      assert.equal(ownerBody.publishAgentActivity, true);
-
-      const credentialResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: { cookie: ownerCookie },
-        body: yield* HttpBody.json({}),
-      });
-      const credential = (yield* credentialResponse.json) as { readonly credential: string };
-      const pairedCookie = yield* getAuthenticatedSessionCookieHeader(credential.credential);
-      const pairedResponse = yield* fetchEffect(preferencesUrl, {
-        method: "POST",
-        headers: {
-          cookie: pairedCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({ publishAgentActivity: false }),
-      });
-      const pairedBody = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly requiredScope?: string;
-      }>(pairedResponse);
-      assert.equal(pairedResponse.status, 403);
-      assert.equal(pairedBody._tag, "EnvironmentScopeRequiredError");
-      assert.equal(pairedBody.requiredScope, "relay:write");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects relay config with an invalid cloud mint public key", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: "not-a-public-key",
-          endpointRuntime: null,
-        }),
-      });
-      const body = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(relayConfigResponse);
-
-      assert.equal(relayConfigResponse.status, 400);
-      assert.equal(body._tag, "EnvironmentHttpBadRequestError");
-      assert.equal(body.message, "Cloud mint public key must be a valid Ed25519 public key.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects relay config with insecure relay metadata or empty credentials", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const postRelayConfig = (body: {
-        readonly relayUrl: string;
-        readonly relayIssuer?: string;
-        readonly cloudUserId: string;
-        readonly environmentCredential: string;
-      }) =>
-        fetchEffect(relayConfigUrl, {
-          method: "POST",
-          headers: {
-            cookie: ownerCookie,
-            "content-type": "application/json",
-          },
-          body: jsonRequestBody({
-            ...body,
-            cloudMintPublicKey: cloudKeyPair.publicKey,
-            endpointRuntime: null,
-          }),
-        });
-
-      const insecureRelayUrl = yield* postRelayConfig({
-        relayUrl: "http://relay.example.test",
-        cloudUserId: "user_123",
-        environmentCredential: "t3env_test_credential",
-      });
-      const insecureRelayIssuer = yield* postRelayConfig({
-        relayUrl: "https://relay.example.test",
-        cloudUserId: "user_123",
-        relayIssuer: "http://relay.example.test",
-        environmentCredential: "t3env_test_credential",
-      });
-      const nonOriginRelayUrl = yield* postRelayConfig({
-        relayUrl: "https://relay.example.test/path",
-        cloudUserId: "user_123",
-        environmentCredential: "t3env_test_credential",
-      });
-      const emptyCredential = yield* postRelayConfig({
-        relayUrl: "https://relay.example.test",
-        cloudUserId: "user_123",
-        environmentCredential: "   ",
-      });
-      const insecureRelayUrlBody = yield* responseJsonEffect<{ readonly message?: string }>(
-        insecureRelayUrl,
-      );
-      const insecureRelayIssuerBody = yield* responseJsonEffect<{ readonly message?: string }>(
-        insecureRelayIssuer,
-      );
-      const nonOriginRelayUrlBody = yield* responseJsonEffect<{ readonly message?: string }>(
-        nonOriginRelayUrl,
-      );
-      const emptyCredentialBody = yield* responseJsonEffect<{ readonly message?: string }>(
-        emptyCredential,
-      );
-
-      assert.equal(insecureRelayUrl.status, 400);
-      assert.equal(insecureRelayUrlBody.message, "Relay URL must be a secure absolute HTTPS URL.");
-      assert.equal(insecureRelayIssuer.status, 400);
-      assert.equal(
-        insecureRelayIssuerBody.message,
-        "Relay issuer must be a secure absolute HTTPS URL.",
-      );
-      assert.equal(nonOriginRelayUrl.status, 400);
-      assert.equal(nonOriginRelayUrlBody.message, "Relay URL must be a secure absolute HTTPS URL.");
-      assert.equal(emptyCredential.status, 400);
-      assert.equal(emptyCredentialBody.message, "Relay environment credential is required.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects relay config replacement from a different cloud account", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const postRelayConfig = (cloudUserId: string, environmentCredential: string) =>
-        fetchEffect(relayConfigUrl, {
-          method: "POST",
-          headers: {
-            cookie: ownerCookie,
-            "content-type": "application/json",
-          },
-          body: jsonRequestBody({
-            relayUrl: "https://relay.example.test",
-            cloudUserId,
-            environmentCredential,
-            cloudMintPublicKey: cloudKeyPair.publicKey,
-            endpointRuntime: null,
-          }),
-        });
-
-      const firstResponse = yield* postRelayConfig("user_123", "t3env_first_credential");
-      const replacementResponse = yield* postRelayConfig("user_456", "t3env_second_credential");
-      const replacementBody = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(replacementResponse);
-
-      assert.equal(firstResponse.status, 200);
-      assert.equal(replacementResponse.status, 409);
-      assert.equal(replacementBody._tag, "EnvironmentHttpConflictError");
-      assert.equal(
-        replacementBody.message,
-        "This environment is already linked to a different cloud account. Unlink it before switching accounts.",
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("reports local cloud link state from persisted relay config", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const linkStateUrl = yield* getHttpServerUrl("/api/connect/link-state");
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-
-      const initialResponse = yield* fetchEffect(linkStateUrl, {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const initialBody = yield* responseJsonEffect<{
-        readonly linked?: boolean;
-        readonly cloudUserId?: string | null;
-      }>(initialResponse);
-      assert.equal(initialResponse.status, 200);
-      assert.equal(initialBody.linked, false);
-      assert.equal(initialBody.cloudUserId, null);
-
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://transport.example.test",
-          relayIssuer: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const linkedResponse = yield* fetchEffect(linkStateUrl, {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const linkedBody = yield* responseJsonEffect<{
-        readonly linked?: boolean;
-        readonly cloudUserId?: string | null;
-        readonly relayUrl?: string | null;
-        readonly relayIssuer?: string | null;
-      }>(linkedResponse);
-
-      assert.equal(linkedResponse.status, 200);
-      assert.equal(linkedBody.linked, true);
-      assert.equal(linkedBody.cloudUserId, "user_123");
-      assert.equal(linkedBody.relayUrl, "https://transport.example.test");
-      assert.equal(linkedBody.relayIssuer, "https://relay.example.test");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("does not expose internal cloud reconciliation over HTTP", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const reconcileUrl = yield* getHttpServerUrl("/api/connect/reconcile");
-      const response = yield* fetchEffect(reconcileUrl, {
-        method: "POST",
-      });
-
-      assert.equal(response.status, 404);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("unlinks local cloud state and disables the managed endpoint runtime", () =>
-    Effect.gen(function* () {
-      const appliedRuntimeConfigs: Array<unknown> = [];
-      yield* buildAppUnderTest({
-        layers: {
-          cloudManagedEndpointRuntime: {
-            applyConfig: (config) => {
-              appliedRuntimeConfigs.push(config);
-              if (!config) {
-                return Effect.succeed({ status: "disabled" });
-              }
-              return Effect.succeed({
-                status: "running",
-                providerKind: "cloudflare_tunnel",
-                pid: 123,
-                ...(config.tunnelId ? { tunnelId: config.tunnelId } : {}),
-                ...(config.tunnelName ? { tunnelName: config.tunnelName } : {}),
-              });
-            },
-          },
-        },
-      });
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const unlinkUrl = yield* getHttpServerUrl("/api/connect/unlink");
-      const linkStateUrl = yield* getHttpServerUrl("/api/connect/link-state");
-
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://transport.example.test",
-          relayIssuer: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: {
-            providerKind: "cloudflare_tunnel",
-            connectorToken: "connector-token",
-            tunnelId: "tunnel-id",
-            tunnelName: "tunnel-name",
-          },
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const unlinkResponse = yield* fetchEffect(unlinkUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const unlinkBody = yield* responseJsonEffect<{
-        readonly ok?: boolean;
-        readonly endpointRuntimeStatus?: { readonly status?: string };
-      }>(unlinkResponse);
-      assert.equal(unlinkResponse.status, 200);
-      assert.equal(unlinkBody.ok, true);
-      assert.equal(unlinkBody.endpointRuntimeStatus?.status, "disabled");
-
-      const linkStateResponse = yield* fetchEffect(linkStateUrl, {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const linkStateBody = yield* responseJsonEffect<{
-        readonly linked?: boolean;
-        readonly cloudUserId?: string | null;
-        readonly relayUrl?: string | null;
-        readonly relayIssuer?: string | null;
-      }>(linkStateResponse);
-      assert.equal(linkStateResponse.status, 200);
-      assert.equal(linkStateBody.linked, false);
-      assert.equal(linkStateBody.cloudUserId, null);
-      assert.equal(linkStateBody.relayUrl, null);
-      assert.equal(linkStateBody.relayIssuer, null);
-      assert.deepEqual(appliedRuntimeConfigs, [
-        {
-          providerKind: "cloudflare_tunnel",
-          connectorToken: "connector-token",
-          tunnelId: "tunnel-id",
-          tunnelName: "tunnel-name",
-        },
-        null,
-      ]);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects replayed cloud mint requests atomically", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const request = makeCloudMintCredentialRequest({
-        privateKey: cloudKeyPair.privateKey,
-        environmentId: testEnvironmentDescriptor.environmentId,
-        clientProofKeyThumbprint: "client-proof-key-thumbprint",
-        nonce: "cloud-mint-nonce-1",
-        issuedAt: DateTime.formatIso(now),
-        expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-      });
-      const mintUrl = yield* getHttpServerUrl("/api/connect/mint-credential");
-      const postMint = () =>
-        fetchEffect(mintUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: jsonRequestBody(request),
-        });
-
-      const firstResponse = yield* postMint();
-      const replayResponse = yield* postMint();
-      const replayBody = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(replayResponse);
-
-      assert.equal(firstResponse.status, 200);
-      assert.equal(replayResponse.status, 409);
-      assert.equal(replayBody._tag, "EnvironmentHttpConflictError");
-      assert.equal(replayBody.message, "Cloud mint request was already consumed.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("serves the documented T3 Connect mint credential endpoint", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const request = makeCloudMintCredentialRequest({
-        privateKey: cloudKeyPair.privateKey,
-        environmentId: testEnvironmentDescriptor.environmentId,
-        clientProofKeyThumbprint: "client-proof-key-thumbprint",
-        jti: "cloud-mint-jti-documented-endpoint",
-        nonce: "cloud-mint-nonce-documented-endpoint",
-        issuedAt: DateTime.formatIso(now),
-        expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-      });
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
-      const response = yield* fetchEffect(mintUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody(request),
-      });
-
-      assert.equal(response.status, 200);
-      const body = yield* responseJsonEffect<{
-        readonly credential?: string;
-        readonly proof?: string;
-      }>(response);
-      assert.equal(typeof body.credential, "string");
-      assert.equal(typeof body.proof, "string");
-      assert.equal(
-        decodeCompactJwtPayload<{ readonly requestNonce?: string }>(body.proof!).requestNonce,
-        "cloud-mint-nonce-documented-endpoint",
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("serves signed T3 Connect environment health checks", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const request = makeCloudEnvironmentHealthRequest({
-        privateKey: cloudKeyPair.privateKey,
-        environmentId: testEnvironmentDescriptor.environmentId,
-        jti: "cloud-health-jti-documented-endpoint",
-        nonce: "cloud-health-nonce-documented-endpoint",
-        issuedAt: DateTime.formatIso(now),
-        expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-      });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
-      const response = yield* fetchEffect(healthUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody(request),
-      });
-
-      assert.equal(response.status, 200);
-      const body = yield* responseJsonEffect<{
-        readonly status?: string;
-        readonly descriptor?: { readonly environmentId?: string };
-        readonly proof?: string;
-      }>(response);
-      assert.equal(body.status, "online");
-      assert.equal(body.descriptor?.environmentId, testEnvironmentDescriptor.environmentId);
-      assert.equal(typeof body.proof, "string");
-      assert.equal(
-        decodeCompactJwtPayload<{ readonly requestNonce?: string }>(body.proof!).requestNonce,
-        "cloud-health-nonce-documented-endpoint",
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects replayed cloud health requests atomically", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const request = makeCloudEnvironmentHealthRequest({
-        privateKey: cloudKeyPair.privateKey,
-        environmentId: testEnvironmentDescriptor.environmentId,
-        jti: "cloud-health-jti-replay",
-        nonce: "cloud-health-nonce-replay",
-        issuedAt: DateTime.formatIso(now),
-        expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-      });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
-      const postHealth = () =>
-        fetchEffect(healthUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: jsonRequestBody(request),
-        });
-
-      const firstResponse = yield* postHealth();
-      const replayResponse = yield* postHealth();
-      const replayBody = yield* responseJsonEffect<{
-        readonly _tag?: string;
-        readonly message?: string;
-      }>(replayResponse);
-
-      assert.equal(firstResponse.status, 200);
-      assert.equal(replayResponse.status, 409);
-      assert.equal(replayBody._tag, "EnvironmentHttpConflictError");
-      assert.equal(replayBody.message, "Cloud health request was already consumed.");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect(
-    "validates cloud proofs against the configured relay issuer, not the transport URL",
-    () =>
-      Effect.gen(function* () {
-        yield* buildAppUnderTest();
-
-        const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-          privateKeyEncoding: { format: "pem", type: "pkcs8" },
-          publicKeyEncoding: { format: "pem", type: "spki" },
-        });
-        const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-        const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-        const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-          method: "POST",
-          headers: {
-            cookie: ownerCookie,
-            "content-type": "application/json",
-          },
-          body: jsonRequestBody({
-            relayUrl: "https://transport.example.test",
-            cloudUserId: "user_123",
-            relayIssuer: "https://relay.example.test",
-            environmentCredential: "t3env_test_credential",
-            cloudMintPublicKey: cloudKeyPair.publicKey,
-            endpointRuntime: null,
-          }),
-        });
-        assert.equal(relayConfigResponse.status, 200);
-
-        const now = yield* DateTime.now;
-        const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
-        const postMint = (request: ReturnType<typeof makeCloudMintCredentialRequest>) =>
-          fetchEffect(mintUrl, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: jsonRequestBody(request),
-          });
-
-        const acceptedResponse = yield* postMint(
-          makeCloudMintCredentialRequest({
-            privateKey: cloudKeyPair.privateKey,
-            environmentId: testEnvironmentDescriptor.environmentId,
-            clientProofKeyThumbprint: "client-proof-key-thumbprint",
-            issuer: "https://relay.example.test",
-            jti: "cloud-mint-jti-explicit-relay-issuer",
-            nonce: "cloud-mint-nonce-explicit-relay-issuer",
-            issuedAt: DateTime.formatIso(now),
-            expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-          }),
-        );
-        const rejectedResponse = yield* postMint(
-          makeCloudMintCredentialRequest({
-            privateKey: cloudKeyPair.privateKey,
-            environmentId: testEnvironmentDescriptor.environmentId,
-            clientProofKeyThumbprint: "client-proof-key-thumbprint",
-            issuer: "https://transport.example.test",
-            jti: "cloud-mint-jti-transport-url",
-            nonce: "cloud-mint-nonce-transport-url",
-            issuedAt: DateTime.formatIso(now),
-            expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-          }),
-        );
-
-        assert.equal(acceptedResponse.status, 200);
-        assert.equal(rejectedResponse.status, 401);
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("fails relay config when the managed endpoint connector cannot start", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        layers: {
-          cloudManagedEndpointRuntime: {
-            applyConfig: () =>
-              Effect.succeed({
-                status: "failed",
-                providerKind: "cloudflare_tunnel",
-                reason: "cloudflared missing",
-                tunnelId: "tunnel-1",
-              }),
-          },
-        },
-      });
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: {
-            providerKind: "cloudflare_tunnel",
-            connectorToken: "connector-token",
-            tunnelId: "tunnel-1",
-          },
-        }),
-      });
-
-      assert.equal(relayConfigResponse.status, 503);
-      const relayConfigBody = yield* responseJsonEffect<{
-        _tag?: string;
-        message?: string;
-        endpointRuntimeStatus?: { status?: string; reason?: string };
-      }>(relayConfigResponse);
-      assert.equal(relayConfigBody._tag, "EnvironmentCloudEndpointUnavailableError");
-      assert.equal(relayConfigBody.message, "Managed endpoint runtime could not be started.");
-      assert.equal(relayConfigBody.endpointRuntimeStatus?.status, "failed");
-      assert.equal(relayConfigBody.endpointRuntimeStatus?.reason, "cloudflared missing");
-
-      const now = yield* DateTime.now;
-      const healthRequest = makeCloudEnvironmentHealthRequest({
-        privateKey: cloudKeyPair.privateKey,
-        environmentId: testEnvironmentDescriptor.environmentId,
-        nonce: "cloud-health-after-failed-runtime",
-        issuedAt: DateTime.formatIso(now),
-        expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-      });
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
-      const healthResponse = yield* fetchEffect(healthUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody(healthRequest),
-      });
-      const healthBody = yield* responseJsonEffect<{
-        _tag?: string;
-        message?: string;
-      }>(healthResponse);
-      assert.equal(healthResponse.status, 500);
-      assert.equal(healthBody._tag, "EnvironmentHttpInternalServerError");
-      assert.equal(
-        healthBody.message,
-        "Cloud mint public key is not installed for this environment.",
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud mint requests with the wrong issuer or audience", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test/",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/connect/mint-credential");
-      const postMint = (request: ReturnType<typeof makeCloudMintCredentialRequest>) =>
-        fetchEffect(mintUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: jsonRequestBody(request),
-        });
-
-      const wrongIssuer = yield* postMint(
-        makeCloudMintCredentialRequest({
-          privateKey: cloudKeyPair.privateKey,
-          environmentId: testEnvironmentDescriptor.environmentId,
-          clientProofKeyThumbprint: "client-proof-key-thumbprint",
-          issuer: "https://attacker.example.test",
-          jti: "cloud-mint-jti-wrong-issuer",
-          nonce: "cloud-mint-nonce-wrong-issuer",
-          issuedAt: DateTime.formatIso(now),
-          expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-        }),
-      );
-      const wrongAudience = yield* postMint(
-        makeCloudMintCredentialRequest({
-          privateKey: cloudKeyPair.privateKey,
-          environmentId: testEnvironmentDescriptor.environmentId,
-          clientProofKeyThumbprint: "client-proof-key-thumbprint",
-          audience: "t3-env:other-environment",
-          jti: "cloud-mint-jti-wrong-audience",
-          nonce: "cloud-mint-nonce-wrong-audience",
-          issuedAt: DateTime.formatIso(now),
-          expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-        }),
-      );
-
-      assert.equal(wrongIssuer.status, 401);
-      assert.equal(wrongAudience.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud mint requests for a cloud subject other than the linked user", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test/",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
-      const response = yield* fetchEffect(mintUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody(
-          makeCloudMintCredentialRequest({
-            privateKey: cloudKeyPair.privateKey,
-            environmentId: testEnvironmentDescriptor.environmentId,
-            clientProofKeyThumbprint: "client-proof-key-thumbprint",
-            subject: "user_other",
-            jti: "cloud-mint-jti-wrong-subject",
-            nonce: "cloud-mint-nonce-wrong-subject",
-            issuedAt: DateTime.formatIso(now),
-            expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-          }),
-        ),
-      });
-
-      assert.equal(response.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud mint requests without the exact connect scope", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test/",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const mintUrl = yield* getHttpServerUrl("/api/t3-connect/mint-credential");
-      const response = yield* fetchEffect(mintUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody(
-          makeCloudMintCredentialRequest({
-            privateKey: cloudKeyPair.privateKey,
-            environmentId: testEnvironmentDescriptor.environmentId,
-            clientProofKeyThumbprint: "client-proof-key-thumbprint",
-            jti: "cloud-mint-jti-duplicate-scope",
-            nonce: "cloud-mint-nonce-duplicate-scope",
-            issuedAt: DateTime.formatIso(now),
-            expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-            scope: ["environment:connect", "environment:connect"],
-          }),
-        ),
-      });
-
-      assert.equal(response.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud health requests with the wrong issuer or audience", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test/",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
-      const postHealth = (request: ReturnType<typeof makeCloudEnvironmentHealthRequest>) =>
-        fetchEffect(healthUrl, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: jsonRequestBody(request),
-        });
-
-      const wrongIssuer = yield* postHealth(
-        makeCloudEnvironmentHealthRequest({
-          privateKey: cloudKeyPair.privateKey,
-          environmentId: testEnvironmentDescriptor.environmentId,
-          issuer: "https://attacker.example.test",
-          jti: "cloud-health-jti-wrong-issuer",
-          nonce: "cloud-health-nonce-wrong-issuer",
-          issuedAt: DateTime.formatIso(now),
-          expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-        }),
-      );
-      const wrongAudience = yield* postHealth(
-        makeCloudEnvironmentHealthRequest({
-          privateKey: cloudKeyPair.privateKey,
-          environmentId: testEnvironmentDescriptor.environmentId,
-          audience: "t3-env:other-environment",
-          jti: "cloud-health-jti-wrong-audience",
-          nonce: "cloud-health-nonce-wrong-audience",
-          issuedAt: DateTime.formatIso(now),
-          expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-        }),
-      );
-
-      assert.equal(wrongIssuer.status, 401);
-      assert.equal(wrongAudience.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud health requests for a cloud subject other than the linked user", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test/",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
-      const response = yield* fetchEffect(healthUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody(
-          makeCloudEnvironmentHealthRequest({
-            privateKey: cloudKeyPair.privateKey,
-            environmentId: testEnvironmentDescriptor.environmentId,
-            subject: "user_other",
-            jti: "cloud-health-jti-wrong-subject",
-            nonce: "cloud-health-nonce-wrong-subject",
-            issuedAt: DateTime.formatIso(now),
-            expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-          }),
-        ),
-      });
-
-      assert.equal(response.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects cloud health requests without the exact status scope", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const cloudKeyPair = NodeCrypto.generateKeyPairSync("ed25519", {
-        privateKeyEncoding: { format: "pem", type: "pkcs8" },
-        publicKeyEncoding: { format: "pem", type: "spki" },
-      });
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const relayConfigUrl = yield* getHttpServerUrl("/api/connect/relay-config");
-      const relayConfigResponse = yield* fetchEffect(relayConfigUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          relayUrl: "https://relay.example.test/",
-          cloudUserId: "user_123",
-          environmentCredential: "t3env_test_credential",
-          cloudMintPublicKey: cloudKeyPair.publicKey,
-          endpointRuntime: null,
-        }),
-      });
-      assert.equal(relayConfigResponse.status, 200);
-
-      const now = yield* DateTime.now;
-      const healthUrl = yield* getHttpServerUrl("/api/t3-connect/health");
-      const response = yield* fetchEffect(healthUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody(
-          makeCloudEnvironmentHealthRequest({
-            privateKey: cloudKeyPair.privateKey,
-            environmentId: testEnvironmentDescriptor.environmentId,
-            jti: "cloud-health-jti-duplicate-scope",
-            nonce: "cloud-health-nonce-duplicate-scope",
-            issuedAt: DateTime.formatIso(now),
-            expiresAt: DateTime.formatIso(DateTime.add(now, { minutes: 5 })),
-            scope: ["environment:status", "environment:status"],
-          }),
-        ),
-      });
-
-      assert.equal(response.status, 401);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -3319,8 +1516,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         );
 
       const compressed = yield* openSocket(true);
-      // The ws client records the negotiated extension only when the server's
-      // 101 response accepted the offer.
       assert.include(compressed.extensions, "permessage-deflate");
 
       const plain = yield* openSocket(false);
@@ -3352,55 +1547,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("does not allow management-only access tokens to operate the environment", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const { response: exchangeResponse, body: tokenBody } = yield* exchangeAccessToken(
-        defaultDesktopBootstrapToken,
-        { scope: "access:write" },
-      );
-      assert.equal(exchangeResponse.status, 200);
-      assert.equal(tokenBody.scope, "access:write");
-      assert.isDefined(tokenBody.access_token);
-
-      const overbroadPairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          authorization: `Bearer ${tokenBody.access_token ?? ""}`,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const overbroadPairingBody = (yield* overbroadPairingResponse.json) as {
-        readonly requiredScope: string;
-      };
-      const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          authorization: `Bearer ${tokenBody.access_token ?? ""}`,
-        },
-        body: yield* HttpBody.json({ scopes: ["access:write"] }),
-      });
-      const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
-        headers: {
-          authorization: `Bearer ${tokenBody.access_token ?? ""}`,
-        },
-      });
-      const wsTicketBody = (yield* wsTicketResponse.json) as { readonly ticket: string };
-      assert.equal(overbroadPairingResponse.status, 403);
-      assert.equal(overbroadPairingBody.requiredScope, "orchestration:read");
-      assert.equal(pairingResponse.status, 200);
-      assert.equal(wsTicketResponse.status, 200);
-      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
-      const rpcError = yield* Effect.flip(
-        Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({}))),
-      );
-      assert.equal(rpcError._tag, "EnvironmentAuthorizationError");
-      if (rpcError._tag === "EnvironmentAuthorizationError") {
-        assert.equal(rpcError.requiredScope, "orchestration:read");
-      }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("includes CORS headers on remote auth success responses", () =>
+  it.effect("does not grant CORS access to remote auth origins", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
@@ -3452,84 +1599,30 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect(
-    "responds to remote auth websocket-ticket preflight requests with authorization CORS headers",
-    () =>
-      Effect.gen(function* () {
-        yield* buildAppUnderTest();
-
-        const wsTicketUrl = yield* getHttpServerUrl("/api/auth/websocket-ticket");
-        const response = yield* fetchEffect(wsTicketUrl, {
-          method: "OPTIONS",
-          headers: {
-            origin: crossOriginClientOrigin,
-            "access-control-request-method": "POST",
-            "access-control-request-headers": "authorization",
-          },
-        });
-
-        assert.equal(response.status, 204);
-        assertBrowserApiCorsPreflightHeaders(response.headers);
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("allows credentialed cloud link proof preflights from the configured dev UI", () =>
+  it.effect("does not grant CORS access to remote auth preflights", () =>
     Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        config: { devUrl: new URL(crossOriginClientOrigin) },
-      });
+      yield* buildAppUnderTest();
 
-      const linkProofUrl = yield* getHttpServerUrl("/api/connect/link-proof");
-      const response = yield* fetchEffect(linkProofUrl, {
+      const wsTicketUrl = yield* getHttpServerUrl("/api/auth/websocket-ticket");
+      const response = yield* fetchEffect(wsTicketUrl, {
         method: "OPTIONS",
         headers: {
           origin: crossOriginClientOrigin,
           "access-control-request-method": "POST",
-          "access-control-request-headers": "content-type",
+          "access-control-request-headers": "authorization",
         },
       });
 
       assert.equal(response.status, 204);
-      assertBrowserApiCorsPreflightHeaders(response.headers, {
-        origin: crossOriginClientOrigin,
-        credentials: true,
-      });
+      assertBrowserApiCorsPreflightHeaders(response.headers);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("allows configured development origins through ServerConfig", () =>
-    Effect.gen(function* () {
-      const tailnetOrigin = "https://host.example.ts.net";
-      yield* buildAppUnderTest({
-        config: {
-          devUrl: new URL(crossOriginClientOrigin),
-          devAllowedOrigins: [tailnetOrigin],
-        },
-      });
-
-      const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
-      const response = yield* fetchEffect(sessionUrl, {
-        method: "OPTIONS",
-        headers: {
-          origin: tailnetOrigin,
-          "access-control-request-method": "GET",
-          "access-control-request-headers": "content-type",
-        },
-      });
-
-      assert.equal(response.status, 204);
-      assertBrowserApiCorsPreflightHeaders(response.headers, {
-        origin: tailnetOrigin,
-        credentials: true,
-      });
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  for (const desktopOrigin of ["t3code://app", "t3code-dev://app"]) {
+  for (const desktopOrigin of ["fdai://app", "fdai-dev://app"]) {
     it.effect(`allows credentialed preflights from ${desktopOrigin} in development`, () =>
       Effect.gen(function* () {
         yield* buildAppUnderTest({
-          config: { devUrl: new URL(crossOriginClientOrigin) },
+          config: { devUrl: new URL("http://127.0.0.1:5173") },
         });
 
         const sessionUrl = yield* getHttpServerUrl("/api/auth/session");
@@ -3551,7 +1644,74 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     );
   }
 
-  it.effect("includes CORS headers on remote websocket-ticket auth failures", () =>
+  it.effect("allows the configured loopback Vite origin in development", () =>
+    Effect.gen(function* () {
+      const origin = "http://127.0.0.1:5173";
+      yield* buildAppUnderTest({ config: { devUrl: new URL(origin) } });
+
+      const response = yield* fetchEffect(yield* getHttpServerUrl("/api/auth/session"), {
+        method: "OPTIONS",
+        headers: {
+          origin,
+          "access-control-request-method": "GET",
+          "access-control-request-headers": "content-type",
+        },
+      });
+
+      assert.equal(response.status, 204);
+      assertBrowserApiCorsPreflightHeaders(response.headers, { origin, credentials: true });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not derive a null CORS origin from an opaque development URL", () =>
+    Effect.gen(function* () {
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL("file://localhost/tmp/index.html") },
+      });
+
+      const response = yield* fetchEffect(yield* getHttpServerUrl("/api/auth/session"), {
+        method: "OPTIONS",
+        headers: {
+          origin: "null",
+          "access-control-request-method": "GET",
+          "access-control-request-headers": "content-type",
+        },
+      });
+
+      assert.equal(response.status, 204);
+      assert.equal(response.headers["access-control-allow-origin"], undefined);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  for (const rejectedOrigin of [
+    "*",
+    "http://0.0.0.0:5173",
+    "http://192.168.1.20:5173",
+    "https://desktop.example.ts.net:5173",
+    "http://[2001:db8::1]:5173",
+  ]) {
+    it.effect(`rejects CORS preflights from ${rejectedOrigin}`, () =>
+      Effect.gen(function* () {
+        yield* buildAppUnderTest({
+          config: { devUrl: new URL("http://127.0.0.1:5173") },
+        });
+
+        const response = yield* fetchEffect(yield* getHttpServerUrl("/api/auth/session"), {
+          method: "OPTIONS",
+          headers: {
+            origin: rejectedOrigin,
+            "access-control-request-method": "GET",
+            "access-control-request-headers": "content-type",
+          },
+        });
+
+        assert.equal(response.status, 204);
+        assert.equal(response.headers["access-control-allow-origin"], undefined);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+    );
+  }
+
+  it.effect("does not grant CORS access on remote websocket-ticket failures", () =>
     Effect.gen(function* () {
       yield* buildAppUnderTest();
 
@@ -3575,399 +1735,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(body.code, "auth_invalid");
       assert.equal(body.reason, "missing_credential");
       assert.equal(typeof body.traceId, "string");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("issues authenticated one-time pairing credentials for additional clients", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const response = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const body = (yield* response.json) as {
-        readonly credential: string;
-        readonly expiresAt: string;
-      };
-
-      assert.equal(response.status, 200);
-      assert.equal(typeof body.credential, "string");
-      assert.isTrue(body.credential.length > 0);
-      assert.equal(typeof body.expiresAt, "string");
-
-      const bootstrapResult = yield* bootstrapBrowserSession(body.credential);
-      assert.equal(bootstrapResult.response.status, 200);
-
-      const reusedResult = yield* bootstrapBrowserSession(body.credential);
-      assert.equal(reusedResult.response.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("issues pairing credentials for bearer sessions with access management scope", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const bearerToken = yield* getAuthenticatedBearerSessionToken();
-      const response = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          authorization: `Bearer ${bearerToken}`,
-        },
-        body: yield* HttpBody.json({ label: "Hosted web" }),
-      });
-      const body = (yield* response.json) as {
-        readonly credential: string;
-        readonly label?: string;
-      };
-
-      assert.equal(response.status, 200);
-      assert.isTrue(body.credential.length > 0);
-      assert.equal(body.label, "Hosted web");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects pairing credentials with an empty scope grant", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const response = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-        },
-        body: yield* HttpBody.json({ scopes: [] }),
-      });
-      const body = (yield* response.json) as {
-        readonly code: string;
-        readonly reason: string;
-      };
-
-      assert.equal(response.status, 400);
-      assert.equal(body.code, "invalid_request");
-      assert.equal(body.reason, "invalid_scope");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects unauthenticated pairing credential requests", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const response = yield* HttpClient.post("/api/auth/pairing-token", {
-        body: yield* HttpBody.json({}),
-      });
-      assert.equal(response.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("lists and revokes pairing links for access management sessions", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        config: {
-          host: "0.0.0.0",
-        },
-      });
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const createdResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: ownerCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const createdBody = (yield* createdResponse.json) as {
-        readonly id: string;
-        readonly credential: string;
-      };
-
-      const listResponse = yield* HttpClient.get("/api/auth/pairing-links", {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const listedLinks = (yield* listResponse.json) as ReadonlyArray<{
-        readonly id: string;
-        readonly credential: string;
-      }>;
-
-      const revokeResponse = yield* HttpClient.post("/api/auth/pairing-links/revoke", {
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: HttpBody.text(jsonRequestBody({ id: createdBody.id }), "application/json"),
-      });
-      const revokedBootstrap = yield* bootstrapBrowserSession(createdBody.credential);
-
-      assert.equal(createdResponse.status, 200);
-      assert.equal(listResponse.status, 200);
-      assert.isTrue(listedLinks.some((entry) => entry.id === createdBody.id));
-      assert.equal(revokeResponse.status, 200);
-      assert.equal(revokedBootstrap.response.status, 401);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("rejects pairing credential requests without access management scope", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        config: {
-          host: "0.0.0.0",
-        },
-      });
-
-      const ownerResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: yield* getAuthenticatedSessionCookieHeader(),
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const ownerBody = (yield* ownerResponse.json) as {
-        readonly credential: string;
-      };
-      assert.equal(ownerResponse.status, 200);
-
-      const pairedSessionCookie = yield* getAuthenticatedSessionCookieHeader(ownerBody.credential);
-      const pairedResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: pairedSessionCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const pairedBody = (yield* pairedResponse.json) as {
-        readonly _tag: string;
-        readonly code: string;
-        readonly requiredScope: string;
-        readonly traceId: string;
-      };
-
-      assert.equal(pairedResponse.status, 403);
-      assert.equal(pairedBody._tag, "EnvironmentScopeRequiredError");
-      assert.equal(pairedBody.code, "insufficient_scope");
-      assert.equal(pairedBody.requiredScope, "access:write");
-      assert.equal(typeof pairedBody.traceId, "string");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("lists paired clients and revokes other sessions while keeping the administrator", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        config: {
-          host: "0.0.0.0",
-        },
-      });
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const pairingTokenUrl = yield* getHttpServerUrl("/api/auth/pairing-token");
-      const ownerPairingResponse = yield* fetchEffect(pairingTokenUrl, {
-        method: "POST",
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: jsonRequestBody({
-          label: "Julius iPhone",
-        }),
-      });
-      const ownerPairingBody = yield* responseJsonEffect<{
-        readonly credential: string;
-        readonly label?: string;
-      }>(ownerPairingResponse);
-      assert.equal(ownerPairingResponse.status, 200);
-      const pairedSessionBootstrap = yield* bootstrapBrowserSession(ownerPairingBody.credential, {
-        headers: {
-          "user-agent":
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
-        },
-      });
-      const pairedSessionCookie = pairedSessionBootstrap.cookie?.split(";")[0];
-      assert.isDefined(pairedSessionCookie);
-
-      const pairedSessionCookieHeader = pairedSessionCookie ?? "";
-      const listBeforeResponse = yield* HttpClient.get("/api/auth/clients", {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const clientsBefore = (yield* listBeforeResponse.json) as ReadonlyArray<{
-        readonly sessionId: string;
-        readonly current: boolean;
-        readonly client: {
-          readonly label?: string;
-          readonly deviceType: string;
-          readonly ipAddress?: string;
-          readonly os?: string;
-          readonly browser?: string;
-        };
-      }>;
-      const pairedClientBefore = clientsBefore.find((entry) => !entry.current);
-      const pairedSessionId = clientsBefore.find((entry) => !entry.current)?.sessionId;
-
-      const revokeOthersResponse = yield* HttpClient.post("/api/auth/clients/revoke-others", {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const revokeOthersBody = (yield* revokeOthersResponse.json) as {
-        readonly revokedCount: number;
-      };
-
-      const listAfterResponse = yield* HttpClient.get("/api/auth/clients", {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const clientsAfter = (yield* listAfterResponse.json) as ReadonlyArray<{
-        readonly sessionId: string;
-        readonly current: boolean;
-      }>;
-
-      const pairedClientPairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: pairedSessionCookieHeader,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const pairedClientPairingBody = (yield* pairedClientPairingResponse.json) as {
-        readonly _tag: string;
-        readonly code: string;
-        readonly reason: string;
-        readonly traceId: string;
-      };
-
-      assert.equal(listBeforeResponse.status, 200);
-      assert.equal(ownerPairingBody.label, "Julius iPhone");
-      assert.lengthOf(clientsBefore, 2);
-      assert.isDefined(pairedSessionId);
-      assert.isDefined(pairedClientBefore);
-      assert.deepInclude(pairedClientBefore?.client, {
-        label: "Julius iPhone",
-        deviceType: "mobile",
-        os: "iOS",
-        browser: "Safari",
-        ipAddress: "127.0.0.1",
-      });
-      assert.equal(revokeOthersResponse.status, 200);
-      assert.equal(revokeOthersBody.revokedCount, 1);
-      assert.equal(listAfterResponse.status, 200);
-      assert.lengthOf(clientsAfter, 1);
-      assert.equal(clientsAfter[0]?.current, true);
-      assert.equal(pairedClientPairingResponse.status, 401);
-      assert.equal(pairedClientPairingBody._tag, "EnvironmentAuthInvalidError");
-      assert.equal(pairedClientPairingBody.code, "auth_invalid");
-      assert.equal(pairedClientPairingBody.reason, "invalid_credential");
-      assert.equal(typeof pairedClientPairingBody.traceId, "string");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("separates access inventory reads from credential management writes", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        config: {
-          host: "0.0.0.0",
-        },
-      });
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const issueScopedSession = Effect.fnUntraced(function* (
-        scope: "access:read" | "access:write",
-      ) {
-        const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-          headers: {
-            cookie: ownerCookie,
-          },
-          body: yield* HttpBody.json({ scopes: [scope] }),
-        });
-        assert.equal(pairingResponse.status, 200);
-        const pairingBody = (yield* pairingResponse.json) as {
-          readonly credential: string;
-        };
-        return yield* getAuthenticatedSessionCookieHeader(pairingBody.credential);
-      });
-
-      const readCookie = yield* issueScopedSession("access:read");
-      const readListResponse = yield* HttpClient.get("/api/auth/clients", {
-        headers: {
-          cookie: readCookie,
-        },
-      });
-      const readWriteResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: readCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const readWriteBody = (yield* readWriteResponse.json) as {
-        readonly requiredScope: string;
-      };
-
-      const writeCookie = yield* issueScopedSession("access:write");
-      const writeListResponse = yield* HttpClient.get("/api/auth/clients", {
-        headers: {
-          cookie: writeCookie,
-        },
-      });
-      const writeListBody = (yield* writeListResponse.json) as {
-        readonly requiredScope: string;
-      };
-
-      assert.equal(readListResponse.status, 200);
-      assert.equal(readWriteResponse.status, 403);
-      assert.equal(readWriteBody.requiredScope, "access:write");
-      assert.equal(writeListResponse.status, 403);
-      assert.equal(writeListBody.requiredScope, "access:read");
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("revokes an individual paired client session", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest({
-        config: {
-          host: "0.0.0.0",
-        },
-      });
-
-      const ownerCookie = yield* getAuthenticatedSessionCookieHeader();
-      const pairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: ownerCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-      const pairingBody = (yield* pairingResponse.json) as {
-        readonly credential: string;
-      };
-      const pairedSessionCookie = yield* getAuthenticatedSessionCookieHeader(
-        pairingBody.credential,
-      );
-
-      const clientsResponse = yield* HttpClient.get("/api/auth/clients", {
-        headers: {
-          cookie: ownerCookie,
-        },
-      });
-      const clients = (yield* clientsResponse.json) as ReadonlyArray<{
-        readonly sessionId: string;
-        readonly current: boolean;
-      }>;
-      const pairedSessionId = clients.find((entry) => !entry.current)?.sessionId;
-      assert.isDefined(pairedSessionId);
-
-      const revokeResponse = yield* HttpClient.post("/api/auth/clients/revoke", {
-        headers: {
-          cookie: ownerCookie,
-          "content-type": "application/json",
-        },
-        body: HttpBody.text(jsonRequestBody({ sessionId: pairedSessionId }), "application/json"),
-      });
-      const pairedClientPairingResponse = yield* HttpClient.post("/api/auth/pairing-token", {
-        headers: {
-          cookie: pairedSessionCookie,
-        },
-        body: yield* HttpBody.json({}),
-      });
-
-      assert.equal(revokeResponse.status, 200);
-      assert.equal(pairedClientPairingResponse.status, 401);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -4008,6 +1775,66 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.auth.policy, "desktop-managed-local");
       assert.equal(response.shellResumeCompletionMarker, true);
       assert.equal(response.threadResumeCompletionMarker, true);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("serves workflow scripts through the server-owned provider-neutral root", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workflowScriptsDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-workflow-rpc-root-",
+      });
+      const scriptPath = path.join(workflowScriptsDir, "agent-run.js");
+      yield* fileSystem.writeFileString(scriptPath, "export const workflow = 'fd';\n");
+
+      yield* buildAppUnderTest({ config: { workflowScriptsDir } });
+
+      const result = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_WS_METHODS.getWorkflowScript]({
+            threadId: defaultThreadId,
+            scriptPath,
+          }),
+        ),
+      );
+
+      assert.include(result.contents, "export const workflow = 'fd'");
+      assert.equal(result.truncated, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("returns typed workflow-script unavailability when the owned root is missing", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const parent = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-workflow-rpc-missing-",
+      });
+      const workflowScriptsDir = path.join(parent, "missing-root");
+      const scriptPath = path.join(workflowScriptsDir, "agent-run.js");
+
+      yield* buildAppUnderTest({ config: { workflowScriptsDir } });
+
+      const result = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl("/ws"), (client) =>
+          client[ORCHESTRATION_WS_METHODS.getWorkflowScript]({
+            threadId: defaultThreadId,
+            scriptPath,
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      if (result._tag === "Failure") {
+        assert.equal(result.failure._tag, "OrchestrationGetWorkflowScriptError");
+      }
+      if (
+        result._tag === "Failure" &&
+        result.failure._tag === "OrchestrationGetWorkflowScriptError"
+      ) {
+        assert.equal(result.failure.reason, "root-unavailable");
+      }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -4215,7 +2042,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       assert.equal(response.status, 204);
-      assert.equal(response.headers["access-control-allow-origin"], "*");
+      assert.equal(response.headers["access-control-allow-origin"], undefined);
       assert.deepEqual(localTraceRecords, [
         {
           type: "otlp-span",
@@ -4276,7 +2103,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       });
 
       assert.equal(response.status, 204);
-      assert.equal(response.headers["access-control-allow-origin"], "*");
+      assert.equal(response.headers["access-control-allow-origin"], undefined);
       assert.deepEqual(splitHeaderTokens(response.headers["access-control-allow-methods"]), [
         "GET",
         "OPTIONS",
@@ -4286,7 +2113,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         "authorization",
         "b3",
         "content-type",
-        "dpop",
         "traceparent",
       ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
@@ -4516,11 +2342,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const providers = [
         {
-          instanceId: ProviderInstanceId.make("codex"),
-          driver: ProviderDriverKind.make("codex"),
+          instanceId: ProviderInstanceId.make("fd-deepseek"),
+          driver: ProviderDriverKind.make("fd-deepseek"),
           enabled: true,
-          installed: true,
-          version: "1.0.0",
           status: "ready" as const,
           auth: { status: "authenticated" as const },
           checkedAt: "2026-04-11T00:00:00.000Z",
@@ -4604,11 +2428,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     Effect.gen(function* () {
       const nextProviders = [
         {
-          instanceId: ProviderInstanceId.make("codex"),
-          driver: ProviderDriverKind.make("codex"),
+          instanceId: ProviderInstanceId.make("fd-deepseek"),
+          driver: ProviderDriverKind.make("fd-deepseek"),
           enabled: true,
-          installed: true,
-          version: "1.0.0",
           status: "ready" as const,
           auth: { status: "authenticated" as const },
           checkedAt: "2026-04-11T00:00:00.000Z",
@@ -8023,10 +5845,7 @@ it.live(
   "reports thread HTTP and WebSocket transfer budgets",
   () =>
     Effect.gen(function* () {
-      const providers = [
-        ProviderDriverKind.make("codex"),
-        ProviderDriverKind.make("claudeAgent"),
-      ] as const;
+      const providers = [ProviderDriverKind.make("fd-deepseek")] as const;
 
       const runs = yield* Effect.forEach(
         providers,

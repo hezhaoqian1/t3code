@@ -1,9 +1,9 @@
 /**
- * UsageService - scans provider transcripts and returns priced daily usage.
+ * UsageService - scans FD's managed Codex transcripts and returns priced daily usage.
  *
- * The scan reads the provider CLIs' own session files rather than T3 Code's
- * orchestration projections, so usage covers turns driven outside T3 Code too.
- * This is the approach `ccusage` takes.
+ * The scan reads the Codex App Server session files under this FD Desktop
+ * profile. Keeping the source inside `stateDir` prevents usage from leaking
+ * across desktop accounts or from unrelated Codex installations.
  *
  * Transcripts are append-only, so parsed records are memoised per file by
  * `(size, mtime)`. A cold 30-day scan of ~1.4 GB lands around 2-3 seconds; warm
@@ -21,7 +21,6 @@ import {
   type UsageSummaryInput,
   UsageReadError,
 } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -34,9 +33,6 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 
 import { ServerConfig } from "../config.ts";
-import * as ServerSettings from "../serverSettings.ts";
-import { resolveClaudeHomePath } from "../provider/Drivers/ClaudeHome.ts";
-import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
 import { UsageAggregator } from "./usageAggregation.ts";
 import { parseRateTable, type RateTable } from "./usagePricing.ts";
 import {
@@ -120,7 +116,6 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig;
-  const settingsService = yield* ServerSettings.ServerSettingsService;
   const httpClient = yield* HttpClient.HttpClient;
 
   const fileCache: ScanCache = new Map();
@@ -183,46 +178,13 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  /**
-   * Claude's config dir is the home itself when overridden, but a default
-   * install nests transcripts under `~/.claude/projects`. Probe both.
-   */
-  const resolveClaudeTranscriptDir = (homePath: string) =>
-    Effect.gen(function* () {
-      const nested = path.join(homePath, ".claude", "projects");
-      const nestedExists = yield* fileSystem
-        .exists(nested)
-        .pipe(Effect.catchCause(() => Effect.succeed(false)));
-      return nestedExists ? nested : path.join(homePath, "projects");
-    });
-
-  /** Resolves the transcript directory for each provider. */
-  const resolveTranscriptDirs = Effect.fn("UsageService.resolveTranscriptDirs")(function* () {
-    // A settings failure must surface as an error: swallowing it here would
-    // present "zero usage from every provider" as a valid answer.
-    const settings = yield* settingsService.getSettings.pipe(
-      Effect.catchCause(
-        (cause) =>
-          new UsageReadError({
-            reason: "scanFailed",
-            // Bounded description; the squashed failure travels as the cause.
-            // Squashed, not the Cause tree: a full tree in a Defect field is
-            // the unbounded wire payload the bounded detail exists to avoid.
-            detail: "Server settings could not be read.",
-            cause: Cause.squash(cause),
-          }),
-      ),
-    );
-
-    const claudeHome = yield* resolveClaudeHomePath(settings.providers.claudeAgent);
-    const claudeDir = yield* resolveClaudeTranscriptDir(claudeHome);
-    const codexLayout = yield* resolveCodexHomeLayout(settings.providers.codex);
-
-    return [
-      { provider: "claude" as const, dir: claudeDir },
-      { provider: "codex" as const, dir: path.join(codexLayout.sharedHomePath, "sessions") },
-    ];
-  });
+  /** Only FD Desktop's managed Codex home contributes to this profile. */
+  const resolveTranscriptDirs = Effect.sync(() => [
+    {
+      provider: "fd-deepseek" as const,
+      dir: path.join(config.stateDir, "codex-home", "sessions"),
+    },
+  ]);
 
   /**
    * Loads the persisted scan cache exactly once per process.
@@ -302,9 +264,7 @@ export const make = Effect.gen(function* () {
     yield* ensureScanCacheLoaded;
 
     const hostId = NodeOS.hostname();
-    // The home resolvers ask for `Path` themselves; satisfy them from the
-    // instance we already hold so `readSummary` stays context-free.
-    const dirs = yield* resolveTranscriptDirs().pipe(Effect.provideService(Path.Path, path));
+    const dirs = yield* resolveTranscriptDirs;
     const windowStart = DateTime.make(`${input.sinceDay}T00:00:00Z`);
     if (Option.isNone(windowStart)) {
       return yield* new UsageReadError({

@@ -1,42 +1,21 @@
-# T3 Code docs
+# Fangde AI Desktop 文档
 
-## Using T3 Code
+## 员工使用
 
-- [Install and first run](./user/install.md)
-- [Permission modes](./user/permission-modes.md)
-- [Keyboard shortcuts](./user/keybindings.md)
-- [Organizing threads](./user/thread-sidebar.md)
-- [Remote access](./user/remote-access.md)
-- [Keeping app and server in sync](./user/updating.md)
-- [Source control integrations](./user/source-control.md)
-- [Background service (Linux)](./user/background-service.md)
-- Providers: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md)
+- [安装与首次使用](./user/install.md)
+- [桌面端更新](./user/updating.md)
+- [权限模式](./user/permission-modes.md)
+- [快捷键](./user/keybindings.md)
+- [任务与空间](./user/thread-sidebar.md)
+- [源码管理](./user/source-control.md)
 
-Mobile app: [apps/mobile/README.md](../apps/mobile/README.md)
+## 开发与运维
 
----
-
-## Working on T3 Code
-
-Everything below is for maintainers. Setup lives in the [root README](../README.md);
-policy in [CONTRIBUTING.md](../CONTRIBUTING.md); agent rules in [AGENTS.md](../AGENTS.md).
-
-- [Architecture overview](./internals/overview.md)
-- [Workspace layout](./internals/workspace-layout.md)
-- [Glossary](./internals/glossary.md)
-- [Scripts](./internals/scripts.md)
-- [Connection runtime](./internals/connection-runtime.md)
-- [Providers](./internals/providers.md)
-- [Remote environments](./internals/remote.md)
-- [Server updates](./internals/server-updates.md)
-- [Resource telemetry](./internals/resource-telemetry.md)
-- [Environment auth](./internals/environment-auth.md)
-- [T3 Connect](./internals/t3-connect.md)
-- [CI gates](./internals/ci.md)
-
-### Runbooks
-
-- [Release](./operations/release.md)
-- [Observability](./operations/observability.md)
-- [Relay observability](./operations/relay-observability.md)
-- [Mobile app store screenshots](./operations/mobile-app-store-screenshots.md)
+- [架构概览](./internals/overview.md)
+- [工作区结构](./internals/workspace-layout.md)
+- [术语表](./internals/glossary.md)
+- [开发脚本](./internals/scripts.md)
+- [环境鉴权](./internals/environment-auth.md)
+- [CI](./internals/ci.md)
+- [桌面端发布](./operations/release.md)
+- [可观测性](./operations/observability.md)

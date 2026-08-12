@@ -45,8 +45,8 @@ export function ContextWindowMeter(props: {
             )}
             aria-label={
               usage.maxTokens !== null && usedPercentage
-                ? `Context window ${usedPercentage} used`
-                : `Context window ${formatContextWindowTokens(usage.usedTokens)} tokens used`
+                ? `上下文窗口已使用 ${usedPercentage}`
+                : `上下文窗口已使用 ${formatContextWindowTokens(usage.usedTokens)} Token`
             }
           >
             <span className="relative flex size-5 items-center justify-center">
@@ -112,7 +112,7 @@ export function ContextWindowMeter(props: {
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(normalizedPercentage)}
-              aria-label="Context window usage"
+              aria-label="上下文窗口用量"
             >
               <div
                 className="h-full rounded-full transition-[width,background-color] duration-500 ease-out motion-reduce:transition-none"

@@ -27,7 +27,7 @@ export function formatProviderSkillInstallSource(
   skill: Pick<ServerProviderSkill, "path" | "scope">,
 ): string | null {
   const normalizedPath = normalizePathSeparators(skill.path);
-  if (normalizedPath.includes("/.codex/plugins/") || normalizedPath.includes("/.agents/plugins/")) {
+  if (normalizedPath.includes("/.agents/plugins/")) {
     return "App";
   }
 

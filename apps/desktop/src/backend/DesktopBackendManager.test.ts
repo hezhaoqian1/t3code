@@ -25,6 +25,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
+import * as FdCredentialPublisher from "../fd-identity/FdCredentialPublisher.ts";
 
 const decodeDesktopBackendBootstrap = Schema.decodeEffect(
   Schema.fromJsonString(DesktopBackendBootstrap),
@@ -47,10 +48,9 @@ const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
     t3Home: "/tmp/t3",
     host: "127.0.0.1",
     desktopBootstrapToken: "token",
-    tailscaleServeEnabled: false,
-    tailscaleServePort: 443,
     desktopTelemetryFd: 4,
     desktopTelemetryControlFd: 5,
+    fdRuntimeCredentialFd: 6,
   },
   bootstrapDelivery: "fd3",
   extendEnv: true,
@@ -61,7 +61,6 @@ const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
 
 const configWithObservability: DesktopBackendBootstrapValue = {
   ...baseConfig.bootstrap,
-  tailscaleServeEnabled: true,
   desktopTelemetryFd: 4,
   otlpTracesUrl: "http://127.0.0.1:4318/v1/traces",
 };
@@ -132,6 +131,7 @@ interface MakeInstanceInput {
   readonly desktopTelemetryPublisher?: Partial<
     DesktopTelemetryPublisher.DesktopTelemetryPublisher["Service"]
   >;
+  readonly fdCredentialStream?: Stream.Stream<Uint8Array>;
 }
 
 // Helper that constructs a primary backend instance using the factory
@@ -167,6 +167,9 @@ function makeTestInstance(input: MakeInstanceInput) {
       removeControlSource: () => Effect.void,
       ...input.desktopTelemetryPublisher,
     }),
+    FdCredentialPublisher.layerTest({
+      encoded: input.fdCredentialStream ?? Stream.empty,
+    }),
   );
 
   const instance = DesktopBackendManager.makeBackendInstance({
@@ -182,87 +185,110 @@ function makeTestInstance(input: MakeInstanceInput) {
 }
 
 describe("DesktopBackendManager", () => {
-  it.effect("spawns the backend with fd3 bootstrap and fd4 telemetry", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        let spawnedCommand: ChildProcess.Command | undefined;
-        let bootstrapJson = "";
-        let telemetryJson = "";
-        let readyCount = 0;
-        const ready = yield* Deferred.make<void>();
-        const exited = yield* Queue.unbounded<void>();
+  it.effect(
+    "spawns the backend with fd3 bootstrap, fd4 telemetry, and private fd6 credentials",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          let spawnedCommand: ChildProcess.Command | undefined;
+          let bootstrapJson = "";
+          let telemetryJson = "";
+          let credentialJson = "";
+          let readyCount = 0;
+          const ready = yield* Deferred.make<void>();
+          const exited = yield* Queue.unbounded<void>();
 
-        const spawnerLayer = Layer.succeed(
-          ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make((command) =>
-            Effect.gen(function* () {
-              spawnedCommand = command;
-              if (command._tag === "StandardCommand") {
-                const fd3 = command.options.additionalFds?.fd3;
-                if (fd3?.type === "input" && fd3.stream) {
-                  bootstrapJson = yield* fd3.stream.pipe(Stream.decodeText(), Stream.mkString);
+          const spawnerLayer = Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make((command) =>
+              Effect.gen(function* () {
+                spawnedCommand = command;
+                if (command._tag === "StandardCommand") {
+                  const fd3 = command.options.additionalFds?.fd3;
+                  if (fd3?.type === "input" && fd3.stream) {
+                    bootstrapJson = yield* fd3.stream.pipe(Stream.decodeText(), Stream.mkString);
+                  }
+                  const fd4 = command.options.additionalFds?.fd4;
+                  if (fd4?.type === "input" && fd4.stream) {
+                    telemetryJson = yield* fd4.stream.pipe(Stream.decodeText(), Stream.mkString);
+                  }
+                  const fd6 = command.options.additionalFds?.fd6;
+                  if (fd6?.type === "input" && fd6.stream) {
+                    credentialJson = yield* fd6.stream.pipe(Stream.decodeText(), Stream.mkString);
+                  }
                 }
-                const fd4 = command.options.additionalFds?.fd4;
-                if (fd4?.type === "input" && fd4.stream) {
-                  telemetryJson = yield* fd4.stream.pipe(Stream.decodeText(), Stream.mkString);
-                }
-              }
 
-              return makeProcess({
-                exitCode: Deferred.await(ready).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
-              });
-            }),
-          ),
-        );
+                return makeProcess({
+                  exitCode: Deferred.await(ready).pipe(Effect.as(ChildProcessSpawner.ExitCode(0))),
+                });
+              }),
+            ),
+          );
 
-        const instance = yield* makeTestInstance({
-          config: {
-            ...baseConfig,
-            bootstrap: configWithObservability,
-          },
-          spawnerLayer,
-          desktopTelemetryStream: Stream.encodeText(
-            Stream.make('{"version":1,"type":"desktopTelemetryHello","electronPid":123}\n'),
-          ),
-          onReady: Effect.sync(() => {
-            readyCount += 1;
-          }).pipe(Effect.andThen(Deferred.succeed(ready, void 0)), Effect.asVoid),
-          backendOutputLog: {
-            persistFailure: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
-          },
-        });
+          const instance = yield* makeTestInstance({
+            config: {
+              ...baseConfig,
+              bootstrap: configWithObservability,
+            },
+            spawnerLayer,
+            desktopTelemetryStream: Stream.encodeText(
+              Stream.make('{"version":1,"type":"desktopTelemetryHello","electronPid":123}\n'),
+            ),
+            fdCredentialStream: Stream.encodeText(
+              Stream.make(
+                '{"version":1,"type":"set","credentials":{"userId":31,"runtimeTokenId":41,"runtimeApiKey":"sk-runtime-secret","accessToken":"access-secret","accessExpiresAt":2000000000,"policy":{"version":1,"capability":"general_assistant","model":"deepseek-v4-flash","expiresAt":2000000000},"generation":1}}\n',
+              ),
+            ),
+            onReady: Effect.sync(() => {
+              readyCount += 1;
+            }).pipe(Effect.andThen(Deferred.succeed(ready, void 0)), Effect.asVoid),
+            backendOutputLog: {
+              persistFailure: () => Queue.offer(exited, void 0).pipe(Effect.asVoid),
+            },
+          });
 
-        yield* instance.start;
-        yield* Queue.take(exited);
+          yield* instance.start;
+          yield* Queue.take(exited);
 
-        assert.equal(readyCount, 1);
-        assert.isDefined(spawnedCommand);
-        if (spawnedCommand._tag !== "StandardCommand") {
-          throw new Error("Expected backend to spawn a standard command.");
-        }
+          assert.equal(readyCount, 1);
+          assert.isDefined(spawnedCommand);
+          if (spawnedCommand._tag !== "StandardCommand") {
+            throw new Error("Expected backend to spawn a standard command.");
+          }
 
-        assert.equal(spawnedCommand.command, "/electron");
-        assert.deepEqual(spawnedCommand.args, ["/server/bin.mjs", "--bootstrap-fd", "3"]);
-        assert.equal(spawnedCommand.options.cwd, "/server");
-        assert.equal(spawnedCommand.options.extendEnv, true);
-        assert.equal(spawnedCommand.options.stdout, "pipe");
-        assert.equal(spawnedCommand.options.stderr, "pipe");
-        assert.equal(spawnedCommand.options.killSignal, "SIGTERM");
-        assert.isDefined(spawnedCommand.options.forceKillAfter);
-        assert.equal(spawnedCommand.options.additionalFds?.fd4?.type, "input");
-        assert.equal(spawnedCommand.options.additionalFds?.fd5?.type, "output");
-        assert.equal(
-          Duration.toMillis(Duration.fromInputUnsafe(spawnedCommand.options.forceKillAfter)),
-          2_000,
-        );
+          assert.equal(spawnedCommand.command, "/electron");
+          assert.deepEqual(spawnedCommand.args, ["/server/bin.mjs", "--bootstrap-fd", "3"]);
+          assert.equal(spawnedCommand.options.cwd, "/server");
+          assert.equal(spawnedCommand.options.extendEnv, true);
+          assert.equal(spawnedCommand.options.stdout, "pipe");
+          assert.equal(spawnedCommand.options.stderr, "pipe");
+          assert.equal(spawnedCommand.options.killSignal, "SIGTERM");
+          assert.isDefined(spawnedCommand.options.forceKillAfter);
+          assert.equal(spawnedCommand.options.additionalFds?.fd4?.type, "input");
+          assert.equal(spawnedCommand.options.additionalFds?.fd5?.type, "output");
+          assert.equal(spawnedCommand.options.additionalFds?.fd6?.type, "input");
+          assert.equal(
+            Duration.toMillis(Duration.fromInputUnsafe(spawnedCommand.options.forceKillAfter)),
+            2_000,
+          );
+          // @effect-diagnostics preferSchemaOverJson:off
+          const spawnSurface = JSON.stringify({
+            args: spawnedCommand.args,
+            env: spawnedCommand.options.env,
+            bootstrap: yield* decodeBootstrap(bootstrapJson),
+          });
+          assert.notInclude(spawnSurface, "access-secret");
+          assert.notInclude(spawnSurface, "sk-runtime-secret");
+          assert.notInclude(spawnSurface, "refresh-secret");
+          assert.include(credentialJson, "access-secret");
 
-        assert.deepEqual(yield* decodeBootstrap(bootstrapJson), configWithObservability);
-        assert.equal(
-          telemetryJson,
-          '{"version":1,"type":"desktopTelemetryHello","electronPid":123}\n',
-        );
-      }),
-    ),
+          assert.deepEqual(yield* decodeBootstrap(bootstrapJson), configWithObservability);
+          assert.equal(
+            telemetryJson,
+            '{"version":1,"type":"desktopTelemetryHello","electronPid":123}\n',
+          );
+        }),
+      ),
   );
 
   it.effect("preserves the readiness timeout cause and process context", () =>

@@ -3,11 +3,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
-import {
-  AuthAccessStreamError,
-  AuthAccessStreamEvent,
-  EnvironmentAuthorizationError,
-} from "./auth.ts";
+import { EnvironmentAuthorizationError } from "./auth.ts";
 import {
   BackgroundPolicySnapshot,
   ClientActivityReportInput,
@@ -66,16 +62,13 @@ import {
   OrchestrationRpcSchemas,
   OrchestrationGetWorkflowScriptError,
 } from "./orchestration.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
-import {
-  RelayClientInstallFailedError,
-  RelayClientInstallProgressEventSchema,
-  RelayClientStatusSchema,
-} from "./relayClient.ts";
 import {
   ProjectListEntriesError,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
+  ProjectListSkillsError,
+  ProjectListSkillsInput,
+  ProjectListSkillsResult,
   ProjectReadFileError,
   ProjectReadFileInput,
   ProjectReadFileResult,
@@ -127,12 +120,9 @@ import {
 import {
   ServerConfigStreamEvent,
   ServerConfig,
-  ServerProviderUpdateError,
-  ServerProviderUpdateInput,
   ServerLifecycleStreamEvent,
   ServerRemoveKeybindingInput,
   ServerRemoveKeybindingResult,
-  ServerProviderUpdatedPayload,
   ServerSelfUpdateError,
   ServerSelfUpdateInput,
   ServerSelfUpdateProgressEvent,
@@ -172,6 +162,7 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
+  projectsListSkills: "projects.listSkills",
   projectsReadFile: "projects.readFile",
   projectsSearchContents: "projects.searchContents",
   projectsSearchEntries: "projects.searchEntries",
@@ -227,8 +218,6 @@ export const WS_METHODS = {
   // Server meta
   serverProbe: "server.probe",
   serverGetConfig: "server.getConfig",
-  serverRefreshProviders: "server.refreshProviders",
-  serverUpdateProvider: "server.updateProvider",
   serverUpdateServer: "server.updateServer",
   serverUpdateServerWithProgress: "server.updateServerWithProgress",
   serverUpsertKeybinding: "server.upsertKeybinding",
@@ -247,10 +236,6 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
 
-  // Cloud environment methods
-  cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
-  cloudInstallRelayClient: "cloud.installRelayClient",
-
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
   sourceControlCloneRepository: "sourceControl.cloneRepository",
@@ -264,7 +249,6 @@ export const WS_METHODS = {
   subscribeDiscoveredLocalServers: "subscribeDiscoveredLocalServers",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
-  subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
 } as const;
@@ -291,26 +275,6 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
   payload: Schema.Struct({}),
   success: ServerConfig,
   error: Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),
-});
-
-export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
-  payload: Schema.Struct({
-    /**
-     * When supplied, only refresh this specific provider instance. When
-     * omitted, refresh all configured instances — the legacy `refresh()`
-     * behaviour retained for transports that still dispatch untargeted
-     * refreshes.
-     */
-    instanceId: Schema.optional(ProviderInstanceId),
-  }),
-  success: ServerProviderUpdatedPayload,
-  error: EnvironmentAuthorizationError,
-});
-
-export const WsServerUpdateProviderRpc = Rpc.make(WS_METHODS.serverUpdateProvider, {
-  payload: ServerProviderUpdateInput,
-  success: ServerProviderUpdatedPayload,
-  error: Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),
 });
 
 export const WsServerUpdateServerRpc = Rpc.make(WS_METHODS.serverUpdateServer, {
@@ -395,19 +359,6 @@ export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess,
   error: EnvironmentAuthorizationError,
 });
 
-export const WsCloudGetRelayClientStatusRpc = Rpc.make(WS_METHODS.cloudGetRelayClientStatus, {
-  payload: Schema.Struct({}),
-  success: RelayClientStatusSchema,
-  error: EnvironmentAuthorizationError,
-});
-
-export const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRelayClient, {
-  payload: Schema.Struct({}),
-  success: RelayClientInstallProgressEventSchema,
-  error: Schema.Union([RelayClientInstallFailedError, EnvironmentAuthorizationError]),
-  stream: true,
-});
-
 export const WsServerReportClientActivityRpc = Rpc.make(WS_METHODS.serverReportClientActivity, {
   payload: ClientActivityReportInput,
   error: EnvironmentAuthorizationError,
@@ -464,6 +415,12 @@ export const WsProjectsListEntriesRpc = Rpc.make(WS_METHODS.projectsListEntries,
   payload: ProjectListEntriesInput,
   success: ProjectListEntriesResult,
   error: Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),
+});
+
+export const WsProjectsListSkillsRpc = Rpc.make(WS_METHODS.projectsListSkills, {
+  payload: ProjectListSkillsInput,
+  success: ProjectListSkillsResult,
+  error: Schema.Union([ProjectListSkillsError, EnvironmentAuthorizationError]),
 });
 
 export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
@@ -789,13 +746,6 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
-export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
-  payload: Schema.Struct({}),
-  success: AuthAccessStreamEvent,
-  error: Schema.Union([AuthAccessStreamError, EnvironmentAuthorizationError]),
-  stream: true,
-});
-
 export const WsSubscribeBackgroundPolicyRpc = Rpc.make(WS_METHODS.subscribeBackgroundPolicy, {
   payload: Schema.Struct({}),
   success: BackgroundPolicySnapshot,
@@ -810,13 +760,9 @@ export const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeReso
   stream: true,
 });
 
-export const WsRpcGroup = RpcGroup.make(
+export const LocalWsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
-  WsServerRefreshProvidersRpc,
-  WsServerUpdateProviderRpc,
-  WsServerUpdateServerRpc,
-  WsServerUpdateServerWithProgressRpc,
   WsServerUpsertKeybindingRpc,
   WsServerRemoveKeybindingRpc,
   WsServerGetSettingsRpc,
@@ -832,12 +778,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
   WsServerGetBackgroundPolicyRpc,
-  WsCloudGetRelayClientStatusRpc,
-  WsCloudInstallRelayClientRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
   WsProjectsListEntriesRpc,
+  WsProjectsListSkillsRpc,
   WsProjectsReadFileRpc,
   WsProjectsSearchContentsRpc,
   WsProjectsSearchEntriesRpc,
@@ -882,7 +827,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeDiscoveredLocalServersRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
-  WsSubscribeAuthAccessRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
   WsOrchestrationDispatchCommandRpc,

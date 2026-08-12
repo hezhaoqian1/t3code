@@ -1,7 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 
-import { useProjects } from "~/state/entities";
+import { usePrimaryProjects } from "~/state/entities";
 
 import { useHandleNewThread } from "./useHandleNewThread";
 
@@ -19,7 +19,7 @@ export interface ActiveProjectTarget {
  */
 export function useActiveProjectTarget(): ActiveProjectTarget | null {
   const { activeDraftThread, activeThread } = useHandleNewThread();
-  const projects = useProjects();
+  const projects = usePrimaryProjects();
   const thread = activeThread ?? activeDraftThread;
   const threadId = activeThread?.id ?? activeDraftThread?.threadId;
   const project = thread

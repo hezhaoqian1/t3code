@@ -6,8 +6,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
-import { normalizeCliError, sanitizeThreadTitle } from "./TextGenerationUtils.ts";
-import { TextGenerationError } from "@t3tools/contracts";
+import { sanitizeThreadTitle } from "./TextGenerationUtils.ts";
 
 describe("buildCommitMessagePrompt", () => {
   it("includes staged patch and summary in the prompt", () => {
@@ -124,7 +123,7 @@ describe("buildBranchNamePrompt", () => {
     expect(result.prompt).not.toContain("Attachment metadata:");
   });
 
-  it("includes attachment metadata when attachments are provided", () => {
+  it("keeps attachment context bounded and non-identifying", () => {
     const result = buildBranchNamePrompt({
       message: "Fix the layout from screenshot",
       attachments: [
@@ -138,10 +137,14 @@ describe("buildBranchNamePrompt", () => {
       ],
     });
 
-    expect(result.prompt).toContain("Attachment metadata:");
-    expect(result.prompt).toContain("screenshot.png");
-    expect(result.prompt).toContain("image/png");
-    expect(result.prompt).toContain("12345 bytes");
+    expect(result.prompt).toContain("Attachment context:");
+    expect(result.prompt).toContain("1 image attachment provided");
+    expect(result.prompt).not.toContain("screenshot.png");
+    expect(result.prompt).not.toContain("att-123");
+    expect(result.prompt).not.toContain("image/png");
+    expect(result.prompt).not.toContain("12345 bytes");
+    expect(result.prompt).not.toContain("/Users/");
+    expect(result.prompt).not.toContain("attachmentsDir");
   });
 });
 
@@ -168,7 +171,7 @@ describe("buildThreadTitlePrompt", () => {
     );
   });
 
-  it("includes attachment metadata when attachments are provided", () => {
+  it("keeps attachment context bounded and non-identifying", () => {
     const result = buildThreadTitlePrompt({
       message: "Name this thread from the screenshot",
       attachments: [
@@ -182,10 +185,14 @@ describe("buildThreadTitlePrompt", () => {
       ],
     });
 
-    expect(result.prompt).toContain("Attachment metadata:");
-    expect(result.prompt).toContain("thread.png");
-    expect(result.prompt).toContain("image/png");
-    expect(result.prompt).toContain("67890 bytes");
+    expect(result.prompt).toContain("Attachment context:");
+    expect(result.prompt).toContain("1 image attachment provided");
+    expect(result.prompt).not.toContain("thread.png");
+    expect(result.prompt).not.toContain("att-456");
+    expect(result.prompt).not.toContain("image/png");
+    expect(result.prompt).not.toContain("67890 bytes");
+    expect(result.prompt).not.toContain("/Users/");
+    expect(result.prompt).not.toContain("attachmentsDir");
   });
 
   it("regenerates from recent thread contents and identifies the previous title", () => {
@@ -205,7 +212,7 @@ describe("buildThreadTitlePrompt", () => {
       "Do not promote one assistant finding into the thread subject unless the user adopts it as a new goal.",
     );
     expect(result.prompt).toContain(
-      'A subagent-monitoring review that finds a Codex roster bug remains "Review Subagent Monitoring Risks,"',
+      'A subagent-monitoring review that finds a provider-specific roster bug remains "Review Subagent Monitoring Risks,"',
     );
     expect(result.prompt).toContain("Thread contents:");
     expect(result.prompt).toContain("The remaining issue is stale session state");
@@ -243,63 +250,5 @@ describe("sanitizeThreadTitle", () => {
         '  "Reconnect failures after restart because the session state does not recover"  ',
       ),
     ).toBe("Reconnect failures after restart because the se...");
-  });
-});
-
-describe("normalizeCliError", () => {
-  it("detects 'Command not found' and includes CLI name in the message", () => {
-    const error = normalizeCliError(
-      "claude",
-      "generateCommitMessage",
-      new Error("Command not found: claude"),
-      "Something went wrong",
-    );
-
-    expect(error).toBeInstanceOf(TextGenerationError);
-    expect(error.detail).toContain("Claude CLI");
-    expect(error.detail).toContain("not available on PATH");
-  });
-
-  it("uses the CLI name from the first argument for codex", () => {
-    const error = normalizeCliError(
-      "codex",
-      "generateBranchName",
-      new Error("Command not found: codex"),
-      "Something went wrong",
-    );
-
-    expect(error).toBeInstanceOf(TextGenerationError);
-    expect(error.detail).toContain("Codex CLI");
-    expect(error.detail).toContain("not available on PATH");
-  });
-
-  it("returns the error as-is if it is already a TextGenerationError", () => {
-    const existing = new TextGenerationError({
-      operation: "generatePrContent",
-      detail: "Already wrapped",
-    });
-
-    const result = normalizeCliError("claude", "generatePrContent", existing, "fallback");
-
-    expect(result).toBe(existing);
-  });
-
-  it("wraps unknown non-Error values with the fallback message", () => {
-    const result = normalizeCliError("codex", "generateCommitMessage", "string error", "fallback");
-
-    expect(result).toBeInstanceOf(TextGenerationError);
-    expect(result.detail).toBe("fallback");
-  });
-
-  it("does not expose CLI failure details in the public error message", () => {
-    const result = normalizeCliError(
-      "codex",
-      "generateCommitMessage",
-      new Error("request failed with access_token=secret-token"),
-      "Failed to generate a commit message",
-    );
-
-    expect(result.detail).toBe("Failed to generate a commit message");
-    expect(result.message).not.toContain("secret-token");
   });
 });

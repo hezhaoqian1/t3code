@@ -2,8 +2,8 @@
  * ServerSettings - Server-authoritative settings service.
  *
  * Owns persistence, validation, and change notification of settings that affect
- * server-side behavior (binary paths, streaming mode, env mode, custom models,
- * text generation model selection).
+ * server-side behavior such as background activity, environment mode, and
+ * source-control writing style.
  *
  * Follows the same pattern as `keybindings.ts`: JSON file + Cache + PubSub +
  * Semaphore + FileSystem.watch for concurrency and external edit detection.
@@ -11,15 +11,7 @@
  * @module ServerSettings
  */
 import {
-  DEFAULT_TEXT_GENERATION_MODEL,
-  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
-  type ModelSelection,
-  type ProviderInstanceConfig,
-  type ProviderInstanceEnvironmentVariable,
-  ProviderDriverKind,
-  ProviderInstanceId,
   ServerSettings,
   ServerSettingsError,
   type ServerSettingsPatch,
@@ -34,7 +26,6 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
@@ -46,20 +37,11 @@ import { writeFileStringAtomically } from "./atomicWrite.ts";
 import * as ServerConfig from "./config.ts";
 import { type DeepPartial, deepMerge } from "@t3tools/shared/Struct";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
-import {
-  applyServerSettingsPatch,
-  isModelSelectionProviderEnabled,
-} from "@t3tools/shared/serverSettings";
-import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
-
-export { resolveSourceControlWriterModelSelection } from "@t3tools/shared/serverSettings";
+import { applyServerSettingsPatch } from "@t3tools/shared/serverSettings";
 
 const encodeServerSettings = Schema.encodeEffect(ServerSettings);
 const encodeServerSettingsJson = Schema.encodeUnknownEffect(fromJsonStringPretty(ServerSettings));
 const decodeServerSettings = Schema.decodeUnknownEffect(ServerSettings);
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 
 const normalizeServerSettings = (
   settings: ServerSettings,
@@ -76,40 +58,8 @@ const normalizeServerSettings = (
     ),
   );
 
-function providerEnvironmentSecretName(input: {
-  readonly instanceId: string;
-  readonly name: string;
-}): string {
-  return `provider-env-${Buffer.from(input.instanceId, "utf8").toString("base64url")}-${Buffer.from(input.name, "utf8").toString("base64url")}`;
-}
-
-function redactProviderEnvironmentVariable(
-  variable: ProviderInstanceEnvironmentVariable,
-): ProviderInstanceEnvironmentVariable {
-  if (!variable.sensitive) {
-    const { valueRedacted: _omit, ...rest } = variable;
-    return rest;
-  }
-  return {
-    ...variable,
-    value: "",
-    ...(variable.value.length > 0 || variable.valueRedacted ? { valueRedacted: true } : {}),
-  };
-}
-
 export function redactServerSettingsForClient(settings: ServerSettings): ServerSettings {
-  const providerInstances = Object.fromEntries(
-    Object.entries(settings.providerInstances).map(([instanceId, instance]) => [
-      instanceId,
-      instance.environment
-        ? {
-            ...instance,
-            environment: instance.environment.map(redactProviderEnvironmentVariable),
-          }
-        : instance,
-    ]),
-  );
-  return { ...settings, providerInstances };
+  return settings;
 }
 
 export class ServerSettingsService extends Context.Service<
@@ -163,13 +113,12 @@ const makeTest = (overrides: DeepPartial<ServerSettings> = {}) =>
     return {
       start: Effect.void,
       ready: Effect.void,
-      getSettings: Ref.get(currentSettingsRef).pipe(Effect.map(resolveTextGenerationProvider)),
+      getSettings: Ref.get(currentSettingsRef),
       updateSettings: (patch) =>
         Ref.get(currentSettingsRef).pipe(
           Effect.map((currentSettings) => applyServerSettingsPatch(currentSettings, patch)),
           Effect.flatMap(normalizeServerSettings),
           Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
-          Effect.map(resolveTextGenerationProvider),
         ),
       streamChanges: Stream.empty,
       subscribeChanges: Effect.succeed(Stream.empty),
@@ -182,38 +131,11 @@ export const layerTest = (overrides: DeepPartial<ServerSettings> = {}) =>
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 const decodeServerSettingsJsonExit = Schema.decodeUnknownExit(ServerSettingsJson);
 
-function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  return isModelSelectionProviderEnabled(settings, settings.textGenerationModelSelection)
-    ? settings
-    : fallbackTextGenerationProvider(settings);
-}
-
-function fallbackTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  const fallbackEntry = Object.entries(settings.providers).find(([, provider]) => provider.enabled);
-  const fallback = fallbackEntry ? ProviderDriverKind.make(fallbackEntry[0]) : undefined;
-  if (!fallback) {
-    return settings;
-  }
-
-  return {
-    ...settings,
-    textGenerationModelSelection: {
-      instanceId: ProviderInstanceId.make(fallback),
-      model:
-        DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback] ??
-        DEFAULT_MODEL_BY_PROVIDER[fallback] ??
-        DEFAULT_TEXT_GENERATION_MODEL,
-    } satisfies ModelSelection,
-  };
-}
-
 // Values under these keys are compared as a whole — never stripped field-by-field.
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "backgroundActivity",
   "automaticGitFetchInterval",
   "providerHealthRefreshInterval",
-  "sourceControlWriterModelSelection",
-  "textGenerationModelSelection",
 ]);
 
 function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {
@@ -254,7 +176,6 @@ const make = Effect.gen(function* () {
   const { settingsPath } = yield* ServerConfig.ServerConfig;
   const fs = yield* FileSystem.FileSystem;
   const pathService = yield* Path.Path;
-  const secretStore = yield* ServerSecretStore.ServerSecretStore;
   const writeSemaphore = yield* Semaphore.make(1);
   const cacheKey = "settings" as const;
   const changesPubSub = yield* PubSub.unbounded<ServerSettings>();
@@ -312,169 +233,6 @@ const make = Effect.gen(function* () {
   });
 
   const getSettingsFromCache = Cache.get(settingsCache, cacheKey);
-
-  const materializeProviderEnvironmentSecrets = (
-    settings: ServerSettings,
-  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
-    Effect.gen(function* () {
-      const providerInstances: Record<string, ProviderInstanceConfig> = {
-        ...settings.providerInstances,
-      };
-      for (const [instanceId, instance] of Object.entries(settings.providerInstances)) {
-        if (!instance.environment) continue;
-        const environment: ProviderInstanceEnvironmentVariable[] = [];
-        for (const variable of instance.environment) {
-          if (!variable.sensitive || !variable.valueRedacted) {
-            environment.push(variable);
-            continue;
-          }
-          const secret = yield* secretStore
-            .get(providerEnvironmentSecretName({ instanceId, name: variable.name }))
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ServerSettingsError({
-                    settingsPath,
-                    operation: "read-secret",
-                    providerInstanceId: instanceId,
-                    environmentVariable: variable.name,
-                    cause,
-                  }),
-              ),
-            );
-          environment.push({
-            ...variable,
-            value: Option.isSome(secret) ? textDecoder.decode(secret.value) : "",
-          });
-        }
-        providerInstances[instanceId] = {
-          ...instance,
-          environment,
-        } satisfies ProviderInstanceConfig;
-      }
-      return {
-        ...settings,
-        providerInstances: providerInstances as ServerSettings["providerInstances"],
-      };
-    });
-
-  const materializeChanges = (changes: Stream.Stream<ServerSettings>) =>
-    changes.pipe(
-      Stream.mapEffect((settings) =>
-        materializeProviderEnvironmentSecrets(settings).pipe(
-          Effect.catch((error: ServerSettingsError) =>
-            Effect.logWarning("failed to materialize provider environment secrets", {
-              operation: error.operation,
-              providerInstanceId: error.providerInstanceId,
-              environmentVariable: error.environmentVariable,
-              cause: error.cause,
-            }).pipe(Effect.as(settings)),
-          ),
-        ),
-      ),
-      Stream.map(resolveTextGenerationProvider),
-    );
-
-  const persistProviderEnvironmentSecrets = (
-    current: ServerSettings,
-    next: ServerSettings,
-  ): Effect.Effect<ServerSettings, ServerSettingsError> =>
-    Effect.gen(function* () {
-      const providerInstances: Record<string, ProviderInstanceConfig> = {
-        ...next.providerInstances,
-      };
-
-      const nextSecretKeys = new Set<string>();
-      for (const [instanceId, instance] of Object.entries(next.providerInstances)) {
-        if (!instance.environment) continue;
-        const environment: ProviderInstanceEnvironmentVariable[] = [];
-        for (const variable of instance.environment) {
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
-          if (!variable.sensitive) {
-            yield* secretStore.remove(secretName).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new ServerSettingsError({
-                    settingsPath,
-                    operation: "remove-secret",
-                    providerInstanceId: instanceId,
-                    environmentVariable: variable.name,
-                    cause,
-                  }),
-              ),
-            );
-            environment.push(redactProviderEnvironmentVariable(variable));
-            continue;
-          }
-
-          nextSecretKeys.add(secretName);
-          if (!variable.valueRedacted) {
-            if (variable.value.length > 0) {
-              yield* secretStore.set(secretName, textEncoder.encode(variable.value)).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ServerSettingsError({
-                      settingsPath,
-                      operation: "write-secret",
-                      providerInstanceId: instanceId,
-                      environmentVariable: variable.name,
-                      cause,
-                    }),
-                ),
-              );
-              environment.push({ ...variable, value: "", valueRedacted: true });
-            } else {
-              yield* secretStore.remove(secretName).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new ServerSettingsError({
-                      settingsPath,
-                      operation: "remove-secret",
-                      providerInstanceId: instanceId,
-                      environmentVariable: variable.name,
-                      cause,
-                    }),
-                ),
-              );
-              const { valueRedacted: _omit, ...rest } = variable;
-              environment.push(rest);
-            }
-            continue;
-          }
-
-          environment.push(redactProviderEnvironmentVariable(variable));
-        }
-        providerInstances[instanceId] = {
-          ...instance,
-          environment,
-        } satisfies ProviderInstanceConfig;
-      }
-
-      for (const [instanceId, instance] of Object.entries(current.providerInstances)) {
-        for (const variable of instance.environment ?? []) {
-          if (!variable.sensitive) continue;
-          const secretName = providerEnvironmentSecretName({ instanceId, name: variable.name });
-          if (nextSecretKeys.has(secretName)) continue;
-          yield* secretStore.remove(secretName).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ServerSettingsError({
-                  settingsPath,
-                  operation: "remove-stale-secret",
-                  providerInstanceId: instanceId,
-                  environmentVariable: variable.name,
-                  cause,
-                }),
-            ),
-          );
-        }
-      }
-
-      return {
-        ...next,
-        providerInstances: providerInstances as ServerSettings["providerInstances"],
-      };
-    });
 
   const writeSettingsAtomically = Effect.fnUntraced(
     function* (settings: ServerSettings) {
@@ -571,32 +329,24 @@ const make = Effect.gen(function* () {
   return {
     start,
     ready: Deferred.await(startedDeferred),
-    getSettings: getSettingsFromCache.pipe(
-      Effect.flatMap(materializeProviderEnvironmentSecrets),
-      Effect.map(resolveTextGenerationProvider),
-    ),
+    getSettings: getSettingsFromCache,
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const nextPersisted = yield* persistProviderEnvironmentSecrets(
-            current,
-            applyServerSettingsPatch(current, patch),
-          );
-          const next = yield* normalizeServerSettings(nextPersisted);
+          const next = yield* normalizeServerSettings(applyServerSettingsPatch(current, patch));
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
-          const materialized = yield* materializeProviderEnvironmentSecrets(next);
-          return resolveTextGenerationProvider(materialized);
+          return next;
         }),
       ),
     get streamChanges() {
-      return materializeChanges(Stream.fromPubSub(changesPubSub));
+      return Stream.fromPubSub(changesPubSub);
     },
     get subscribeChanges() {
       return PubSub.subscribe(changesPubSub).pipe(
-        Effect.map((subscription) => materializeChanges(Stream.fromSubscription(subscription))),
+        Effect.map((subscription) => Stream.fromSubscription(subscription)),
       );
     },
   } satisfies ServerSettingsService["Service"];

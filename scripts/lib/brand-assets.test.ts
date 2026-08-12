@@ -83,18 +83,19 @@ describe("brand-assets", () => {
     expect(resolveWebAssetBrandForPackageVersion("0.0.29-nightly.20260723.882")).toBe("nightly");
   });
 
-  it("keeps development, nightly, and production icon families separate", () => {
-    expect([
-      BRAND_ASSET_PATHS.developmentIconComposerProject,
-      BRAND_ASSET_PATHS.nightlyIconComposerProject,
-      BRAND_ASSET_PATHS.productionIconComposerProject,
-    ]).toEqual([
-      "assets/dev/app-icon.icon",
-      "assets/nightly/app-icon.icon",
-      "assets/prod/app-icon.icon",
-    ]);
-    expect(BRAND_ASSET_PATHS.developmentDesktopIconPng).toMatch(/^assets\/dev\/blueprint-/);
-    expect(BRAND_ASSET_PATHS.nightlyMacIconPng).toMatch(/^assets\/nightly\/nightly-/);
-    expect(BRAND_ASSET_PATHS.productionMacIconPng).toMatch(/^assets\/prod\/black-/);
+  it("uses the tracked FD icon family for every runtime and web channel", () => {
+    const activePaths = Object.values(BRAND_ASSET_PATHS);
+
+    expect(activePaths).toEqual(
+      expect.arrayContaining([
+        "assets/fd/fangde-ai-1024.png",
+        "assets/fd/fangde-ai.ico",
+        "assets/fd/fangde-ai-16.png",
+        "assets/fd/fangde-ai-32.png",
+        "assets/fd/fangde-ai-180.png",
+      ]),
+    );
+    expect(activePaths.every((path) => path.startsWith("assets/fd/"))).toBe(true);
+    expect(activePaths.some((path) => /^assets\/(?:dev|nightly|prod)\//.test(path))).toBe(false);
   });
 });

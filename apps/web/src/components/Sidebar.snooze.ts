@@ -25,9 +25,17 @@ export function resolveSnoozePresets(
     const time = timeOfDayLabel(wake, timestampFormat);
     return {
       ...preset,
+      label:
+        preset.id === "hour"
+          ? "1 小时后"
+          : preset.id === "evening"
+            ? "今天晚上"
+            : preset.id === "tomorrow"
+              ? "明天"
+              : "下周",
       whenLabel:
         preset.id === "next-week"
-          ? `${wake.toLocaleDateString(undefined, { weekday: "short" })} ${time}`
+          ? `${wake.toLocaleDateString("zh-CN", { weekday: "short" })} ${time}`
           : time,
     };
   });
@@ -49,9 +57,9 @@ export function snoozeWakeDescription(
   startOfToday.setHours(0, 0, 0, 0);
   const dayDelta = Math.floor((wake.getTime() - startOfToday.getTime()) / DAY_MS);
   if (dayDelta === 0) return time;
-  if (dayDelta === 1) return `tomorrow ${time}`;
-  const weekday = wake.toLocaleDateString(undefined, { weekday: "short" });
+  if (dayDelta === 1) return `明天 ${time}`;
+  const weekday = wake.toLocaleDateString("zh-CN", { weekday: "short" });
   if (dayDelta < 7) return `${weekday} ${time}`;
-  const date = wake.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  return `${date}, ${time}`;
+  const date = wake.toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+  return `${date} ${time}`;
 }

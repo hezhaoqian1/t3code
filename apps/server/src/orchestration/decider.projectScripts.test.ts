@@ -299,6 +299,36 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
         ]),
         runtimeMode: "approval-required",
       });
+
+      const enterpriseResult = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-enterprise-turn-start"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("message-enterprise-1"),
+            role: "user",
+            text: "sensitive enterprise prompt",
+            attachments: [],
+          },
+          fdSkillVersionId: 10004,
+          titleSeed: "sensitive enterprise prompt",
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        },
+        readModel,
+      });
+
+      const enterpriseEvents = Array.isArray(enterpriseResult)
+        ? enterpriseResult
+        : [enterpriseResult];
+      expect(enterpriseEvents).toHaveLength(1);
+      expect(enterpriseEvents[0]?.type).toBe("thread.turn-start-requested");
+      if (enterpriseEvents[0]?.type === "thread.turn-start-requested") {
+        expect(enterpriseEvents[0].payload.fdSkillVersionId).toBe(10004);
+        expect("titleSeed" in enterpriseEvents[0].payload).toBe(false);
+      }
     }),
   );
 

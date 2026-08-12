@@ -79,7 +79,7 @@ function SettingsContentLayout() {
             )}
           >
             <div className="flex w-full items-center gap-2">
-              <span className="text-sm font-medium text-foreground">Settings</span>
+              <span className="text-sm font-medium text-foreground">设置</span>
               {showRestoreDefaults ? (
                 <div className="ms-auto flex items-center gap-2">
                   <RestoreDefaultsButton onRestored={handleRestored} />
@@ -96,9 +96,7 @@ function SettingsContentLayout() {
               COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             )}
           >
-            <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
-              Settings
-            </span>
+            <span className="text-xs font-medium tracking-wide text-muted-foreground/70">设置</span>
             {showRestoreDefaults ? (
               <div className="ms-auto flex items-center gap-2">
                 <RestoreDefaultsButton onRestored={handleRestored} />
@@ -120,14 +118,7 @@ function SettingsRouteLayout() {
 }
 
 export const Route = createFileRoute("/settings")({
-  beforeLoad: async ({ context, location }) => {
-    if (
-      context.authGateState.status !== "authenticated" &&
-      context.authGateState.status !== "hosted-static"
-    ) {
-      throw redirect({ to: "/pair", replace: true });
-    }
-
+  beforeLoad: async ({ location }) => {
     if (location.pathname === "/settings") {
       throw redirect({ to: "/settings/general", replace: true });
     }

@@ -28,7 +28,7 @@ export function useResourceTelemetry(): ResourceTelemetryState {
   });
   const retry = useCallback(async () => {
     if (environmentId === null) {
-      throw new Error("No environment is selected.");
+      throw new Error("The local service is not available.");
     }
     const result = await retryCommand({ environmentId, input: {} });
     if (result._tag === "Failure") {

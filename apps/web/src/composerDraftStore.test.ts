@@ -59,7 +59,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
+  clearAllEnterpriseComposerDrafts,
+  clearEnterpriseComposerDraft,
   clearComposerDraftsEnvironment,
+  excludeEnterpriseComposerDraftFromPersistence,
   finalizePromotedDraftThreadByRef,
   markPromotedDraftThread,
   markPromotedDraftThreadByRef,
@@ -69,6 +72,8 @@ import {
   useComposerDraftStore,
   DraftId,
 } from "./composerDraftStore";
+import { createFdAccountStatePublisher } from "./fd/FdAccountProvider";
+import { useFdSkillSelectionStore } from "./fdSkillSelectionStore";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
@@ -342,6 +347,85 @@ describe("composerDraftStore syncPersistedAttachments", () => {
 
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.persistedAttachments).toEqual([]);
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.nonPersistedImageIds).toEqual([image.id]);
+  });
+});
+
+describe("composerDraftStore FD enterprise privacy", () => {
+  const threadId = ThreadId.make("thread-enterprise-private");
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, threadId);
+
+  beforeEach(() => {
+    removeLocalStorageItem(COMPOSER_DRAFT_STORAGE_KEY);
+    useFdSkillSelectionStore.setState({ selectedByThread: {} });
+    useComposerDraftStore.setState({
+      draftsByThreadKey: {},
+      draftThreadsByThreadKey: {},
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      stickyModelSelectionByProvider: {},
+      stickyActiveProvider: null,
+    });
+  });
+
+  afterEach(() => {
+    useFdSkillSelectionStore.setState({ selectedByThread: {} });
+    removeLocalStorageItem(COMPOSER_DRAFT_STORAGE_KEY);
+  });
+
+  it("keeps an FD-selected prompt in memory and excludes it from persisted drafts", () => {
+    useComposerDraftStore.getState().setPrompt(threadRef, "企业敏感查询");
+    useFdSkillSelectionStore.getState().select(threadId, 10004);
+    excludeEnterpriseComposerDraftFromPersistence(threadId);
+
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown;
+      };
+    };
+    const persisted = persistApi.getOptions().partialize(useComposerDraftStore.getState()) as {
+      draftsByThreadKey?: Record<string, unknown>;
+    };
+    expect(
+      persisted.draftsByThreadKey?.[threadKeyFor(threadId, TEST_ENVIRONMENT_ID)],
+    ).toBeUndefined();
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt).toBe("企业敏感查询");
+
+    clearEnterpriseComposerDraft(threadId);
+    useFdSkillSelectionStore.getState().clear(threadId);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt ?? "").toBe("");
+  });
+
+  it("scrubs enterprise drafts and selections when the authenticated user changes", () => {
+    useComposerDraftStore.getState().setPrompt(threadRef, "账号 A 的未发送企业查询");
+    useFdSkillSelectionStore.getState().select(threadId, 10004);
+    excludeEnterpriseComposerDraftFromPersistence(threadId);
+    const publish = createFdAccountStatePublisher(vi.fn());
+    publish({
+      status: "authenticated",
+      policyVersion: 1,
+      profile: { id: 1, username: "account-a", displayName: "账号 A" },
+      capabilities: { generalAssistant: true },
+      expiresAt: 4_102_444_800,
+    });
+
+    publish({
+      status: "authenticated",
+      policyVersion: 1,
+      profile: { id: 2, username: "account-b", displayName: "账号 B" },
+      capabilities: { generalAssistant: true },
+      expiresAt: 4_102_444_800,
+    });
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt ?? "").toBe("");
+    expect(useFdSkillSelectionStore.getState().selectedByThread).toEqual({});
+  });
+
+  it("clears every selected enterprise draft before selections are discarded", () => {
+    useComposerDraftStore.getState().setPrompt(threadRef, "需要清理的企业查询");
+    useFdSkillSelectionStore.getState().select(threadId, 10004);
+
+    clearAllEnterpriseComposerDrafts();
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.prompt ?? "").toBe("");
   });
 });
 
@@ -1048,6 +1132,27 @@ describe("composerDraftStore project draft thread mapping", () => {
     store.setDraftThreadContext(draftId, { startFromOrigin: false });
 
     expect(useComposerDraftStore.getState().getDraftThread(draftId)?.startFromOrigin).toBe(false);
+  });
+
+  it("keeps task-area drafts independent even when they share the staging project", () => {
+    const store = useComposerDraftStore.getState();
+    store.setLogicalProjectDraftThreadId("task:draft-a", projectRef, draftId, {
+      threadId,
+      taskArea: true,
+    });
+    store.setLogicalProjectDraftThreadId("task:draft-b", projectRef, otherDraftId, {
+      threadId: otherThreadId,
+      taskArea: true,
+    });
+
+    expect(store.getDraftSessionByLogicalProjectKey("task:draft-a")).toMatchObject({
+      draftId,
+      taskArea: true,
+    });
+    expect(store.getDraftSessionByLogicalProjectKey("task:draft-b")).toMatchObject({
+      draftId: otherDraftId,
+      taskArea: true,
+    });
   });
 
   it("preserves existing branch and worktree when setProjectDraftThreadId receives undefined", () => {

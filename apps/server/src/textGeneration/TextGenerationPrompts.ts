@@ -2,7 +2,7 @@
  * Shared prompt builders for text generation providers.
  *
  * Extracts the prompt construction logic that is identical across
- * Codex, Claude, and any future CLI-based text generation backends.
+ * the FD DeepSeek text-generation backend.
  *
  * @module textGenerationPrompts
  */
@@ -157,9 +157,9 @@ interface PromptFromMessageInput {
 }
 
 function buildPromptFromMessage(input: PromptFromMessageInput): string {
-  const attachmentLines = (input.attachments ?? []).map(
-    (attachment) => `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
-  );
+  const imageAttachmentCount = (input.attachments ?? []).filter(
+    (attachment) => attachment.type === "image",
+  ).length;
 
   const promptSections = [
     input.instruction,
@@ -171,11 +171,11 @@ function buildPromptFromMessage(input: PromptFromMessageInput): string {
     limitSection(input.message, 8_000),
     ...policyInstruction(input.additionalInstructions),
   ];
-  if (attachmentLines.length > 0) {
+  if (imageAttachmentCount > 0) {
     promptSections.push(
       "",
-      "Attachment metadata:",
-      limitSection(attachmentLines.join("\n"), 4_000),
+      "Attachment context:",
+      `[${imageAttachmentCount} image attachment${imageAttachmentCount === 1 ? "" : "s"} provided; filenames, identifiers, paths, and image bytes are omitted from this text-generation request.]`,
     );
   }
 
@@ -269,7 +269,7 @@ Editorial rules:
 - Return a meaningfully improved title, not a cosmetic paraphrase of the previous title.
 
 Examples of the distinction:
-- A subagent-monitoring review that finds a Codex roster bug remains "Review Subagent Monitoring Risks," not "Codex Roster Bug Review."
+- A subagent-monitoring review that finds a provider-specific roster bug remains "Review Subagent Monitoring Risks," not a provider-branded title.
 - A vague failing-test request later identified as a lazy thread-feed mismatch becomes "Fix Lazy Thread Feed Test," not "Prevent Mobile Feed Regressions."
 - A QR-sharing overhaul that ends with CI and merge work remains about QR sharing, not the PR lifecycle.`;
 }
@@ -287,16 +287,16 @@ function preserveMessageEnd(message: string): string {
 
 function threadTitlePromptSuffix(input: ThreadTitlePromptInput): string {
   const additionalInstructions = policyInstruction(input.policy?.threadTitleInstructions);
-  const attachmentLines = (input.attachments ?? []).map(
-    (attachment) => `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
-  );
+  const imageAttachmentCount = (input.attachments ?? []).filter(
+    (attachment) => attachment.type === "image",
+  ).length;
 
   let suffix = "";
   if (additionalInstructions.length > 0) {
     suffix = `\n${additionalInstructions.join("\n")}`;
   }
-  if (attachmentLines.length > 0) {
-    suffix += `\n\nAttachment metadata:\n${limitSection(attachmentLines.join("\n"), 4_000)}`;
+  if (imageAttachmentCount > 0) {
+    suffix += `\n\nAttachment context:\n[${imageAttachmentCount} image attachment${imageAttachmentCount === 1 ? "" : "s"} provided; filenames, identifiers, paths, and image bytes are omitted from this text-generation request.]`;
   }
   return suffix;
 }

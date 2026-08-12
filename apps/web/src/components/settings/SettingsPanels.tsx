@@ -6,7 +6,6 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   type BackgroundActivityProfile,
   type DesktopUpdateChannel,
-  ProviderDriverKind,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
@@ -17,9 +16,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
-  DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_UNIFIED_SETTINGS,
-  type EnvironmentIdentificationMode,
   MAX_CODE_FONT_SIZE,
   MAX_GLASS_OPACITY,
   MAX_INTERFACE_FONT_SIZE,
@@ -34,11 +31,10 @@ import {
   MIN_TERMINAL_FONT_SIZE,
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
-import { createModelSelection } from "@t3tools/shared/model";
 import * as Duration from "effect/Duration";
 import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
-import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
+import { APP_VERSION } from "../../branding";
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
@@ -46,14 +42,7 @@ import {
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
-import {
-  resolveEnvironmentIdentificationPillLabel,
-  useEnvironmentStageLabel,
-} from "../SidebarStageBackdrop";
 import { isElectron } from "../../env";
-import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useCustomThemes } from "../../hooks/useCustomThemes";
 import {
   readAppearanceModePreference,
@@ -65,20 +54,11 @@ import { useLocalStorage } from "../../hooks/useLocalStorage";
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
-import {
-  getCustomModelOptionsByInstance,
-  resolveAppModelSelectionState,
-} from "../../modelSelection";
-import {
-  applyProviderInstanceSettings,
-  deriveProviderInstanceEntries,
-  sortProviderInstanceEntries,
-} from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { isMacPlatform } from "../../lib/utils";
-import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
-import { useProjects } from "../../state/entities";
-import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
+import { primaryServerObservabilityAtom } from "../../state/server";
+import { useArchivedThreadSnapshot } from "../../lib/archivedThreadsState";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -123,7 +103,6 @@ import {
   durationToSeconds,
   formatDiagnosticsDescription,
   normalizeIntervalSeconds,
-  PROVIDER_HEALTH_INTERVAL_STEP_SECONDS,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
   projectGroupingModeFromToggle,
@@ -141,12 +120,6 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
-
-const ENVIRONMENT_IDENTIFICATION_LABELS: Record<EnvironmentIdentificationMode, string> = {
-  artwork: "Artwork",
-  pill: "Version pill",
-  none: "None",
-};
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -177,7 +150,6 @@ const BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS: Record<BackgroundActivityProfile
 const ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION =
   "Uses custom background intervals with the selected shared power policy.";
 
-const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES: ReadonlyArray<{
   readonly key:
     | "pauseWhenHostLocked"
@@ -223,7 +195,6 @@ function AboutVersionSection() {
 
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
   const selectedUpdateChannel = updateState?.channel ?? "latest";
-  const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL;
 
   const handleUpdateChannelChange = useCallback(
     (channel: DesktopUpdateChannel) => {
@@ -394,34 +365,6 @@ function AboutVersionSection() {
             </Select>
           }
         />
-      ) : selectedHostedAppChannel ? (
-        <SettingsRow
-          title="Update track"
-          description="Switches the hosted app release channel."
-          control={
-            <Select
-              value={selectedHostedAppChannel}
-              onValueChange={(value) => {
-                if (value === selectedHostedAppChannel) return;
-                window.location.assign(
-                  buildHostedChannelSelectionUrl({ channel: value as HostedAppChannel }),
-                );
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Update track">
-                <SelectValue>{HOSTED_APP_CHANNEL_LABEL}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="latest">
-                  Latest
-                </SelectItem>
-                <SelectItem hideIndicator value="nightly">
-                  Nightly
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
       ) : null}
     </>
   );
@@ -440,10 +383,6 @@ export function useSettingsRestore(onRestored?: () => void) {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
 
-  const isTextGenerationModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
   const isBackgroundActivityDirty = hasChangedBackgroundActivitySettings(settings);
 
   const changedSettingLabels = useMemo(
@@ -452,10 +391,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(!followSystem ? ["Follow system"] : []),
       ...(themeHalves !== null ? ["Theme mix"] : []),
       ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
-      ...(settings.environmentIdentificationMode !==
-      DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode
-        ? ["Environment identification"]
-        : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -488,10 +423,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming
         ? ["Stream token by token"]
         : []),
-      ...(settings.enableProviderUpdateChecks !==
-      DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
-        ? ["Provider update checks"]
-        : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
@@ -509,10 +440,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
         ? ["Delete confirmation"]
         : []),
-      ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
     ],
     [
-      isTextGenerationModelDirty,
       isBackgroundActivityDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
@@ -520,7 +449,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
       settings.diffIgnoreWhitespace,
-      settings.environmentIdentificationMode,
       settings.fontFamilyCode,
       settings.fontFamilyComposer,
       settings.fontFamilySans,
@@ -531,7 +459,6 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.fontSizeTerminal,
       settings.glassOpacity,
       settings.enableLegacyTokenStreaming,
-      settings.enableProviderUpdateChecks,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
@@ -607,23 +534,19 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
-      environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       enableLegacyTokenStreaming: DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
-      enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
-      providerHealthRefreshInterval: DEFAULT_UNIFIED_SETTINGS.providerHealthRefreshInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
-      textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
       fontFamilySans: DEFAULT_UNIFIED_SETTINGS.fontFamilySans,
       fontFamilyComposer: DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer,
       fontFamilyCode: DEFAULT_UNIFIED_SETTINGS.fontFamilyCode,
@@ -661,9 +584,6 @@ function BackgroundActivityAdvancedDialog({
   const activeProfile = resolvedBackgroundActivity.profile;
   const automaticGitFetchIntervalSeconds = durationToSeconds(
     resolvedBackgroundActivity.automaticGitFetchInterval,
-  );
-  const providerHealthRefreshIntervalSeconds = durationToSeconds(
-    resolvedBackgroundActivity.providerHealthRefreshInterval,
   );
   const hostPowerMonitorActiveIntervalSeconds = durationToSeconds(
     resolvedBackgroundActivity.hostPowerMonitorActiveInterval,
@@ -753,44 +673,6 @@ function BackgroundActivityAdvancedDialog({
                     <NumberFieldDecrement aria-label="Decrease Git fetch interval" />
                     <NumberFieldInput aria-label="Git fetch interval in seconds" />
                     <NumberFieldIncrement aria-label="Increase Git fetch interval" />
-                  </NumberFieldGroup>
-                </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Provider health interval</div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Refresh provider availability, versions, auth state, and model metadata.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <NumberField
-                  value={providerHealthRefreshIntervalSeconds}
-                  min={0}
-                  step={PROVIDER_HEALTH_INTERVAL_STEP_SECONDS}
-                  size="sm"
-                  className="w-32"
-                  onValueChange={(value) =>
-                    updateSettings(
-                      backgroundActivityOverrideSettings(
-                        settings.backgroundActivity,
-                        resolvedBackgroundActivity,
-                        {
-                          providerHealthRefreshInterval: Duration.seconds(
-                            normalizeIntervalSeconds(value),
-                          ),
-                        },
-                      ),
-                    )
-                  }
-                >
-                  <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease provider health interval" />
-                    <NumberFieldInput aria-label="Provider health interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase provider health interval" />
                   </NumberFieldGroup>
                 </NumberField>
                 <span className="text-xs text-muted-foreground">seconds</span>
@@ -929,9 +811,6 @@ export function AppearanceSettingsPanel() {
   const [isImportThemeOpen, setIsImportThemeOpen] = useState(false);
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
-  const environmentStageLabel = useEnvironmentStageLabel();
-  const showEnvironmentIdentification =
-    resolveEnvironmentIdentificationPillLabel(environmentStageLabel) !== null;
   const glassOpacityRatio =
     (settings.glassOpacity - MIN_GLASS_OPACITY) / (MAX_GLASS_OPACITY - MIN_GLASS_OPACITY);
   const glassOpacitySliderStyle = {
@@ -1003,48 +882,6 @@ export function AppearanceSettingsPanel() {
             </div>
           }
         />
-
-        {showEnvironmentIdentification ? (
-          <SettingsRow
-            {...searchableSetting("environment-identification")}
-            description="Choose how Dev and Nightly environments are identified."
-            resetAction={
-              settings.environmentIdentificationMode !== DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE ? (
-                <SettingResetButton
-                  label="environment identification"
-                  onClick={() =>
-                    updateSettings({
-                      environmentIdentificationMode: DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
-                    })
-                  }
-                />
-              ) : null
-            }
-            control={
-              <Select
-                value={settings.environmentIdentificationMode}
-                onValueChange={(value) => {
-                  if (value === "artwork" || value === "pill" || value === "none") {
-                    updateSettings({ environmentIdentificationMode: value });
-                  }
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-40" aria-label="Environment identification">
-                  <SelectValue>
-                    {ENVIRONMENT_IDENTIFICATION_LABELS[settings.environmentIdentificationMode]}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {Object.entries(ENVIRONMENT_IDENTIFICATION_LABELS).map(([value, label]) => (
-                    <SelectItem hideIndicator key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
-          />
-        ) : null}
       </SettingsSection>
 
       <TypographySection />
@@ -1567,7 +1404,6 @@ function AutoSettleDaysInput({
 const LEGACY_FEATURE_TARGET_IDS: ReadonlySet<string> = new Set([
   "legacy-plan-mode",
   "legacy-token-streaming",
-  "legacy-sidebar",
 ]);
 
 /**
@@ -1646,19 +1482,6 @@ function LegacyFeaturesSection() {
                 />
               }
             />
-            <SettingsRow
-              {...searchableSetting("legacy-sidebar")}
-              description="Brings back the original sidebar with per-project thread trees. The default sidebar shows one flat list: active work as rich cards, settled threads as compact rows."
-              control={
-                <Switch
-                  checked={settings.legacySidebarEnabled}
-                  onCheckedChange={(checked) =>
-                    updateSettings({ legacySidebarEnabled: Boolean(checked) })
-                  }
-                  aria-label="Sidebar (legacy)"
-                />
-              }
-            />
           </div>
         </CollapsiblePanel>
       </Collapsible>
@@ -1674,7 +1497,6 @@ export function GeneralSettingsPanel() {
     readLastEnabledProjectGroupingMode(),
   );
   const observability = useAtomValue(primaryServerObservabilityAtom);
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
@@ -1683,28 +1505,6 @@ export function GeneralSettingsPanel() {
     otlpMetricsUrl: observability?.otlpMetricsUrl,
   });
 
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
-  const textGenInstanceId = textGenerationModelSelection.instanceId;
-  const textGenModel = textGenerationModelSelection.model;
-  const textGenModelOptions = textGenerationModelSelection.options;
-  const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
-    applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
-  );
-  const textGenInstanceEntry = textGenerationModelInstanceEntries.find(
-    (entry) => entry.instanceId === textGenInstanceId,
-  );
-  const textGenProvider: ProviderDriverKind =
-    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
-  const textGenerationModelOptionsByInstance = getCustomModelOptionsByInstance(
-    settings,
-    serverProviders,
-    textGenInstanceId,
-    textGenModel,
-  );
-  const isTextGenerationModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
   const resolvedBackgroundActivity = resolveServerBackgroundActivitySettings(settings);
   const activeBackgroundActivityProfile = resolvedBackgroundActivity.profile;
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
@@ -1724,7 +1524,7 @@ export function GeneralSettingsPanel() {
       <SettingsSection title="General">
         <SettingsRow
           {...searchableSetting("project-grouping")}
-          description="Combine matching repositories across environments."
+          description="Combine related repository worktrees."
           resetAction={
             settings.sidebarProjectGroupingMode !==
             DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode ? (
@@ -1868,39 +1668,12 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("provider-update-checks")}
-          description="Check installed provider CLIs for newer available versions."
-          resetAction={
-            settings.enableProviderUpdateChecks !==
-            DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks ? (
-              <SettingResetButton
-                label="provider update checks"
-                onClick={() =>
-                  updateSettings({
-                    enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Switch
-              checked={settings.enableProviderUpdateChecks}
-              onCheckedChange={(checked) =>
-                updateSettings({ enableProviderUpdateChecks: Boolean(checked) })
-              }
-              aria-label="Check provider versions"
-            />
-          }
-        />
-
-        <SettingsRow
           title={
             <span className="inline-flex items-center gap-1.5">
               Background activity
               <PolicyTooltip>
-                This shared policy gates background work such as Git refreshes and provider health
-                probes after their individual intervals elapse.
+                This shared policy gates background Git refreshes after their configured interval
+                elapses.
               </PolicyTooltip>
             </span>
           }
@@ -2131,84 +1904,10 @@ export function GeneralSettingsPanel() {
             />
           }
         />
-
-        <SettingsRow
-          {...searchableSetting("text-generation-model")}
-          description="Default model for generated text like thread titles and source control content. Source control settings can override it with a dedicated source control writer model."
-          resetAction={
-            isTextGenerationModelDirty ? (
-              <SettingResetButton
-                label="text generation model"
-                onClick={() =>
-                  updateSettings({
-                    textGenerationModelSelection:
-                      DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <ProviderModelPicker
-                activeInstanceId={textGenInstanceId}
-                model={textGenModel}
-                lockedProvider={null}
-                instanceEntries={textGenerationModelInstanceEntries}
-                modelOptionsByInstance={textGenerationModelOptionsByInstance}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onInstanceModelChange={(instanceId, model) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: createModelSelection(instanceId, model),
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-              <TraitsPicker
-                provider={textGenProvider}
-                models={
-                  // Use the exact instance's models (rather than the
-                  // first-kind-match) so a custom text-gen instance like
-                  // `codex_personal` gets its own model list, not the
-                  // default Codex one.
-                  textGenInstanceEntry?.models ?? []
-                }
-                model={textGenModel}
-                prompt=""
-                onPromptChange={() => {}}
-                modelOptions={textGenModelOptions}
-                allowPromptInjectedEffort={false}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onModelOptionsChange={(nextOptions) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: createModelSelection(
-                          textGenInstanceId,
-                          textGenModel,
-                          nextOptions,
-                        ),
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-            </div>
-          }
-        />
       </SettingsSection>
 
       <SettingsSection title="About">
-        {isElectron || HOSTED_APP_CHANNEL ? (
+        {isElectron ? (
           <AboutVersionSection />
         ) : (
           <SettingsRow
@@ -2233,52 +1932,37 @@ export function GeneralSettingsPanel() {
 }
 
 export function ArchivedThreadsPanel() {
-  const projects = useProjects();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
-  const environmentIds = useMemo(
-    () => [...new Set(projects.map((project) => project.environmentId))],
-    [projects],
-  );
   const {
-    snapshots: archivedSnapshots,
+    snapshot: archivedSnapshot,
     error: archiveError,
     isLoading: isLoadingArchive,
     refresh: refreshArchivedThreads,
-  } = useArchivedThreadSnapshots(environmentIds);
+  } = useArchivedThreadSnapshot(primaryEnvironmentId);
 
   const archivedGroups = useMemo(() => {
-    const projectsByEnvironmentAndId = new Map(
-      archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-        snapshot.projects.map(
-          (project) =>
-            [
-              `${environmentId}:${project.id}`,
-              {
-                id: project.id,
-                environmentId,
-                name: project.title,
-                cwd: project.workspaceRoot,
-              },
-            ] as const,
-        ),
-      ),
-    );
-    const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
-      snapshot.threads.map((thread) => ({
-        ...thread,
-        environmentId,
-      })),
-    );
+    if (archivedSnapshot === null || primaryEnvironmentId === null) return [];
+    const archivedProjects = archivedSnapshot.projects.map((project) => ({
+      id: project.id,
+      environmentId: primaryEnvironmentId,
+      name: project.title,
+      cwd: project.workspaceRoot,
+    }));
+    const threads = archivedSnapshot.threads.map((thread) => ({
+      ...thread,
+      environmentId: primaryEnvironmentId,
+    }));
+    const projectsById = new Map(archivedProjects.map((project) => [project.id, project] as const));
 
-    const archivedProjects = Array.from(projectsByEnvironmentAndId.values());
     const groups: Array<{
       readonly project: (typeof archivedProjects)[number];
       readonly threads: Array<(typeof threads)[number]>;
     }> = [];
-    for (const project of archivedProjects) {
+    for (const project of projectsById.values()) {
       const projectThreads: Array<(typeof threads)[number]> = [];
       for (const thread of threads) {
-        if (thread.projectId === project.id && thread.environmentId === project.environmentId) {
+        if (thread.projectId === project.id) {
           projectThreads.push(thread);
         }
       }
@@ -2294,7 +1978,7 @@ export function ArchivedThreadsPanel() {
       }
     }
     return groups;
-  }, [archivedSnapshots]);
+  }, [archivedSnapshot, primaryEnvironmentId]);
 
   const handleArchivedThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
@@ -2368,7 +2052,7 @@ export function ArchivedThreadsPanel() {
             }
             description={
               isLoadingArchive
-                ? "Checking connected environments."
+                ? "Checking the local archive."
                 : (archiveError ?? "Archived threads will appear here.")
             }
           />

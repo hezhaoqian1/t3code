@@ -192,7 +192,7 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
       descriptionParts.push(`#${thread.branch}`);
     }
     if (thread.id === input.activeThreadId) {
-      descriptionParts.push("Current thread");
+      descriptionParts.push("当前任务");
     }
 
     const leadingContent = input.renderLeadingContent?.(thread);
@@ -291,14 +291,14 @@ export function filterCommandPaletteGroups(input: {
     if (input.projectSearchItems.length > 0) {
       searchableGroups.push({
         value: "projects-search",
-        label: "Projects",
+        label: "工作空间",
         items: input.projectSearchItems,
       });
     }
     if (input.threadSearchItems.length > 0) {
       searchableGroups.push({
         value: "threads-search",
-        label: "Threads",
+        label: "任务",
         items: input.threadSearchItems,
       });
     }
@@ -367,7 +367,7 @@ export function buildBrowseGroups(input: {
     });
   }
 
-  return [{ value: "directories", label: "Directories", items }];
+  return [{ value: "directories", label: "目录", items }];
 }
 
 export function getCommandPaletteMode(input: {
@@ -386,12 +386,12 @@ export function buildRootGroups(input: {
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
   if (input.actionItems.length > 0) {
-    groups.push({ value: "actions", label: "Actions", items: input.actionItems });
+    groups.push({ value: "actions", label: "操作", items: input.actionItems });
   }
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent Threads",
+      label: "最近任务",
       items: input.recentThreadItems,
     });
   }
@@ -401,12 +401,12 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "搜索操作、工作空间和任务...";
     case "root-browse":
-      return "Enter project path (e.g. ~/projects/my-app)";
+      return "输入工作空间路径（如 ~/projects/my-app）";
     case "submenu":
-      return "Search...";
+      return "搜索...";
     case "submenu-browse":
-      return "Enter path (e.g. ~/projects/my-app)";
+      return "输入路径（如 ~/projects/my-app）";
   }
 }

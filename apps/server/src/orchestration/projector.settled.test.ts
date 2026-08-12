@@ -42,7 +42,7 @@ it.effect("projects settled lifecycle events", () =>
           threadId: ThreadId.make("thread-1"),
           projectId: ProjectId.make("project-1"),
           title: "Thread",
-          modelSelection: { provider: "codex", model: "gpt-5.4" },
+          modelSelection: { instanceId: "fd-deepseek", model: "deepseek-v4-flash" },
           runtimeMode: "full-access",
           interactionMode: "default",
           branch: null,

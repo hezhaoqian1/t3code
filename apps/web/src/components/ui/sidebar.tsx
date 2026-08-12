@@ -249,8 +249,8 @@ function Sidebar({
             }
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>Sidebar</SheetTitle>
-              <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+              <SheetTitle>侧栏</SheetTitle>
+              <SheetDescription>显示移动端侧栏。</SheetDescription>
             </SheetHeader>
             <div
               className={cn(
@@ -338,7 +338,7 @@ function SidebarTrigger({ className, onClick, ...props }: React.ComponentProps<t
       {...props}
     >
       {isOpen ? <PanelLeftCloseIcon /> : <PanelLeftIcon />}
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">切换侧栏</span>
     </Button>
   );
 }
@@ -376,8 +376,8 @@ function SidebarRail({
   } | null>(null);
   const resolvedResizable = sidebarInstance?.resizable ?? null;
   const canResize = resolvedResizable !== null && open;
-  const railLabel = canResize ? "Resize Sidebar" : "Toggle Sidebar";
-  const railTitle = canResize ? "Drag to resize sidebar" : "Toggle Sidebar";
+  const railLabel = canResize ? "调整侧栏宽度" : "切换侧栏";
+  const railTitle = canResize ? "拖动调整侧栏宽度" : "切换侧栏";
 
   const stopResize = React.useCallback(
     (pointerId: number) => {

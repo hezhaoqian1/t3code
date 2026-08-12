@@ -178,6 +178,13 @@ function providerLogPath(directory: string, prefix: string, threadSegment: strin
 }
 
 function shouldPersist(stream: EventNdjsonStream, event: unknown): boolean {
+  if (typeof event === "object" && event !== null) {
+    try {
+      if (Reflect.get(event, "persistence") === "memory-only") return false;
+    } catch {
+      return false;
+    }
+  }
   if (stream !== "canonical" || typeof event !== "object" || event === null) {
     return true;
   }

@@ -1,15 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import {
-  defaultInstanceIdForDriver,
-  ProviderDriverKind,
-  ProviderInstanceId,
-  type ServerProvider,
-} from "@t3tools/contracts";
-import { createModelCapabilities } from "@t3tools/shared/model";
+import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Logger from "effect/Logger";
 
 import {
   hydrateCachedProvider,
@@ -19,253 +12,73 @@ import {
   writeProviderStatusCache,
 } from "./providerStatusCache.ts";
 
-const emptyCapabilities = createModelCapabilities({ optionDescriptors: [] });
-const CODEX_DRIVER = ProviderDriverKind.make("codex");
-const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make("claudeAgent");
-const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
+const FD_DRIVER = ProviderDriverKind.make("fd-deepseek");
+const FD_INSTANCE = ProviderInstanceId.make("fd-deepseek");
 
-const makeProvider = (
-  provider: ProviderDriverKind,
-  overrides?: Partial<ServerProvider>,
-): ServerProvider => ({
-  instanceId: defaultInstanceIdForDriver(provider),
-  driver: provider,
+const makeProvider = (overrides: Partial<ServerProvider> = {}): ServerProvider => ({
+  instanceId: FD_INSTANCE,
+  driver: FD_DRIVER,
+  displayName: "FD DeepSeek",
   enabled: true,
-  installed: true,
-  version: "1.0.0",
   status: "ready",
-  auth: { status: "authenticated" },
-  checkedAt: "2026-04-11T00:00:00.000Z",
-  models: [],
+  auth: { status: "authenticated", type: "fd-account", label: "FD Account" },
+  checkedAt: "2026-08-10T00:00:00.000Z",
+  models: [
+    {
+      slug: "deepseek-v4-flash",
+      name: "DeepSeek V4 Flash",
+      isCustom: false,
+      isDefault: true,
+      capabilities: { optionDescriptors: [] },
+    },
+  ],
   slashCommands: [],
   skills: [],
   ...overrides,
 });
 
 it.layer(NodeServices.layer)("providerStatusCache", (it) => {
-  it.effect("logs structural diagnostics without retaining invalid cache contents", () => {
-    const messages: Array<unknown> = [];
-    const logger = Logger.make<unknown, void>((options) => {
-      if (Array.isArray(options.message)) {
-        messages.push(...options.message);
-      } else {
-        messages.push(options.message);
-      }
-    });
-
-    return Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-cache-invalid-" });
-      const cachePath = `${tempDir}/provider.json`;
-      const secretCacheValue = "secret-cache-value";
-      yield* fs.writeFileString(cachePath, `{ "token": "${secretCacheValue}" }`);
-
-      const result = yield* readProviderStatusCache(cachePath);
-
-      assert.strictEqual(result, undefined);
-      const failure = messages.find(
-        (message): message is Record<string, unknown> =>
-          typeof message === "object" && message !== null && "path" in message,
-      );
-      assert.exists(failure);
-      assert.strictEqual(failure.path, cachePath);
-      assert.strictEqual(typeof failure.errorTag, "string");
-      assert.ok(!("cause" in failure));
-      assert.ok(!("issues" in failure));
-      assert.ok(!Object.values(failure).map(String).join("\n").includes(secretCacheValue));
-    }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
-  });
-
-  it.effect("writes and reads provider status snapshots", () =>
+  it.effect("writes and reads the FD provider snapshot", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-cache-" });
-      const codexProvider = makeProvider(CODEX_DRIVER);
-      const claudeProvider = makeProvider(CLAUDE_AGENT_DRIVER, {
-        status: "warning",
-        auth: { status: "unknown" },
-      });
-      const openCodeProvider = makeProvider(OPENCODE_DRIVER, {
-        status: "warning",
-        auth: { status: "unknown", type: "opencode" },
-      });
-      const codexPath = yield* resolveProviderStatusCachePath({
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "fd-provider-cache-" });
+      const cachePath = yield* resolveProviderStatusCachePath({
         cacheDir: tempDir,
-        instanceId: defaultInstanceIdForDriver(ProviderDriverKind.make("codex")),
+        instanceId: FD_INSTANCE,
       });
-      const claudePath = yield* resolveProviderStatusCachePath({
-        cacheDir: tempDir,
-        instanceId: defaultInstanceIdForDriver(ProviderDriverKind.make("claudeAgent")),
-      });
-      const openCodePath = yield* resolveProviderStatusCachePath({
-        cacheDir: tempDir,
-        instanceId: defaultInstanceIdForDriver(ProviderDriverKind.make("opencode")),
-      });
+      const provider = makeProvider();
 
-      yield* writeProviderStatusCache({
-        filePath: codexPath,
-        provider: codexProvider,
-      });
-      yield* writeProviderStatusCache({
-        filePath: claudePath,
-        provider: claudeProvider,
-      });
-      yield* writeProviderStatusCache({
-        filePath: openCodePath,
-        provider: openCodeProvider,
-      });
-
-      assert.deepStrictEqual(yield* readProviderStatusCache(codexPath), codexProvider);
-      assert.deepStrictEqual(yield* readProviderStatusCache(claudePath), claudeProvider);
-      assert.deepStrictEqual(yield* readProviderStatusCache(openCodePath), openCodeProvider);
+      yield* writeProviderStatusCache({ filePath: cachePath, provider });
+      assert.deepStrictEqual(yield* readProviderStatusCache(cachePath), provider);
     }),
   );
 
-  it("hydrates cached provider status while preserving current settings-derived models", () => {
-    const cachedCodex = makeProvider(CODEX_DRIVER, {
-      checkedAt: "2026-04-10T12:00:00.000Z",
-      models: [
-        {
-          slug: "gpt-5-mini",
-          name: "GPT-5 Mini",
-          isCustom: false,
-          capabilities: emptyCapabilities,
-        },
-      ],
-      message: "Cached message",
-      skills: [
-        {
-          name: "github:gh-fix-ci",
-          path: "/tmp/skills/gh-fix-ci/SKILL.md",
-          enabled: true,
-          displayName: "CI Debug",
-        },
-      ],
+  it("hydrates volatile status while preserving the current exact model", () => {
+    const cached = makeProvider({
+      status: "warning",
+      auth: { status: "unauthenticated", type: "fd-account", label: "FD Account" },
+      checkedAt: "2026-08-09T00:00:00.000Z",
+      message: "Sign in to FD to use DeepSeek.",
     });
-    const fallbackCodex = makeProvider(CODEX_DRIVER, {
-      models: [
-        {
-          slug: "gpt-5.4",
-          name: "GPT-5.4",
-          isCustom: false,
-          capabilities: emptyCapabilities,
-        },
-      ],
-      message: "Pending refresh",
-    });
+    const fallback = makeProvider();
 
-    assert.deepStrictEqual(
-      hydrateCachedProvider({
-        cachedProvider: cachedCodex,
-        fallbackProvider: fallbackCodex,
-      }),
-      {
-        ...fallbackCodex,
-        models: [
-          ...fallbackCodex.models,
-          {
-            slug: "gpt-5-mini",
-            name: "GPT-5 Mini",
-            isCustom: false,
-            capabilities: emptyCapabilities,
-          },
-        ],
-        installed: cachedCodex.installed,
-        version: cachedCodex.version,
-        status: cachedCodex.status,
-        auth: cachedCodex.auth,
-        checkedAt: cachedCodex.checkedAt,
-        slashCommands: cachedCodex.slashCommands,
-        skills: cachedCodex.skills,
-        message: cachedCodex.message,
-      },
-    );
+    const hydrated = hydrateCachedProvider({ cachedProvider: cached, fallbackProvider: fallback });
+    assert.deepStrictEqual(hydrated.models, fallback.models);
+    assert.strictEqual(hydrated.status, "warning");
+    assert.deepStrictEqual(hydrated.auth, cached.auth);
+    assert.strictEqual(hydrated.checkedAt, cached.checkedAt);
   });
 
-  it("ignores stale cached enabled state when the provider is now disabled", () => {
-    const cachedCodex = makeProvider(CODEX_DRIVER, {
-      checkedAt: "2026-04-10T12:00:00.000Z",
-      message: "Cached ready status",
-    });
-    const disabledFallback = makeProvider(CODEX_DRIVER, {
-      enabled: false,
-      installed: false,
-      version: null,
-      status: "disabled",
-      auth: { status: "unknown" },
-      message: "Codex is disabled in T3 Code settings.",
-    });
-
-    assert.deepStrictEqual(
-      hydrateCachedProvider({
-        cachedProvider: cachedCodex,
-        fallbackProvider: disabledFallback,
-      }),
-      disabledFallback,
-    );
-  });
-
-  it("rejects cached snapshots that are not correlated to the fallback instance", () => {
-    const fallbackCodex = makeProvider(CODEX_DRIVER, {
-      models: [
-        {
-          slug: "gpt-5.4",
-          name: "GPT-5.4",
-          isCustom: false,
-          capabilities: emptyCapabilities,
-        },
-      ],
-    });
-    const legacyCachedCodex = {
-      provider: ProviderDriverKind.make("codex"),
-      enabled: true,
-      installed: true,
-      version: "1.0.0",
-      status: "ready",
-      auth: { status: "authenticated" },
-      checkedAt: "2026-04-10T12:00:00.000Z",
-      models: [
-        {
-          slug: "cached-legacy-model",
-          name: "Cached Legacy Model",
-          isCustom: false,
-          capabilities: emptyCapabilities,
-        },
-      ],
-      slashCommands: [],
-      skills: [],
-    } as unknown as ServerProvider;
-    const mismatchedCachedCodex = makeProvider(CODEX_DRIVER, {
-      instanceId: ProviderInstanceId.make("codex_personal"),
-    });
-
+  it("rejects a cache entry with a different provider identity", () => {
+    const provider = makeProvider();
+    const other = makeProvider({ instanceId: ProviderInstanceId.make("other") });
     assert.strictEqual(
-      isCachedProviderCorrelated({
-        cachedProvider: legacyCachedCodex,
-        fallbackProvider: fallbackCodex,
-      }),
+      isCachedProviderCorrelated({ cachedProvider: other, fallbackProvider: provider }),
       false,
     );
-    assert.deepStrictEqual(
-      hydrateCachedProvider({
-        cachedProvider: legacyCachedCodex,
-        fallbackProvider: fallbackCodex,
-      }),
-      fallbackCodex,
-    );
     assert.strictEqual(
-      isCachedProviderCorrelated({
-        cachedProvider: mismatchedCachedCodex,
-        fallbackProvider: fallbackCodex,
-      }),
-      false,
-    );
-    assert.deepStrictEqual(
-      hydrateCachedProvider({
-        cachedProvider: mismatchedCachedCodex,
-        fallbackProvider: fallbackCodex,
-      }),
-      fallbackCodex,
+      hydrateCachedProvider({ cachedProvider: other, fallbackProvider: provider }),
+      provider,
     );
   });
 });

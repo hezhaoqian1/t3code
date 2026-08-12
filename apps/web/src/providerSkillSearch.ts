@@ -71,7 +71,10 @@ export function searchProviderSkills(
   query: string,
   limit = Number.POSITIVE_INFINITY,
 ): ServerProviderSkill[] {
-  const enabledSkills = skills.filter((skill) => skill.enabled);
+  // Managed FD Skills have a separate picker and an enterprise execution
+  // boundary. Keeping them out of the native `$skill` menu prevents a token
+  // insertion from accidentally selecting a local-looking route.
+  const enabledSkills = skills.filter((skill) => skill.enabled && skill.scope !== "fd-managed");
   const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
 
   if (!normalizedQuery) {

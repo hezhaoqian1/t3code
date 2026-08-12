@@ -127,6 +127,35 @@ describe("EventNdjsonLogger", () => {
     }),
   );
 
+  it.effect("never persists memory-only enterprise events in any log stream", () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const secret = "enterprise customer payload";
+
+      try {
+        for (const stream of ["native", "canonical", "orchestration"] as const) {
+          const basePath = NodePath.join(tempDir, `provider-${stream}.ndjson`);
+          const logger = yield* makeEventNdjsonLogger(basePath, { stream, batchWindowMs: 0 });
+          assert.exists(logger);
+          if (!logger) continue;
+          yield* logger.write(
+            { type: "content.delta", persistence: "memory-only", payload: { delta: secret } },
+            ThreadId.make("thread-enterprise"),
+          );
+          yield* logger.close();
+          const threadPath = ownedLogPath(basePath, "thread-enterprise");
+          assert.equal(NodeFS.existsSync(threadPath), false);
+        }
+        const allFiles = NodeFS.readdirSync(tempDir);
+        for (const file of allFiles) {
+          assert.notInclude(NodeFS.readFileSync(NodePath.join(tempDir, file), "utf8"), secret);
+        }
+      } finally {
+        NodeFS.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
   it.effect(
     "falls back to a global segment when orchestration thread id is missing or invalid",
     () =>

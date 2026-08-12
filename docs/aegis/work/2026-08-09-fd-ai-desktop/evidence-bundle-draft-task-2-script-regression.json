@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-2-script-regression",
+  "type": "test",
+  "source": "vp test and @t3tools/scripts typecheck",
+  "summary": "Four focused script test files passed 108 tests; scripts package typecheck passed.",
+  "verifier": "Vitest and tsgo exit code 0"
+}

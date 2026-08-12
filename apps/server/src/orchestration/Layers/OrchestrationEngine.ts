@@ -29,6 +29,7 @@ import {
   orchestrationCommandDuration,
 } from "../../observability/Metrics.ts";
 import { toPersistenceSqlError } from "../../persistence/Errors.ts";
+import { FdEnterpriseThreadRuntime } from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
 import { OrchestrationEventStore } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepository } from "../../persistence/Services/OrchestrationCommandReceipts.ts";
 import {
@@ -83,6 +84,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const projectionPipeline = yield* OrchestrationProjectionPipeline;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const crypto = yield* Crypto.Crypto;
+  const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
@@ -213,6 +215,26 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         commandReadModel = committedCommand.nextCommandReadModel;
+        // Stage the sensitive user text only after the durable lifecycle
+        // command has committed. A rejected command must never leave a ghost
+        // message in the process-local enterprise overlay.
+        if (
+          envelope.command.type === "thread.turn.start" &&
+          envelope.command.fdSkillVersionId !== undefined
+        ) {
+          if (Option.isNone(enterpriseRuntime)) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail: "FD Enterprise thread runtime is unavailable.",
+            });
+          }
+          yield* enterpriseRuntime.value.stageTurn({
+            threadId: envelope.command.threadId,
+            messageId: envelope.command.message.messageId,
+            text: envelope.command.message.text,
+            createdAt: envelope.command.createdAt,
+          });
+        }
         for (const [index, event] of committedCommand.committedEvents.entries()) {
           yield* PubSub.publish(eventPubSub, event);
           if (index === 0) {

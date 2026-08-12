@@ -41,7 +41,7 @@ import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
 import { runBrowserViewportMutation } from "~/browser/browserViewportActions";
 import { previewRuntimeTabId } from "~/browser/previewRuntimeTabId";
 import { isElectron } from "~/env";
-import { useEnvironments } from "~/state/environments";
+import { usePrimaryEnvironmentId } from "~/state/environments";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -244,23 +244,10 @@ const raisePreviewAutomationHostError = (
 };
 
 export function PreviewAutomationHosts() {
-  const { environments } = useEnvironments();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   if (!isElectron || !previewBridge?.automation) return null;
-  return (
-    <>
-      {/*
-       * Host lifetime follows the desktop runtime's environment connections,
-       * not the routed thread. This keeps background threads automatable and
-       * lets the subscription runtime own reconnects for every saved target.
-       */}
-      {environments.map((environment) => (
-        <PreviewAutomationHost
-          key={environment.environmentId}
-          environmentId={environment.environmentId}
-        />
-      ))}
-    </>
-  );
+  if (primaryEnvironmentId === null) return null;
+  return <PreviewAutomationHost environmentId={primaryEnvironmentId} />;
 }
 
 function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId }) {

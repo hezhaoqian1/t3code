@@ -1,11 +1,11 @@
-import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
+import { Outlet, createFileRoute } from "@tanstack/react-router";
 import { useAtomValue } from "@effect/atom-react";
 import { useEffect, useMemo } from "react";
 
 import { isCommandPaletteOpen } from "../commandPaletteBus";
-import { useClientSettings, useLegacySidebarEnabled } from "../hooks/useSettings";
+import { useClientSettings } from "../hooks/useSettings";
 import { openCommandPalette } from "../commandPaletteBus";
-import { useProjects } from "../state/entities";
+import { usePrimaryProjects } from "../state/entities";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { selectProjectGroupingSettings } from "../logicalProject";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
@@ -21,16 +21,22 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { primaryServerKeybindingsAtom } from "~/state/server";
+import { isElectron } from "../env";
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
   const selectedThreadKeysSize = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
-  const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
-    useHandleNewThread();
+  const {
+    activeDraftThread,
+    activeThread,
+    defaultProjectRef,
+    handleNewTask,
+    handleNewThread,
+    routeThreadRef,
+  } = useHandleNewThread();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
-  const legacySidebarEnabled = useLegacySidebarEnabled();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const projects = useProjects();
+  const projects = usePrimaryProjects();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupCount = useMemo(
     () =>
@@ -38,7 +44,6 @@ function ChatRouteGlobalShortcuts() {
         projects,
         settings: projectGroupingSettings,
         primaryEnvironmentId,
-        resolveEnvironmentLabel: () => null,
       }).length,
     [primaryEnvironmentId, projectGroupingSettings, projects],
   );
@@ -80,6 +85,10 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.newLocal") {
         event.preventDefault();
         event.stopPropagation();
+        if (isElectron) {
+          void handleNewTask();
+          return;
+        }
         void startNewThreadFromContext({
           activeDraftThread,
           activeThread: activeThread ?? undefined,
@@ -92,10 +101,11 @@ function ChatRouteGlobalShortcuts() {
       if (command === "chat.new") {
         event.preventDefault();
         event.stopPropagation();
-        // The default sidebar routes creation through the command palette
-        // whenever there is a real choice to make; the legacy sidebar (and
-        // single-project setups) keep the immediate contextual create.
-        if (!legacySidebarEnabled && projectGroupCount > 1) {
+        if (isElectron) {
+          void handleNewTask();
+          return;
+        }
+        if (projectGroupCount > 1) {
           openCommandPalette({ open: "new-thread-in" });
           return;
         }
@@ -117,7 +127,7 @@ function ChatRouteGlobalShortcuts() {
             stackedThreadToast({
               type: "info",
               title: "Preview is desktop-only",
-              description: "Open T3 Code in the desktop app to use the in-app preview.",
+              description: "Open 方德 AI in the desktop app to use the in-app preview.",
             }),
           );
           return;
@@ -160,6 +170,7 @@ function ChatRouteGlobalShortcuts() {
     activeDraftThread,
     activeThread,
     clearSelection,
+    handleNewTask,
     handleNewThread,
     keybindings,
     defaultProjectRef,
@@ -167,7 +178,6 @@ function ChatRouteGlobalShortcuts() {
     projectGroupCount,
     routeThreadRef,
     selectedThreadKeysSize,
-    legacySidebarEnabled,
     terminalOpen,
   ]);
 
@@ -184,13 +194,5 @@ function ChatRouteLayout() {
 }
 
 export const Route = createFileRoute("/_chat")({
-  beforeLoad: async ({ context }) => {
-    if (
-      context.authGateState.status !== "authenticated" &&
-      context.authGateState.status !== "hosted-static"
-    ) {
-      throw redirect({ to: "/pair", replace: true });
-    }
-  },
   component: ChatRouteLayout,
 });

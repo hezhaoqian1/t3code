@@ -10,7 +10,6 @@
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
-  type CodexSettings,
   ProviderDriverKind,
   type ProviderEvent,
   ProviderInstanceId,
@@ -25,6 +24,7 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
+  type ProviderSessionStartInput,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
@@ -76,6 +76,26 @@ const PROVIDER = ProviderDriverKind.make("codex");
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly resolveRuntime?: () => Effect.Effect<
+    { readonly environment: NodeJS.ProcessEnv; readonly homePath: string },
+    ProviderAdapterRequestError
+  >;
+  readonly resolveTurnSkills?: (input: {
+    readonly cwd: string;
+    readonly prompt: string;
+  }) => Effect.Effect<
+    ReadonlyArray<{ readonly name: string; readonly path: string }>,
+    ProviderAdapterRequestError
+  >;
+  readonly resolveSessionRuntime?: (
+    input: ProviderSessionStartInput & { readonly fdSkillVersionId?: number },
+  ) => Effect.Effect<
+    Pick<
+      CodexSessionRuntimeOptions,
+      "developerInstructions" | "dynamicTools" | "dynamicToolExecutor"
+    >,
+    ProviderAdapterRequestError
+  >;
   readonly makeRuntime?: (
     options: CodexSessionRuntimeOptions,
   ) => Effect.Effect<
@@ -89,6 +109,7 @@ export interface CodexAdapterLiveOptions {
 
 interface CodexAdapterSessionContext {
   readonly threadId: ThreadId;
+  readonly cwd: string;
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
@@ -421,10 +442,6 @@ function asRuntimeRequestId(requestId: string): RuntimeRequestId {
   return RuntimeRequestId.make(requestId);
 }
 
-function eventRawSource(event: ProviderEvent): NonNullable<ProviderRuntimeEvent["raw"]>["source"] {
-  return event.kind === "request" ? "codex.app-server.request" : "codex.app-server.notification";
-}
-
 function providerRefsFromEvent(
   event: ProviderEvent,
 ): ProviderRuntimeEvent["providerRefs"] | undefined {
@@ -450,11 +467,6 @@ function runtimeEventBase(
     ...(event.itemId ? { itemId: asRuntimeItemId(event.itemId) } : {}),
     ...(event.requestId ? { requestId: asRuntimeRequestId(event.requestId) } : {}),
     ...(refs ? { providerRefs: refs } : {}),
-    raw: {
-      source: eventRawSource(event),
-      method: event.method,
-      payload: event.payload ?? {},
-    },
   };
 }
 
@@ -1541,17 +1553,15 @@ function mapToRuntimeEvents(
             type: "runtime.error",
             ...runtimeEventBase(event, canonicalThreadId),
             payload: {
-              message,
+              message: "FD Agent runtime connection failed.",
               class: "provider_error" as const,
-              ...(event.payload !== undefined ? { detail: event.payload } : {}),
             },
           }
         : {
             type: "runtime.warning",
             ...runtimeEventBase(event, canonicalThreadId),
             payload: {
-              message,
-              ...(event.payload !== undefined ? { detail: event.payload } : {}),
+              message: "FD Agent runtime reported a diagnostic.",
             },
           },
     ];
@@ -1621,8 +1631,14 @@ function mapToRuntimeEvents(
  * in the registry owns its own closure with its own config, so two Codex
  * instances with different `homePath`s cannot step on each other.
  */
+export interface FdCodexAdapterConfig {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly launchArgs?: string;
+}
+
 export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
-  codexConfig: CodexSettings,
+  codexConfig: FdCodexAdapterConfig,
   options?: CodexAdapterLiveOptions,
 ) {
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("codex");
@@ -1658,6 +1674,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           yield* Effect.suspend(() => stopSessionInternal(existing));
         }
 
+        const resolvedRuntime = options?.resolveRuntime
+          ? yield* options.resolveRuntime()
+          : undefined;
+        const runtimeEnvironment = resolvedRuntime?.environment ?? options?.environment;
+        const runtimeHomePath = resolvedRuntime?.homePath ?? codexConfig.homePath;
+        const sessionRuntime = options?.resolveSessionRuntime
+          ? yield* options.resolveSessionRuntime(input)
+          : undefined;
+
         const serviceTier =
           input.modelSelection?.instanceId === boundInstanceId
             ? getCodexServiceTierOptionValue(input.modelSelection)
@@ -1668,9 +1693,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           providerInstanceId: boundInstanceId,
           cwd: input.cwd ?? process.cwd(),
           binaryPath: codexConfig.binaryPath,
-          launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
-          ...(options?.environment ? { environment: options.environment } : {}),
-          ...(codexConfig.homePath ? { homePath: codexConfig.homePath } : {}),
+          launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, runtimeEnvironment),
+          ...(runtimeEnvironment ? { environment: runtimeEnvironment } : {}),
+          ...(runtimeHomePath ? { homePath: runtimeHomePath } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),
@@ -1679,10 +1704,17 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ? { model: input.modelSelection.model }
             : {}),
           ...(serviceTier ? { serviceTier } : {}),
+          ...(sessionRuntime?.developerInstructions
+            ? { developerInstructions: sessionRuntime.developerInstructions }
+            : {}),
+          ...(sessionRuntime?.dynamicTools ? { dynamicTools: sessionRuntime.dynamicTools } : {}),
+          ...(sessionRuntime?.dynamicToolExecutor
+            ? { dynamicToolExecutor: sessionRuntime.dynamicToolExecutor }
+            : {}),
           ...(mcpSession
             ? {
                 environment: {
-                  ...(options?.environment ?? process.env),
+                  ...(runtimeEnvironment ?? process.env),
                   T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
                 },
                 appServerArgs: [
@@ -1730,7 +1762,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
           }),
-        ).pipe(Effect.forkChild);
+        ).pipe(Effect.forkIn(sessionScope));
 
         const started = yield* runtime.start().pipe(
           Effect.mapError(
@@ -1753,6 +1785,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
         sessions.set(input.threadId, {
           threadId: input.threadId,
+          cwd: runtimeInput.cwd,
           scope: sessionScope,
           runtime,
           eventFiber,
@@ -1804,6 +1837,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
     const session = yield* requireSession(input.threadId);
+    const codexSkills =
+      input.input !== undefined && options?.resolveTurnSkills
+        ? yield* options.resolveTurnSkills({ cwd: session.cwd, prompt: input.input })
+        : [];
     const reasoningEffort =
       input.modelSelection?.instanceId === boundInstanceId
         ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
@@ -1815,6 +1852,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     return yield* session.runtime
       .sendTurn({
         ...(input.input !== undefined ? { input: input.input } : {}),
+        ...(codexSkills.length > 0 ? { skills: codexSkills } : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }
           : {}),

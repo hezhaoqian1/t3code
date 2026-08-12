@@ -70,6 +70,7 @@ import {
 } from "./ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useEnvironmentQuery } from "../state/query";
+import { usePrimaryEnvironmentId } from "../state/environments";
 import { useAtomCommand } from "../state/use-atom-command";
 import { serverEnvironment } from "../state/server";
 import { reviewEnvironment } from "../state/review";
@@ -327,9 +328,10 @@ export default function DiffPanel({
     readonly turnId: TurnId | null;
   } | null>(null);
 
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const routeThreadRef = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteRef(params),
+    select: (params) => resolveThreadRouteRef(params, primaryEnvironmentId),
   });
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const activeThread = useThread(routeThreadRef);

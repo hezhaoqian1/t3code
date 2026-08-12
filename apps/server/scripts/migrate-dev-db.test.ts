@@ -2,9 +2,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
+import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
 import { runMigrations } from "../src/persistence/Migrations.ts";
 import * as NodeSqliteClient from "../src/persistence/NodeSqliteClient.ts";
 import { runMigrateDevDb } from "./migrate-dev-db.ts";
@@ -57,7 +59,7 @@ const createFixtureSource = Effect.fn("createMigrateDevDbFixtureSource")(functio
           VALUES (${`event-${threadId}`}, 'thread', ${threadId}, 0, 'thread.created', '2026-08-01', 'user', '{}', '{}')`;
       }
       yield* sql`INSERT INTO auth_sessions (session_id, subject, scopes, method, issued_at, expires_at)
-        VALUES ('session-1', 'user', '[]', 'pairing', '2026-08-01', '2027-08-01')`;
+        VALUES ('session-1', 'user', '[]', 'browser-session-cookie', '2026-08-01', '2027-08-01')`;
     }),
   );
   return databasePath;
@@ -139,22 +141,15 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       const sourceDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-busy-" });
       const destDir = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-busy-dest-" });
       const source = yield* createFixtureSource(sourceDir);
-      // This test process stands in for a live dev server.
       const stateDir = path.join(destDir, "userdata");
       yield* fs.makeDirectory(stateDir, { recursive: true });
-      yield* fs.writeFileString(
-        path.join(stateDir, "server-runtime.json"),
-        `{"version":1,"pid":${process.pid}}`,
-      );
+      yield* Layer.build(makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")));
 
       const error = yield* runMigrateDevDb(
         { baseDir: destDir, source, projects: 5, threadsPerProject: 10 },
         { sharedHome: sourceDir },
       ).pipe(Effect.flip);
-      assert.equal(error._tag, "MigrateDevDbServerRunningError");
-      if (error._tag === "MigrateDevDbServerRunningError") {
-        assert.equal(error.pid, process.pid);
-      }
+      assert.equal(error._tag, "DatabaseLeaseUnavailableError");
     }),
   );
 

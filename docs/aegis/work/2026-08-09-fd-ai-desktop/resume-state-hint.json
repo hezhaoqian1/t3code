@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-08-09-fd-ai-desktop",
+  "lastCheckpointRef": "docs/aegis/work/2026-08-09-fd-ai-desktop/todo-checkpoint-draft.json",
+  "resumeInstruction": "Resume Task 11A at the real App Server test. Do not delete transitional runtime code or begin Task 12 until the live exact-model, local-Skill, and resume assertions pass.",
+  "knownPartialWork": [
+    "Selectively restored effect-codex-app-server and T3 Codex adapter/session runtime",
+    "Bound exact deepseek-v4-flash and fd_new_api through managed CODEX_HOME and a minimal child environment",
+    "Routed ordinary/project/local-Skill turns through Codex while retaining Enterprise Agent ownership",
+    "Proved structured local Skills, bidirectional conversation owner locking, restart/resume, approval, user input, cancellation, usage, and exactly-once projection with focused local tests",
+    "Passed 14 focused files and 237 tests, four package typechecks, Server bundle, format, diff, and credential-boundary scans"
+  ],
+  "mustReadBeforeContinuing": [
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/10-intent.md",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/20-checkpoint.md",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/todo-checkpoint-draft.json"
+  ],
+  "unsafeToAssume": [
+    "The skipped real integration test has passed.",
+    "The global codex command is a usable App Server binary.",
+    "Local fake-runtime evidence authorizes transitional kernel retirement."
+  ]
+}

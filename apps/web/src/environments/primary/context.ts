@@ -54,6 +54,20 @@ async function fetchPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironment
   });
 }
 
+export function refreshPrimaryEnvironmentDescriptor(): Promise<ExecutionEnvironmentDescriptor> {
+  if (primaryEnvironmentDescriptorPromise) {
+    return primaryEnvironmentDescriptorPromise;
+  }
+
+  const nextPromise = fetchPrimaryEnvironmentDescriptor();
+  primaryEnvironmentDescriptorPromise = nextPromise;
+  return nextPromise.finally(() => {
+    if (primaryEnvironmentDescriptorPromise === nextPromise) {
+      primaryEnvironmentDescriptorPromise = null;
+    }
+  });
+}
+
 export function readPrimaryEnvironmentDescriptor(): ExecutionEnvironmentDescriptor | null {
   return primaryEnvironmentDescriptor;
 }
@@ -82,17 +96,7 @@ export function resolveInitialPrimaryEnvironmentDescriptor(): Promise<ExecutionE
     return Promise.resolve(descriptor);
   }
 
-  if (primaryEnvironmentDescriptorPromise) {
-    return primaryEnvironmentDescriptorPromise;
-  }
-
-  const nextPromise = fetchPrimaryEnvironmentDescriptor();
-  primaryEnvironmentDescriptorPromise = nextPromise;
-  return nextPromise.finally(() => {
-    if (primaryEnvironmentDescriptorPromise === nextPromise) {
-      primaryEnvironmentDescriptorPromise = null;
-    }
-  });
+  return refreshPrimaryEnvironmentDescriptor();
 }
 
 export function __resetPrimaryEnvironmentBootstrapForTests(): void {

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-4-loopback-runtime",
+  "type": "test",
+  "source": "server/config/bootstrap/dev-runner focused suites",
+  "summary": "Server binds literal 127.0.0.1; public host/pair/connect/service/relay/Tailscale paths are absent; explicit CORS and HTTP(S) loopback dev URL rejection pass; full server suite passes 93/93.",
+  "verifier": "codex-controller"
+}

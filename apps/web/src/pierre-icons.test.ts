@@ -24,7 +24,6 @@ describe("Pierre file icons", () => {
       "t3-file-icon-tsconfig",
     );
     assert.equal(resolvePierreIconForEntry("AGENTS.md", "file")?.name, "t3-file-icon-agents");
-    assert.equal(resolvePierreIconForEntry("CLAUDE.md", "file")?.name, "t3-file-icon-claude");
     assert.equal(resolvePierreIconForEntry("README.md", "file")?.name, "t3-file-icon-readme");
     assert.equal(resolvePierreIconForEntry("pnpm-lock.yaml", "file")?.name, "t3-file-icon-pnpm");
     assert.equal(

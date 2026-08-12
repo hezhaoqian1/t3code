@@ -7,6 +7,7 @@ import {
   buildDraftThreadRouteParams,
   buildThreadRouteParams,
   resolveActiveThreadRouteRef,
+  resolveThreadRouteRedirect,
   resolveThreadRouteRenderState,
   resolveThreadRouteRef,
   resolveThreadRouteTarget,
@@ -17,24 +18,18 @@ describe("threadRoutes", () => {
     const ref = scopeThreadRef("env-1" as never, ThreadId.make("thread-1"));
 
     expect(buildThreadRouteParams(ref)).toEqual({
-      environmentId: "env-1",
       threadId: "thread-1",
     });
   });
 
-  it("resolves a scoped ref only when both params are present", () => {
-    expect(
-      resolveThreadRouteRef({
-        environmentId: "env-1",
-        threadId: "thread-1",
-      }),
-    ).toEqual({
+  it("scopes a route thread id to the primary environment", () => {
+    expect(resolveThreadRouteRef({ threadId: "thread-1" }, "env-1" as never)).toEqual({
       environmentId: "env-1",
       threadId: "thread-1",
     });
 
-    expect(resolveThreadRouteRef({ environmentId: "env-1" })).toBeNull();
-    expect(resolveThreadRouteRef({ threadId: "thread-1" })).toBeNull();
+    expect(resolveThreadRouteRef({}, "env-1" as never)).toBeNull();
+    expect(resolveThreadRouteRef({ threadId: "thread-1" }, null)).toBeNull();
   });
 
   it("builds canonical draft route params from a draft id", () => {
@@ -45,10 +40,12 @@ describe("threadRoutes", () => {
 
   it("resolves draft and server route targets", () => {
     expect(
-      resolveThreadRouteTarget({
-        environmentId: "env-1",
-        threadId: "thread-1",
-      }),
+      resolveThreadRouteTarget(
+        {
+          threadId: "thread-1",
+        },
+        "env-1" as never,
+      ),
     ).toEqual({
       kind: "server",
       threadRef: {
@@ -57,18 +54,14 @@ describe("threadRoutes", () => {
       },
     });
 
-    expect(
-      resolveThreadRouteTarget({
-        draftId: "draft-1",
-      }),
-    ).toEqual({
+    expect(resolveThreadRouteTarget({ draftId: "draft-1" }, "env-1" as never)).toEqual({
       kind: "draft",
       draftId: "draft-1",
     });
   });
 
   it("resolves the backing thread while a draft route is being promoted", () => {
-    const target = resolveThreadRouteTarget({ draftId: "draft-1" });
+    const target = resolveThreadRouteTarget({ draftId: "draft-1" }, "env-1" as never);
 
     expect(
       resolveActiveThreadRouteRef(target, {
@@ -83,7 +76,7 @@ describe("threadRoutes", () => {
   });
 
   it("does not treat a draft's reserved thread ref as an active sidebar thread", () => {
-    const target = resolveThreadRouteTarget({ draftId: "draft-1" });
+    const target = resolveThreadRouteTarget({ draftId: "draft-1" }, "env-1" as never);
 
     expect(
       resolveActiveThreadRouteRef(target, {
@@ -158,5 +151,45 @@ describe("threadRoutes", () => {
         draftThreadExists: false,
       }),
     ).toBe("missing");
+  });
+
+  it.each(["pair", "connect", "unknown-thread"])(
+    "redirects /%s after an empty snapshot resolves it as missing",
+    (threadId) => {
+      expect(resolveThreadRouteRef({ threadId }, "env-1" as never)).not.toBeNull();
+      const renderState = resolveThreadRouteRenderState({
+        bootstrapComplete: true,
+        serverThreadShellExists: false,
+        serverThreadDetailExists: false,
+        serverThreadDetailDeleted: false,
+        draftThreadExists: false,
+      });
+
+      expect(resolveThreadRouteRedirect({ bootstrapComplete: true, renderState })).toBe("/");
+    },
+  );
+
+  it("redirects a missing thread even when its server shell previously existed", () => {
+    const renderState = resolveThreadRouteRenderState({
+      bootstrapComplete: true,
+      serverThreadShellExists: true,
+      serverThreadDetailExists: false,
+      serverThreadDetailDeleted: true,
+      draftThreadExists: false,
+    });
+
+    expect(resolveThreadRouteRedirect({ bootstrapComplete: true, renderState })).toBe("/");
+  });
+
+  it("does not redirect while loading or when the thread is ready", () => {
+    expect(
+      resolveThreadRouteRedirect({ bootstrapComplete: false, renderState: "loading" }),
+    ).toBeNull();
+    expect(
+      resolveThreadRouteRedirect({ bootstrapComplete: true, renderState: "loading" }),
+    ).toBeNull();
+    expect(
+      resolveThreadRouteRedirect({ bootstrapComplete: true, renderState: "ready" }),
+    ).toBeNull();
   });
 });

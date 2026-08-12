@@ -5,8 +5,7 @@ import type * as Stream from "effect/Stream";
 export type ConnectionWakeup =
   | "application-active"
   | "application-active-probe"
-  | "application-active-reconnect"
-  | "credentials-changed";
+  | "application-active-reconnect";
 
 export function isApplicationActiveWakeup(reason: ConnectionWakeup): boolean {
   return (

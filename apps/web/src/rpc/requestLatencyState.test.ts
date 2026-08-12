@@ -70,21 +70,6 @@ describe("requestLatencyState", () => {
     expect(getSlowRpcAckRequests()).toEqual([]);
   });
 
-  it("gives provider updates a longer threshold before warning", () => {
-    trackRpcRequestSent("1", WS_METHODS.serverUpdateProvider, "server.updateProvider · env-1");
-    vi.advanceTimersByTime(LONG_RUNNING_RPC_ACK_THRESHOLD_MS - 1);
-    expect(getSlowRpcAckRequests()).toEqual([]);
-
-    vi.advanceTimersByTime(1);
-    expect(getSlowRpcAckRequests()).toMatchObject([
-      {
-        requestId: "1",
-        tag: "server.updateProvider · env-1",
-        thresholdMs: LONG_RUNNING_RPC_ACK_THRESHOLD_MS,
-      },
-    ]);
-  });
-
   it("evicts the oldest pending requests once the tracker reaches capacity", () => {
     for (let index = 0; index < MAX_TRACKED_RPC_ACK_REQUESTS + 1; index += 1) {
       trackRpcRequestSent(String(index), "server.getConfig");

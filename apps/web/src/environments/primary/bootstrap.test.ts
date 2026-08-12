@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   getPrimaryKnownEnvironment,
   isDesktopEnvironmentBootstrapIncompleteError,
+  isPrimaryEnvironmentHostUnsupportedError,
   isPrimaryEnvironmentProtocolUnsupportedError,
-  isPrimaryEnvironmentUrlInvalidError,
   readPrimaryEnvironmentTarget,
+  resolveBrowserDevelopmentPrimaryTarget,
   resolvePrimaryEnvironmentHttpUrl,
   resolveInitialPrimaryEnvironmentDescriptor,
   resetPrimaryEnvironmentDescriptorForTests,
@@ -75,9 +76,7 @@ describe("environmentBootstrap", () => {
 
   it("attaches the bootstrapped environment descriptor to the primary environment", () => {
     vi.stubGlobal("window", {
-      location: {
-        origin: "http://localhost:3773",
-      },
+      location: new URL("http://localhost:3773/"),
       desktopBridge: undefined,
     });
     writePrimaryEnvironmentDescriptor({
@@ -96,7 +95,7 @@ describe("environmentBootstrap", () => {
     expect(getPrimaryKnownEnvironment()).toEqual({
       id: "environment-local",
       label: "Bootstrapped environment",
-      source: "window-origin",
+      source: "development-loopback",
       environmentId: "environment-local",
       target: {
         httpBaseUrl: "http://localhost:3773/",
@@ -116,44 +115,40 @@ describe("environmentBootstrap", () => {
     expect(testApi.calls.descriptor).toBe(1);
   });
 
-  it("uses https descriptor urls when the primary environment uses wss", async () => {
-    vi.stubEnv("VITE_HTTP_URL", "https://remote.example.com");
-    vi.stubEnv("VITE_WS_URL", "wss://remote.example.com");
-    await installDescriptorApi();
-
-    await expect(resolveInitialPrimaryEnvironmentDescriptor()).resolves.toEqual(BASE_ENVIRONMENT);
-    expect(resolvePrimaryEnvironmentHttpUrl("/.well-known/t3/environment")).toBe(
-      "https://remote.example.com/.well-known/t3/environment",
-    );
+  it("does not create a browser target outside explicit development mode", () => {
+    expect(
+      resolveBrowserDevelopmentPrimaryTarget({
+        isDevelopment: false,
+        locationHref: "http://localhost:5735/",
+      }),
+    ).toBeNull();
   });
 
-  it("derives the websocket url when only VITE_HTTP_URL is configured", async () => {
-    vi.stubEnv("VITE_HTTP_URL", "https://remote.example.com");
-    await installDescriptorApi();
+  it.each([
+    ["http://127.0.0.1:5735/app", "http://127.0.0.1:5735/", "ws://127.0.0.1:5735/"],
+    ["https://[::1]:5735/app", "https://[::1]:5735/", "wss://[::1]:5735/"],
+  ])(
+    "derives the development websocket endpoint from exact loopback %s",
+    (locationHref, httpBaseUrl, wsBaseUrl) => {
+      expect(resolveBrowserDevelopmentPrimaryTarget({ isDevelopment: true, locationHref })).toEqual(
+        {
+          source: "development-loopback",
+          generation: `origin:${new URL(httpBaseUrl).origin}`,
+          target: { httpBaseUrl, wsBaseUrl },
+        },
+      );
+    },
+  );
 
-    await expect(resolveInitialPrimaryEnvironmentDescriptor()).resolves.toEqual(BASE_ENVIRONMENT);
-    expect(resolvePrimaryEnvironmentHttpUrl("/.well-known/t3/environment")).toBe(
-      "https://remote.example.com/.well-known/t3/environment",
-    );
-    expect(getPrimaryKnownEnvironment()?.target).toEqual({
-      httpBaseUrl: "https://remote.example.com/",
-      wsBaseUrl: "wss://remote.example.com/",
-    });
-  });
-
-  it("derives the http url when only VITE_WS_URL is configured", async () => {
-    vi.stubEnv("VITE_WS_URL", "wss://remote.example.com");
-    await installDescriptorApi();
-
-    await expect(resolveInitialPrimaryEnvironmentDescriptor()).resolves.toEqual(BASE_ENVIRONMENT);
-    expect(resolvePrimaryEnvironmentHttpUrl("/.well-known/t3/environment")).toBe(
-      "https://remote.example.com/.well-known/t3/environment",
-    );
-    expect(getPrimaryKnownEnvironment()?.target).toEqual({
-      httpBaseUrl: "https://remote.example.com/",
-      wsBaseUrl: "wss://remote.example.com/",
-    });
-  });
+  it.each(["http://192.168.1.20:5735/", "http://0.0.0.0:5735/", "https://example.com/"])(
+    "rejects non-loopback development endpoint %s",
+    (locationHref) => {
+      const error = captureThrown(() =>
+        resolveBrowserDevelopmentPrimaryTarget({ isDevelopment: true, locationHref }),
+      );
+      expect(isPrimaryEnvironmentHostUnsupportedError(error)).toBe(true);
+    },
+  );
 
   it("uses the current origin as the descriptor base for local dev environments", async () => {
     installTestBrowser("http://localhost:5735/");
@@ -177,6 +172,7 @@ describe("environmentBootstrap", () => {
           {
             id: "primary",
             label: "Windows",
+            generation: "pid:100",
             httpBaseUrl: "http://127.0.0.1:3773",
             wsBaseUrl: "ws://127.0.0.1:3773",
             bootstrapToken: "desktop-bootstrap-token",
@@ -192,22 +188,28 @@ describe("environmentBootstrap", () => {
     );
   });
 
-  it("retains the URL parser cause without exposing the configured URL in its message", () => {
-    vi.stubEnv("VITE_HTTP_URL", "http://[");
-
-    const error = captureThrown(readPrimaryEnvironmentTarget);
-
-    expect(isPrimaryEnvironmentUrlInvalidError(error)).toBe(true);
-    if (!isPrimaryEnvironmentUrlInvalidError(error)) {
-      throw new Error("Expected a structured primary environment URL error.");
-    }
-    expect(error).toMatchObject({
-      source: "configured",
-      urlKind: "http-base-url",
-      message: "Could not parse http-base-url for the configured primary environment target.",
+  it("keeps the desktop endpoint when the Electron page uses a custom protocol", () => {
+    vi.stubEnv("VITE_DEV_SERVER_URL", "http://127.0.0.1:5733");
+    vi.stubGlobal("window", {
+      location: new URL("fdai-dev://app/"),
+      history: { replaceState: vi.fn() },
+      desktopBridge: {
+        getLocalEnvironmentBootstraps: () => [
+          {
+            id: "primary",
+            label: "Fangde AI",
+            generation: "pid:100",
+            httpBaseUrl: "http://127.0.0.1:51120",
+            wsBaseUrl: "ws://127.0.0.1:51120",
+            bootstrapToken: "desktop-bootstrap-token",
+          },
+        ],
+      },
     });
-    expect(error.cause).toBeInstanceOf(TypeError);
-    expect(error.message).not.toContain("http://[");
+
+    expect(resolvePrimaryEnvironmentHttpUrl("/api/auth/session")).toBe(
+      "http://127.0.0.1:51120/api/auth/session",
+    );
   });
 
   it("describes which desktop bootstrap endpoint is missing", () => {
@@ -219,6 +221,7 @@ describe("environmentBootstrap", () => {
           {
             id: "primary",
             label: "Local environment",
+            generation: "pid:100",
             httpBaseUrl: "http://127.0.0.1:3773",
             bootstrapToken: "desktop-bootstrap-token",
           },
@@ -239,22 +242,46 @@ describe("environmentBootstrap", () => {
     });
   });
 
-  it("preserves an unsupported window-origin protocol", () => {
-    vi.stubGlobal("window", {
-      location: { origin: "file:///tmp/t3code/" },
-      history: { replaceState: vi.fn() },
-    });
-
-    const error = captureThrown(readPrimaryEnvironmentTarget);
+  it("rejects non-http browser development protocols", () => {
+    const error = captureThrown(() =>
+      resolveBrowserDevelopmentPrimaryTarget({
+        isDevelopment: true,
+        locationHref: "file:///tmp/t3code/",
+      }),
+    );
 
     expect(isPrimaryEnvironmentProtocolUnsupportedError(error)).toBe(true);
     if (!isPrimaryEnvironmentProtocolUnsupportedError(error)) {
       throw new Error("Expected a structured primary environment protocol error.");
     }
     expect(error).toMatchObject({
-      source: "window-origin",
+      source: "development-loopback",
       protocol: "file:",
-      message: "The window-origin primary environment target uses unsupported protocol file:.",
+      message:
+        "The development-loopback primary environment target uses unsupported protocol file:.",
     });
+  });
+
+  it("rejects a non-loopback Desktop-managed bootstrap", () => {
+    vi.stubGlobal("window", {
+      location: new URL("http://localhost:5733/"),
+      history: { replaceState: vi.fn() },
+      desktopBridge: {
+        getLocalEnvironmentBootstraps: () => [
+          {
+            id: "primary",
+            label: "Local environment",
+            generation: "pid:100",
+            httpBaseUrl: "http://192.168.1.20:3773",
+            wsBaseUrl: "ws://192.168.1.20:3773",
+            bootstrapToken: "desktop-bootstrap-token",
+          },
+        ],
+      },
+    });
+
+    expect(
+      isPrimaryEnvironmentHostUnsupportedError(captureThrown(readPrimaryEnvironmentTarget)),
+    ).toBe(true);
   });
 });

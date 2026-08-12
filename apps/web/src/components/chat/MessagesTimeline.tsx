@@ -795,7 +795,7 @@ function TimelineMinimap({
     >
       <div className="relative h-full w-full select-none">
         <button
-          aria-label={`Jump to message: ${activeItem?.userText ?? "User message"}`}
+          aria-label={`跳转到消息：${activeItem?.userText ?? "用户消息"}`}
           className={cn(
             "absolute top-1/2 left-3 -translate-y-1/2 cursor-pointer bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
             // The strip is width-capped to the side gutter so it never overlays

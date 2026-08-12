@@ -13,7 +13,6 @@ const ICON_COLORS: Record<string, readonly [light: string, dark: string]> = {
   browserslist: ["#d5a910", "#ffd452"],
   bun: ["#594c5b", "#79697b"],
   c: ["#1a85d4", "#69b1ff"],
-  claude: ["#d47628", "#ffa359"],
   cpp: ["#1a85d4", "#69b1ff"],
   css: ["#693acf", "#9d6afb"],
   database: ["#a631be", "#d568ea"],

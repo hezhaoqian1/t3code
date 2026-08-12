@@ -1,84 +1,36 @@
-# Install T3 Code
+# 安装方德 AI 桌面版
 
-T3 Code is a web and desktop GUI for running coding agents on your machine.
+方德 AI 桌面版面向公司员工提供日常办公、文档处理、数据分析和项目协作能力。桌面端已内置
+本地 Agent 运行环境，员工无需选择模型、填写 API Key 或单独登录 Codex。
 
-## Requirements
+## 下载
 
-Node.js `^22.16 || ^23.11 || >=24.10` on the machine that runs the T3 Code server.
+打开[方德 AI 下载页](https://ai-api.fdsure.com/api-access)，按设备选择：
 
-At least one provider CLI, installed and authenticated. See [Providers](#providers) below.
+- Windows x64
+- Windows ARM64
+- macOS Apple Silicon
+- macOS Intel
 
-## Run Without Installing
+正式安装包必须经过平台签名。不要使用聊天文件、个人网盘或其他来源的安装包。
 
-```bash
-npx t3@latest
-```
+## 首次使用
 
-This starts the T3 Code server on your machine and opens the local web app. Use
-`npx t3@latest --help` for the full CLI reference.
+1. 安装并打开方德 AI。
+2. 使用公司分配的方德账号登录。
+3. 新建任务。无需选择空间时，首次发送会自动创建独立任务目录。
+4. 需要操作已有文件时，选择或导入本地空间。
+5. 需要企业数据能力时，在输入框中选择已授权的 FD Skill。
 
-## Desktop App
+普通任务默认使用公司管理的 `deepseek-v4-flash`。账号凭据、模型策略、AI 点数和 FD Skill
+权限由方德平台下发。
 
-Download the latest release from
-[GitHub Releases](https://github.com/pingdotgg/t3code/releases), or install from a package
-registry.
+## 本地文件
 
-Windows:
+未选择空间的任务会在 `~/FangdeAI/Tasks` 下创建独立目录。任务结束后文件仍会保留；新任务
+使用新的目录。打开的项目空间不会被复制或上传，Agent 仅按当前权限操作本地目录。
 
-```bash
-winget install T3Tools.T3Code
-```
+## 更新
 
-macOS:
-
-```bash
-brew install --cask t3-code
-```
-
-Arch Linux:
-
-```bash
-yay -S t3code-bin
-```
-
-## Providers
-
-T3 Code drives provider CLIs; it does not ship them. Install the CLI for each provider you want
-to use, then authenticate it.
-
-| Provider   | CLI                                                   | Default binary | Log in with           |
-| ---------- | ----------------------------------------------------- | -------------- | --------------------- |
-| Codex      | [Codex CLI](https://developers.openai.com/codex/cli)  | `codex`        | `codex login`         |
-| Claude     | [Claude Code](https://claude.com/product/claude-code) | `claude`       | `claude auth login`   |
-| Cursor     | [Cursor CLI](https://cursor.com/cli)                  | `cursor-agent` | `agent login`         |
-| Grok Build | [Grok Build CLI](https://x.ai/cli)                    | `grok`         | `grok login`          |
-| OpenCode   | [OpenCode](https://opencode.ai)                       | `opencode`     | `opencode auth login` |
-
-Cursor is the one to watch: install Cursor CLI, which provides the `cursor-agent` binary that
-T3 Code looks for, but authenticate with `agent login`, not `cursor-agent login`.
-
-Run the login command on the machine running the T3 Code server, not on the device you browse
-from.
-
-### Binary Discovery
-
-Each provider CLI must be on the server's `PATH`, or have an explicit binary path set in
-**Settings** → the provider instance → **Binary path**. Use the explicit path when a version
-manager or a non-standard install location keeps the CLI off the `PATH` of the shell that
-started T3 Code.
-
-### When Auth Is Needed
-
-Provider auth is required before you start a session with that provider, not before you start
-T3 Code. You can install T3 Code, open it, and add providers afterwards. A provider that is not
-authenticated shows its status in **Settings** and fails at session start with the login command
-to run.
-
-For multi-account setups, see [Codex](./providers-codex.md) and [Claude](./providers-claude.md).
-
-## Next Steps
-
-- [Permission modes](./permission-modes.md): how much T3 Code asks before acting
-- [Remote access](./remote-access.md): connect from a phone, tablet, or another desktop
-- [Keeping T3 Code in sync](./updating.md): client and server version skew
-- [Running in the background](./background-service.md): Linux background service
+桌面端发现新版本后会在应用内提示。完成当前任务后下载更新，再按提示重启安装。详细流程见
+[桌面端更新](./updating.md)。

@@ -213,6 +213,7 @@ export function projectEvent(
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
+            projectPurpose: payload.projectPurpose ?? "workspace",
             defaultModelSelection: payload.defaultModelSelection,
             defaultThreadEnvMode: null,
             scripts: payload.scripts,

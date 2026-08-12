@@ -6,60 +6,14 @@ export {
   deriveLocalBranchNameFromRemoteRef,
 } from "@t3tools/shared/git";
 
-export interface EnvironmentOption {
-  environmentId: EnvironmentId;
-  projectId: ProjectId;
-  label: string;
-  isPrimary: boolean;
-}
-
 export const EnvMode = Schema.Literals(["local", "worktree"]);
 export type EnvMode = typeof EnvMode.Type;
-
-const GENERIC_LOCAL_ENVIRONMENT_LABELS = new Set(["local", "local environment"]);
-
-function normalizeDisplayLabel(value: string | null | undefined): string | null {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : null;
-}
-
-export function resolveEnvironmentOptionLabel(input: {
-  isPrimary: boolean;
-  environmentId: EnvironmentId;
-  runtimeLabel?: string | null;
-  savedLabel?: string | null;
-}): string {
-  const runtimeLabel = normalizeDisplayLabel(input.runtimeLabel);
-  const savedLabel = normalizeDisplayLabel(input.savedLabel);
-
-  if (input.isPrimary) {
-    const preferredLocalLabel = [runtimeLabel, savedLabel].find((label) => {
-      if (!label) return false;
-      return !GENERIC_LOCAL_ENVIRONMENT_LABELS.has(label.toLowerCase());
-    });
-    return preferredLocalLabel ?? "This device";
-  }
-
-  return runtimeLabel ?? savedLabel ?? input.environmentId;
-}
-
-// A remote (non-primary) environment is always surfaced, even when it is the
-// only environment available: with a single connected machine there is nothing
-// to pick, but the user still needs to see where the project runs.
-export function shouldShowEnvironmentIndicator(input: {
-  activeEnvironment: Pick<EnvironmentOption, "isPrimary"> | null;
-  canPickEnvironment: boolean;
-}): boolean {
-  if (input.canPickEnvironment) return true;
-  return input.activeEnvironment !== null && !input.activeEnvironment.isPrimary;
-}
 
 export function shouldShowComposerContextStrip(input: {
   hasActiveProject: boolean;
   isGitRepo: boolean;
-  showEnvironmentIndicator: boolean;
 }): boolean {
-  return input.hasActiveProject && (input.isGitRepo || input.showEnvironmentIndicator);
+  return input.hasActiveProject && input.isGitRepo;
 }
 
 export function resolveEnvModeLabel(mode: EnvMode): string {

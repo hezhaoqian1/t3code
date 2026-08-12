@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ServerConfig from "../config.ts";
@@ -43,9 +44,6 @@ const repositoryFailure = new PersistenceSqlError({
 const failingSessionLookupRepositoryLayer = Layer.succeed(AuthSessions.AuthSessionRepository, {
   create: () => Effect.void,
   getById: () => Effect.fail(repositoryFailure),
-  listActive: () => Effect.succeed([]),
-  revoke: () => Effect.fail(repositoryFailure),
-  revokeAllExcept: () => Effect.fail(repositoryFailure),
   setLastConnectedAt: () => Effect.void,
 });
 
@@ -65,7 +63,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       const sessions = yield* SessionStore.SessionStore;
       const issued = yield* sessions.issue({
         subject: "desktop-bootstrap",
-        scopes: ["orchestration:read", "access:write"],
+        scopes: ["orchestration:read", "review:write"],
         client: {
           label: "Desktop app",
           deviceType: "desktop",
@@ -78,7 +76,7 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
 
       expect(verified.method).toBe("browser-session-cookie");
       expect(verified.subject).toBe("desktop-bootstrap");
-      expect(verified.scopes).toEqual(["orchestration:read", "access:write"]);
+      expect(verified.scopes).toEqual(["orchestration:read", "review:write"]);
       expect(verified.client.label).toBe("Desktop app");
       expect(verified.client.browser).toBe("Electron");
       expect(verified.expiresAt?.toString()).toBe(issued.expiresAt.toString());
@@ -104,8 +102,6 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
 
       const sessionError = yield* Effect.flip(sessions.verify(issued.token));
       const websocketError = yield* Effect.flip(sessions.verifyWebSocketToken(websocket.token));
-      const revokeError = yield* Effect.flip(sessions.revoke(issued.sessionId));
-      const revokeOthersError = yield* Effect.flip(sessions.revokeAllExcept(issued.sessionId));
 
       expect(sessionError._tag).toBe("SessionCredentialVerificationError");
       expect(websocketError._tag).toBe("WebSocketTokenVerificationError");
@@ -117,16 +113,6 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
       if (websocketError._tag === "WebSocketTokenVerificationError") {
         expect(websocketError.sessionId).toBe(issued.sessionId);
       }
-      expect(revokeError).toMatchObject({
-        _tag: "SessionRevocationError",
-        sessionId: issued.sessionId,
-        cause: repositoryFailure,
-      });
-      expect(revokeOthersError).toMatchObject({
-        _tag: "OtherSessionsRevocationError",
-        currentSessionId: issued.sessionId,
-        cause: repositoryFailure,
-      });
     }).pipe(Effect.provide(failingSessionLookupCredentialLayer)),
   );
   it.effect("verifies session tokens against the Effect clock", () =>
@@ -145,8 +131,11 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
         "orchestration:operate",
         "terminal:operate",
         "review:write",
-        "relay:read",
       ]);
+      expect(verified.scopes).not.toContain("relay:read");
+      expect(verified.scopes).not.toContain("relay:write");
+      expect(verified.scopes).not.toContain("access:read");
+      expect(verified.scopes).not.toContain("access:write");
     }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
   );
 
@@ -212,107 +201,48 @@ it.layer(NodeServices.layer)("SessionStore.layer", (it) => {
     }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
   );
 
-  it.effect("lists active sessions, tracks connectivity, and revokes other sessions", () =>
-    Effect.gen(function* () {
-      const sessions = yield* SessionStore.SessionStore;
-      const administrative = yield* sessions.issue({
-        subject: "desktop-bootstrap",
-        scopes: ["orchestration:read", "access:write"],
-        client: {
-          label: "Desktop app",
-          deviceType: "desktop",
-          os: "macOS",
-          browser: "Electron",
-        },
-      });
-      const client = yield* sessions.issue({
-        subject: "one-time-token",
-        scopes: ["orchestration:read"],
-        client: {
-          label: "Julius iPhone",
-          deviceType: "mobile",
-          os: "iOS",
-          browser: "Safari",
-          ipAddress: "192.168.1.88",
-        },
-      });
-      const clientWebSocket = yield* sessions.issueWebSocketToken(client.sessionId);
-
-      yield* sessions.markConnected(client.sessionId);
-      const beforeRevoke = yield* sessions.listActive();
-      const revokedCount = yield* sessions.revokeAllExcept(administrative.sessionId);
-      const afterRevoke = yield* sessions.listActive();
-      const revokedClient = yield* Effect.flip(sessions.verify(client.token));
-      const revokedClientWebSocket = yield* Effect.flip(
-        sessions.verifyWebSocketToken(clientWebSocket.token),
-      );
-
-      expect(beforeRevoke).toHaveLength(2);
-      expect(beforeRevoke.find((entry) => entry.sessionId === client.sessionId)?.connected).toBe(
-        true,
-      );
-      expect(beforeRevoke.find((entry) => entry.sessionId === client.sessionId)?.client.label).toBe(
-        "Julius iPhone",
-      );
-      expect(
-        beforeRevoke.find((entry) => entry.sessionId === administrative.sessionId)?.client
-          .deviceType,
-      ).toBe("desktop");
-      expect(revokedCount).toBe(1);
-      expect(afterRevoke).toHaveLength(1);
-      expect(afterRevoke[0]?.sessionId).toBe(administrative.sessionId);
-      expect(revokedClient._tag).toBe("SessionTokenRevokedError");
-      if (revokedClient._tag === "SessionTokenRevokedError") {
-        expect(revokedClient.sessionId).toBe(client.sessionId);
-        expect(revokedClient.revokedAt.epochMilliseconds).toBeGreaterThanOrEqual(0);
-      }
-      expect(revokedClientWebSocket._tag).toBe("WebSocketSessionRevokedError");
-      if (revokedClientWebSocket._tag === "WebSocketSessionRevokedError") {
-        expect(revokedClientWebSocket.sessionId).toBe(client.sessionId);
-        expect(revokedClientWebSocket.revokedAt.epochMilliseconds).toBeGreaterThanOrEqual(0);
-      }
-    }).pipe(Effect.provide(makeSessionStoreLayer())),
-  );
-
   it.effect("persists lastConnectedAt on first connect and updates it after reconnect", () =>
     Effect.gen(function* () {
       const sessions = yield* SessionStore.SessionStore;
+      const repository = yield* AuthSessions.AuthSessionRepository;
       const issued = yield* sessions.issue({
         subject: "reconnect-test",
         method: "bearer-access-token",
       });
 
-      const beforeConnect = yield* sessions.listActive();
-      expect(beforeConnect[0]?.lastConnectedAt).toBeNull();
+      const beforeConnect = yield* repository.getById({ sessionId: issued.sessionId });
+      expect(beforeConnect.pipe(Option.getOrThrow).lastConnectedAt).toBeNull();
 
       yield* TestClock.adjust(Duration.seconds(1));
       yield* sessions.markConnected(issued.sessionId);
-      const firstConnect = yield* sessions.listActive();
-      const firstConnectedAt = firstConnect[0]?.lastConnectedAt;
+      const firstConnect = yield* repository.getById({ sessionId: issued.sessionId });
+      const firstConnectedAt = firstConnect.pipe(Option.getOrThrow).lastConnectedAt;
 
-      expect(firstConnect[0]?.connected).toBe(true);
       expect(firstConnectedAt).not.toBeNull();
 
       yield* TestClock.adjust(Duration.seconds(1));
       yield* sessions.markConnected(issued.sessionId);
-      const stillConnected = yield* sessions.listActive();
+      const stillConnected = yield* repository.getById({ sessionId: issued.sessionId });
 
-      expect(stillConnected[0]?.lastConnectedAt?.toString()).toBe(firstConnectedAt?.toString());
+      expect(stillConnected.pipe(Option.getOrThrow).lastConnectedAt?.toString()).toBe(
+        firstConnectedAt?.toString(),
+      );
 
       yield* sessions.markDisconnected(issued.sessionId);
       yield* sessions.markDisconnected(issued.sessionId);
-      const afterDisconnect = yield* sessions.listActive();
+      const afterDisconnect = yield* repository.getById({ sessionId: issued.sessionId });
 
-      expect(afterDisconnect[0]?.connected).toBe(false);
-      expect(afterDisconnect[0]?.lastConnectedAt?.toString()).toBe(firstConnectedAt?.toString());
+      expect(afterDisconnect.pipe(Option.getOrThrow).lastConnectedAt?.toString()).toBe(
+        firstConnectedAt?.toString(),
+      );
 
       yield* TestClock.adjust(Duration.seconds(1));
       yield* sessions.markConnected(issued.sessionId);
-      const afterReconnect = yield* sessions.listActive();
+      const afterReconnect = yield* repository.getById({ sessionId: issued.sessionId });
+      const reconnectedAt = afterReconnect.pipe(Option.getOrThrow).lastConnectedAt;
 
-      expect(afterReconnect[0]?.connected).toBe(true);
-      expect(afterReconnect[0]?.lastConnectedAt).not.toBeNull();
-      expect(afterReconnect[0]?.lastConnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
+      expect(reconnectedAt).not.toBeNull();
+      expect(reconnectedAt?.toString()).not.toBe(firstConnectedAt?.toString());
     }).pipe(Effect.provide(Layer.merge(makeSessionStoreLayer(), TestClock.layer()))),
   );
 });

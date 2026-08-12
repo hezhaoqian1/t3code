@@ -11,7 +11,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ChangeRequestStateLike } from "@t3tools/client-runtime/state/thread-settled";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, SquarePenIcon } from "lucide-react";
 import {
   memo,
   useCallback,
@@ -30,7 +30,6 @@ import ProjectScriptsControl, {
   type ProjectScriptActionResult,
 } from "../ProjectScriptsControl";
 import { OpenInPicker } from "./OpenInPicker";
-import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { useThreadActionMenu } from "~/hooks/useThreadActionMenu";
 import { threadEnvironment } from "../../state/threads";
@@ -51,6 +50,7 @@ interface ChatHeaderProps {
   activeProjectCwd: string | null;
   openInCwd: string | null;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
+  officeMode?: boolean;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
@@ -82,14 +82,8 @@ export function resolveRenameCommit(input: {
 
 export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined;
-  readonly activeThreadEnvironmentId: EnvironmentId;
-  readonly primaryEnvironmentId: EnvironmentId | null;
 }): boolean {
-  return (
-    Boolean(input.activeProjectName) &&
-    input.primaryEnvironmentId !== null &&
-    input.activeThreadEnvironmentId === input.primaryEnvironmentId
-  );
+  return Boolean(input.activeProjectName);
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -103,6 +97,7 @@ export const ChatHeader = memo(function ChatHeader({
   activeProjectCwd,
   openInCwd,
   activeProjectScripts,
+  officeMode = false,
   preferredScriptId,
   keybindings,
   availableEditors,
@@ -114,15 +109,12 @@ export const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
 }: ChatHeaderProps) {
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const fileScripts = useT3ProjectFileScripts(
     activeThreadEnvironmentId,
     activeProjectScripts ? activeProjectCwd : null,
   );
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
-    activeThreadEnvironmentId,
-    primaryEnvironmentId,
   });
   const activeThreadRef = useMemo(
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
@@ -172,6 +164,7 @@ export const ChatHeader = memo(function ChatHeader({
   const { openMenu } = useThreadActionMenu({
     threadRef: isServerThread ? activeThreadRef : null,
     projectCwd: activeProjectCwd,
+    technicalActionsVisible: !officeMode,
     changeRequestState,
     onStartRename: startRename,
   });
@@ -210,17 +203,34 @@ export const ChatHeader = memo(function ChatHeader({
       onContextMenu={handleHeaderContextMenu}
     >
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+        {officeMode ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label="新对话"
+                  onClick={onNewThreadInProject}
+                  className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              }
+            >
+              <SquarePenIcon className="size-4" aria-hidden />
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">新对话</TooltipPopup>
+          </Tooltip>
+        ) : null}
         {/* The project always leads the header: knowing which project a
             thread lives in is priority zero, and the thread title alone
             doesn't answer it. */}
-        {activeProjectName ? (
+        {!officeMode && activeProjectName ? (
           <span className="inline-flex shrink-0 items-center gap-2">
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    aria-label={`New thread in ${activeProjectName}`}
+                    aria-label={`在 ${activeProjectName} 中新建任务`}
                     onClick={onNewThreadInProject}
                     className="inline-flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   />
@@ -233,7 +243,7 @@ export const ChatHeader = memo(function ChatHeader({
                 />
                 <span className="max-w-40 truncate text-sm font-medium">{activeProjectName}</span>
               </TooltipTrigger>
-              <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+              <TooltipPopup side="top">在 {activeProjectName} 中新建任务</TooltipPopup>
             </Tooltip>
             <span aria-hidden className="text-icon-muted">
               /
@@ -243,7 +253,7 @@ export const ChatHeader = memo(function ChatHeader({
         {renamingTitle !== null ? (
           <input
             autoFocus
-            aria-label="Thread title"
+            aria-label="任务标题"
             className="min-w-0 flex-1 rounded-sm bg-transparent text-sm font-medium text-foreground outline-none ring-1 ring-ring/50 focus:ring-ring"
             defaultValue={renamingTitle}
             onBlur={(event) => {
@@ -260,7 +270,7 @@ export const ChatHeader = memo(function ChatHeader({
                 <button
                   ref={titleButtonRef}
                   type="button"
-                  aria-label={`Thread actions for ${activeThreadTitle}`}
+                  aria-label={`${activeThreadTitle} 的任务操作`}
                   aria-haspopup="menu"
                   onClick={openMenuFromTitle}
                   className="group/thread-title inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"

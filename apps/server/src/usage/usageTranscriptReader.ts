@@ -20,7 +20,6 @@ import type { UsageProviderKind } from "@t3tools/contracts";
 import {
   initialCodexScanState,
   mightCarryUsage,
-  parseClaudeLine,
   parseCodexLine,
   type UsageRecord,
 } from "./usageTranscripts.ts";
@@ -116,21 +115,14 @@ export async function readTranscriptRecords(
     });
 
     for await (const line of lines) {
-      if (provider === "codex") {
-        if (
-          !mightCarryUsage(line, provider) &&
-          !line.includes('"turn_context"') &&
-          !line.includes('"session_meta"')
-        ) {
-          continue;
-        }
-        const record = parseCodexLine(line, codexState);
-        if (record !== null) records.push(record);
+      if (
+        !mightCarryUsage(line, provider) &&
+        !line.includes('"turn_context"') &&
+        !line.includes('"session_meta"')
+      ) {
         continue;
       }
-
-      if (!mightCarryUsage(line, provider)) continue;
-      const record = parseClaudeLine(line);
+      const record = parseCodexLine(line, codexState);
       if (record !== null) records.push(record);
     }
   } catch {

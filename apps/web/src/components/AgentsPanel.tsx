@@ -36,16 +36,16 @@ import { ScrollArea } from "~/components/ui/scroll-area";
  * user problem). Only settled states differentiate.
  */
 const STATUS_VISUALS: Record<RuntimeSubagent["status"], { dotClass: string; label: string }> = {
-  pending: { dotClass: "bg-info", label: "Working" },
-  running: { dotClass: "bg-info", label: "Working" },
-  waiting: { dotClass: "bg-info", label: "Working" },
-  // Idle reads as settled (muted, not sky): a resting Codex child looks done
+  pending: { dotClass: "bg-info", label: "处理中" },
+  running: { dotClass: "bg-info", label: "处理中" },
+  waiting: { dotClass: "bg-info", label: "处理中" },
+  // Idle reads as settled (muted, not sky): a resting child agent looks done
   // unless resumed — live-test: sky idle dots read as stuck in-progress.
-  idle: { dotClass: "bg-muted-foreground/50", label: "Idle · resumable" },
-  completed: { dotClass: "bg-success", label: "Completed" },
-  failed: { dotClass: "bg-destructive", label: "Failed" },
-  cancelled: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
-  interrupted: { dotClass: "bg-muted-foreground/60", label: "Stopped" },
+  idle: { dotClass: "bg-muted-foreground/50", label: "空闲 · 可继续" },
+  completed: { dotClass: "bg-success", label: "已完成" },
+  failed: { dotClass: "bg-destructive", label: "失败" },
+  cancelled: { dotClass: "bg-muted-foreground/60", label: "已停止" },
+  interrupted: { dotClass: "bg-muted-foreground/60", label: "已停止" },
 };
 
 function StatusDot({ status }: { status: RuntimeSubagent["status"] }) {
@@ -285,7 +285,7 @@ function WorkflowScriptView({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close script"
+          aria-label="关闭脚本"
           className="ml-auto text-muted-foreground hover:text-foreground"
         >
           <X aria-hidden className="size-3" />
@@ -298,9 +298,9 @@ function WorkflowScriptView({
             {result.value.truncated ? "\n… (truncated)" : ""}
           </pre>
         ) : result._tag === "Failure" ? (
-          <p className="text-xs text-destructive-foreground">Could not load the script.</p>
+          <p className="text-xs text-destructive-foreground">无法加载脚本。</p>
         ) : (
-          <p className="text-xs text-muted-foreground">Loading…</p>
+          <p className="text-xs text-muted-foreground">正在加载…</p>
         )}
       </div>
     </div>
@@ -420,7 +420,7 @@ function ExpandedWorkflowSection({
         <button
           type="button"
           onClick={onCollapse}
-          aria-label="Collapse workflow"
+          aria-label="收起工作流"
           className="text-muted-foreground hover:text-foreground"
         >
           <ChevronDown aria-hidden className="size-3" />
@@ -531,7 +531,7 @@ export function AgentsPanel({
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <Bot aria-hidden className="size-6 text-muted-foreground/60" />
-        <p className="text-sm font-medium">No agents yet</p>
+        <p className="text-sm font-medium">暂无 Agent</p>
         <p className="max-w-56 text-xs text-muted-foreground">
           When this thread spawns subagents or runs a workflow, they show up here with live status,
           activity, and token usage.

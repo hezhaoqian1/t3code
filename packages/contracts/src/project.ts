@@ -5,6 +5,7 @@ import {
   TrimmedNonEmptyString,
   TrimmedString,
 } from "./baseSchemas.ts";
+import { ServerProviderSkill } from "./server.ts";
 
 const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;
@@ -79,6 +80,48 @@ export const ProjectListEntriesResult = Schema.Struct({
   truncated: Schema.Boolean,
 });
 export type ProjectListEntriesResult = typeof ProjectListEntriesResult.Type;
+
+export const ProjectListSkillsInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+});
+export type ProjectListSkillsInput = typeof ProjectListSkillsInput.Type;
+
+export const ProjectListSkillsResult = Schema.Struct({
+  skills: Schema.Array(ServerProviderSkill),
+});
+export type ProjectListSkillsResult = typeof ProjectListSkillsResult.Type;
+
+export const ProjectSkillCatalogFailure = Schema.Literals([
+  "project_not_found",
+  "project_lookup_failed",
+  "catalog_refresh_failed",
+]);
+export type ProjectSkillCatalogFailure = typeof ProjectSkillCatalogFailure.Type;
+
+export class ProjectListSkillsError extends Schema.TaggedErrorClass<ProjectListSkillsError>()(
+  "ProjectListSkillsError",
+  {
+    cwd: Schema.optional(TrimmedNonEmptyString),
+    failure: Schema.optional(ProjectSkillCatalogFailure),
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
+  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
+  constructor(props: {
+    readonly cwd: string;
+    readonly failure: ProjectSkillCatalogFailure;
+    readonly cause?: unknown;
+  }) {
+    super({
+      ...props,
+      message:
+        props.failure === "project_not_found"
+          ? `Project workspace '${props.cwd}' is not registered.`
+          : `Failed to list Agent Skills for project workspace '${props.cwd}'.`,
+    } as any);
+  }
+}
 
 export const ProjectEntriesFailure = Schema.Literals([
   "workspace_root_not_found",

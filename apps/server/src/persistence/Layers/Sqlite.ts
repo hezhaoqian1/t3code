@@ -6,6 +6,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import type { SqlError } from "effect/unstable/sql/SqlError";
 
 import { runMigrations } from "../Migrations.ts";
+import * as DatabaseLease from "../DatabaseLease.ts";
 import { ServerConfig } from "../../config.ts";
 
 type RuntimeSqliteLayerConfig = {
@@ -46,16 +47,15 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
   const path = yield* Path.Path;
   yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
 
-  return Layer.provideMerge(
-    setup,
-    makeRuntimeSqliteLayer({
-      filename: dbPath,
-      spanAttributes: {
-        "db.name": path.basename(dbPath),
-        "service.name": "t3-server",
-      },
-    }),
-  );
+  const sqliteLayer = makeRuntimeSqliteLayer({
+    filename: dbPath,
+    spanAttributes: {
+      "db.name": path.basename(dbPath),
+      "service.name": "t3-server",
+    },
+  }).pipe(Layer.provideMerge(DatabaseLease.layer(dbPath)));
+
+  return Layer.provideMerge(setup, sqliteLayer);
 }, Layer.unwrap);
 
 export const SqlitePersistenceMemory = Layer.provideMerge(

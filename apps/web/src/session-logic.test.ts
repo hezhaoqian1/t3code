@@ -338,8 +338,7 @@ describe("derivePendingUserInputs", () => {
         tone: "error",
         payload: {
           requestId: "req-user-input-stale-1",
-          detail:
-            "Provider adapter request failed (codex) for item/tool/requestUserInput: Unknown pending Codex user input request: req-user-input-stale-1",
+          detail: "Unknown pending user input request: req-user-input-stale-1",
         },
       }),
     ];

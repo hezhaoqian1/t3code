@@ -1,8 +1,4 @@
-import type {
-  AuthClientMetadata,
-  AuthClientMetadataDeviceType,
-  AuthClientPresentationMetadata,
-} from "@t3tools/contracts";
+import type { AuthClientMetadata, AuthClientPresentationMetadata } from "@t3tools/contracts";
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as NodeCrypto from "node:crypto";
 import * as Encoding from "effect/Encoding";
@@ -16,31 +12,19 @@ const SESSION_COOKIE_NAME = "t3_session";
  * clobbers the first's session and both sides see "Invalid session token
  * signature" until someone clears cookies by hand.
  *
- * Two populations qualify, for the same reason but from different causes:
- *
- * - **Dev servers** (`devUrl` set), which run several at a time across worktrees.
- * - **Desktop**, which scans upward from 3773 for a free port and binds
+ * Desktop scans upward from 3773 for a free port and binds
  *   127.0.0.1, so a second instance lands on a different port and the same host.
- *
- * Hosted deployments keep the stable production name: their public port can
- * change between releases, and scoping it would log every user out.
  */
 export function resolveSessionCookieName(input: {
   readonly mode: "web" | "desktop";
   readonly port: number;
-  readonly host: string | undefined;
   readonly instanceKey: string;
-  readonly development: boolean;
 }): string {
   if (input.mode === "desktop") {
     return `${SESSION_COOKIE_NAME}_${input.port}`;
   }
 
-  if (!input.development && isRemoteReachableHost(input.host)) {
-    return SESSION_COOKIE_NAME;
-  }
-
-  // Cookies are scoped by host, not port. Loopback development servers need an
+  // Cookies are scoped by host, not port. Parallel loopback servers need an
   // instance-specific name or parallel agents overwrite each other's session,
   // and a server that later reuses the port receives a token signed elsewhere.
   const instanceHash = NodeCrypto.createHash("sha256")
@@ -48,22 +32,6 @@ export function resolveSessionCookieName(input: {
     .digest("hex")
     .slice(0, 12);
   return `${SESSION_COOKIE_NAME}_${input.port}_${instanceHash}`;
-}
-
-export function isRemoteReachableHost(host: string | undefined): boolean {
-  if (host === "0.0.0.0" || host === "::" || host === "[::]") {
-    return true;
-  }
-  if (!host || host.length === 0) {
-    return false;
-  }
-  return !(
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host === "[::1]" ||
-    host.startsWith("127.")
-  );
 }
 
 export function base64UrlEncode(input: string | Uint8Array): string {
@@ -103,24 +71,6 @@ function normalizeIpAddress(value: string | null | undefined): string | undefine
     return undefined;
   }
   return normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
-}
-
-function inferDeviceType(userAgent: string | undefined): AuthClientMetadataDeviceType {
-  if (!userAgent) {
-    return "unknown";
-  }
-
-  const normalized = userAgent.toLowerCase();
-  if (/bot|crawler|spider|slurp|curl|wget/.test(normalized)) {
-    return "bot";
-  }
-  if (/ipad|tablet/.test(normalized)) {
-    return "tablet";
-  }
-  if (/iphone|android.+mobile|mobile/.test(normalized)) {
-    return "mobile";
-  }
-  return "desktop";
 }
 
 function inferBrowser(userAgent: string | undefined): string | undefined {
@@ -177,7 +127,7 @@ export function deriveAuthClientMetadata(input: {
     ...(input.presented?.label ? { label: input.presented.label } : {}),
     ...(ipAddress ? { ipAddress } : {}),
     ...(userAgent ? { userAgent } : {}),
-    deviceType: input.presented?.deviceType ?? inferDeviceType(userAgent),
+    deviceType: "desktop",
     ...(os ? { os } : {}),
     ...(browser ? { browser } : {}),
   };

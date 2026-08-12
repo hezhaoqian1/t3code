@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/contracts",
-  "version": "0.0.32",
+  "version": "0.2.0",
   "private": true,
   "files": [
     "dist"
@@ -15,9 +15,9 @@
       "types": "./src/settings.ts",
       "import": "./src/settings.ts"
     },
-    "./relay": {
-      "types": "./src/relay.ts",
-      "import": "./src/relay.ts"
+    "./fd/runtime-credentials": {
+      "types": "./src/fd/runtimeCredentials.ts",
+      "import": "./src/fd/runtimeCredentials.ts"
     }
   },
   "scripts": {

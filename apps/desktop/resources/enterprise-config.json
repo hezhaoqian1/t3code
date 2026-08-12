@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "distribution": "internal",
+  "newApiOrigin": "https://ai-api.fdsure.com",
+  "updateManifestUrl": "https://ai-api.fdsure.com/downloads/desktop/latest/latest.json"
+}

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "baselineRefs": [
+    "docs/aegis/specs/2026-08-09-fd-ai-local-desktop-design.md",
+    "docs/aegis/plans/2026-08-09-fd-ai-desktop-implementation.md"
+  ],
+  "impactStatement": "docs/aegis/work/2026-08-09-fd-ai-desktop/impact-statement-draft.json",
+  "compatPlan": "Retain FD APIs and T3 local workbench; retire all remote, mobile, cloud, Clerk, and third-party provider compatibility.",
+  "retirementPlan": "FdAgentKernel, FdResponsesClient, FdDeepSeekTextGeneration, and AI SDK dependencies remain transitional and must not be removed until the gated real test passes and the compatibility evidence is reviewed.",
+  "evidenceBundle": [
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-1-baseline-tests.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-10-final-quality-gate.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-11-final-quality-gate.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-11a-codex-compatibility-local.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-2-release-smoke.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-2-script-regression.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-2-workspace-graph.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-3-desktop-regression.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-3-retirement-scan.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-3-typechecks.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-4-auth-retirement.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-4-loopback-runtime.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-4-regression.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-5-client-contract-regression.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-5-independent-review.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-6-independent-review.json",
+    "docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-6-renderer-regression.json"
+  ]
+}

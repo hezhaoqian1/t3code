@@ -51,7 +51,7 @@ import {
   repositoryConventionsTextGenerationPolicy,
 } from "../textGeneration/TextGenerationPresets.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
-import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
+import { FD_DEEPSEEK_MODEL_SELECTION } from "../fd-agent/FdModelPolicy.ts";
 import { extractBranchNameFromRemoteRef } from "./remoteRefs.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import type { GitManagerServiceError } from "@t3tools/contracts";
@@ -595,7 +595,6 @@ export const make = Effect.gen(function* () {
   const gitCore = yield* GitVcsDriver.GitVcsDriver;
   const sourceControlProviders = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
   const textGeneration = yield* TextGeneration.TextGeneration;
-  const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
   const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
   const crypto = yield* Crypto.Crypto;
 
@@ -2072,22 +2071,10 @@ export const make = Effect.gen(function* () {
         let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
         const textGenerationSettings = yield* serverSettingsService.getSettings.pipe(
-          Effect.flatMap((settings) =>
-            settings.sourceControlWriterModelSelection === null
-              ? Effect.succeed({
-                  modelSelection: settings.textGenerationModelSelection,
-                  style: settings.sourceControlWritingStyle,
-                })
-              : providerRegistry.getProviders.pipe(
-                  Effect.map((providers) => ({
-                    modelSelection: ServerSettings.resolveSourceControlWriterModelSelection(
-                      settings,
-                      providers,
-                    ),
-                    style: settings.sourceControlWritingStyle,
-                  })),
-                ),
-          ),
+          Effect.map((settings) => ({
+            modelSelection: FD_DEEPSEEK_MODEL_SELECTION,
+            style: settings.sourceControlWritingStyle,
+          })),
           Effect.mapError(
             (cause) =>
               new GitManagerError({

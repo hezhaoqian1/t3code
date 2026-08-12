@@ -1,5 +1,5 @@
 import * as Schema from "effect/Schema";
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ApprovalRequestId,
   EventId,
@@ -56,6 +56,9 @@ export const ProviderSessionStartInput = Schema.Struct({
   // See ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
   cwd: Schema.optional(TrimmedNonEmptyString),
+  // Server-derived project identity used by provider policy. This remains the
+  // project root even when cwd points at a thread worktree.
+  projectWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
   approvalPolicy: Schema.optional(ProviderApprovalPolicy),
@@ -66,6 +69,12 @@ export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
+  fdSkillVersionId: Schema.optional(PositiveInt),
+  // Stable across retries of the same accepted orchestration command. Only
+  // the FD Enterprise transport uses this value for idempotent replay.
+  idempotencyKey: Schema.optional(
+    TrimmedNonEmptyString.check(Schema.isMaxLength(64), Schema.isPattern(/^[A-Za-z0-9_-]+$/)),
+  ),
   input: Schema.optional(
     TrimmedNonEmptyString.check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)),
   ),

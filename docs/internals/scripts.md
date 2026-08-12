@@ -16,17 +16,12 @@ vp run dev
 Node 24 is required. Bun is not: the server picks Bun adapters when it detects Bun and falls back to
 Node otherwise, and nothing in contributor setup needs it.
 
-`vp run dev` prints a one-time pairing URL. Open it so the first browser navigation is
-authenticated.
+Use `vp run dev:desktop` for the authenticated product experience. Electron starts the local server
+on loopback and delivers its bootstrap credential to the renderer over trusted IPC.
 
 ## Dev
 
 - `vp run dev`: Starts contracts, server, and web in watch mode.
-- `vp run dev --share`: Also publishes the web port over HTTPS on this machine's tailnet. The
-  startup pairing URL is built against the shared origin, and the mapping is removed on exit.
-  Shared runs default to Vite's bundled dev mode (`T3CODE_BUNDLED_DEV=1`): a remote browser pays a
-  network round trip per import level in unbundled dev, which turns a cold module graph into
-  minutes of waterfall. Set `T3CODE_BUNDLED_DEV=0` to opt a shared run back out.
 - `vp run dev --browser`: Auto-opens a browser. Off by default. The dev runner writes
   `T3CODE_NO_BROWSER` itself from this flag, so setting `T3CODE_NO_BROWSER=0` in your environment has
   no effect; use `--browser`.
@@ -77,8 +72,8 @@ authenticated.
 ### Desktop `.dmg` packaging notes
 
 - Default build is unsigned/not notarized for local sharing.
-- The DMG build uses `assets/prod/black-macos-1024.png` as the production app icon source.
-- Desktop production windows load the bundled UI from the `t3code://app/` root URL (not a
+- The DMG build uses `assets/fd/fangde-ai-1024.png` as the Fangde AI app icon source.
+- Desktop production windows load the bundled UI from the `fdai://app/` root URL (not a
   `127.0.0.1` document URL, and not an explicit `index.html` path).
 - Desktop packaging includes `apps/server/dist` (the `t3` backend) and starts it on loopback with an
   auth token for WebSocket/API traffic.
@@ -87,8 +82,7 @@ authenticated.
 - To keep staging files for debugging package contents, run: `vp run dist:desktop:dmg --keep-stage`
 - To allow code-signing/notarization when configured in CI/secrets, add: `--signed`.
 - Signed macOS builds also require `T3CODE_APPLE_TEAM_ID` and
-  `T3CODE_MACOS_PROVISIONING_PROFILE`. The passkey RP domain is derived from
-  `T3CODE_CLERK_PUBLISHABLE_KEY` unless `T3CODE_CLERK_PASSKEY_RP_DOMAINS` overrides it.
+  `T3CODE_MACOS_PROVISIONING_PROFILE`.
 - Windows `--signed` uses Azure Trusted Signing and expects:
   `AZURE_TRUSTED_SIGNING_ENDPOINT`, `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`,
   `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`, and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`.
@@ -99,7 +93,7 @@ authenticated.
 
 `dev` and `dev:web` leave `VITE_HTTP_URL` and `VITE_WS_URL` unset so the browser resolves the backend
 from `window.location.origin`. Vite proxies `/api`, `/ws`, `/oauth`, and `/.well-known` to the
-server, allowing the same bundle to work from localhost or a tailnet hostname.
+loopback server. Non-loopback Vite origins are rejected by server configuration.
 
 ## Running multiple dev instances
 

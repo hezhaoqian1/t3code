@@ -29,6 +29,7 @@ import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
 import { useComposerDraftStore } from "~/composerDraftStore";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
+import { usePrimaryEnvironmentId } from "~/state/environments";
 import { resolveThreadRouteTarget } from "~/threadRoutes";
 import {
   buildVisibleToastLayout,
@@ -428,9 +429,10 @@ interface ToastProviderProps extends Toast.Provider.Props {
 }
 
 function useActiveThreadRefFromRoute(): ScopedThreadRef | null {
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const routeTarget = useParams({
     strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
+    select: (params) => resolveThreadRouteTarget(params, primaryEnvironmentId),
   });
   const activeDraftSession = useComposerDraftStore((store) =>
     routeTarget?.kind === "draft" ? store.getDraftSession(routeTarget.draftId) : null,

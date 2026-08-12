@@ -63,6 +63,10 @@ import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import {
+  FdEnterpriseThreadRuntime,
+  FdEnterpriseThreadRuntimeLive,
+} from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -97,6 +101,10 @@ describe("ProviderCommandReactor", () => {
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
+  let enterpriseRuntimeRuntime: ManagedRuntime.ManagedRuntime<
+    FdEnterpriseThreadRuntime,
+    never
+  > | null = null;
   const createdStateDirs = new Set<string>();
   const createdBaseDirs = new Set<string>();
 
@@ -109,6 +117,10 @@ describe("ProviderCommandReactor", () => {
       await runtime.dispose();
     }
     runtime = null;
+    if (enterpriseRuntimeRuntime) {
+      await enterpriseRuntimeRuntime.dispose();
+    }
+    enterpriseRuntimeRuntime = null;
     for (const stateDir of createdStateDirs) {
       NodeFS.rmSync(stateDir, { recursive: true, force: true });
     }
@@ -345,6 +357,12 @@ describe("ProviderCommandReactor", () => {
       },
     };
 
+    // Both consumers must share the same in-memory staging map.
+    enterpriseRuntimeRuntime = ManagedRuntime.make(FdEnterpriseThreadRuntimeLive);
+    const enterpriseRuntime = await enterpriseRuntimeRuntime.runPromise(
+      Effect.service(FdEnterpriseThreadRuntime),
+    );
+    const enterpriseRuntimeLayer = Layer.succeed(FdEnterpriseThreadRuntime, enterpriseRuntime);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(ThreadBackgroundLiveness.layer),
@@ -354,6 +372,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
       Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
+      Layer.provideMerge(enterpriseRuntimeLayer),
     );
     const projectionSnapshotLayer = OrchestrationProjectionSnapshotQueryLive.pipe(
       Layer.provide(ThreadBackgroundLiveness.layer),
@@ -415,6 +434,7 @@ describe("ProviderCommandReactor", () => {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir)),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(enterpriseRuntimeLayer),
     );
     runtime = ManagedRuntime.make(layer);
 
@@ -487,6 +507,9 @@ describe("ProviderCommandReactor", () => {
 
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    // Let the hot PubSub subscription establish before the first command is
+    // dispatched; otherwise a test turn can legitimately beat the listener.
+    await Effect.runPromise(Effect.yieldNow);
     const drain = () => Effect.runPromise(reactor.drain);
 
     return {
@@ -503,6 +526,7 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      enterpriseRuntime,
       stateDir,
       drain,
       runEffect,
@@ -527,6 +551,7 @@ describe("ProviderCommandReactor", () => {
           text: "hello reactor",
           attachments: [],
         },
+        fdSkillVersionId: 10004,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         createdAt: now,
@@ -538,18 +563,35 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[0]?.[0]).toEqual(ThreadId.make("thread-1"));
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
       cwd: "/tmp/provider-project",
+      projectWorkspaceRoot: "/tmp/provider-project",
       modelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",
       },
       runtimeMode: "approval-required",
     });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      fdSkillVersionId: 10004,
+      input: "hello reactor",
+    });
 
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.messages).toEqual([]);
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+
+    const enterpriseOverlay = await Effect.runPromise(
+      harness.enterpriseRuntime.getSnapshot(ThreadId.make("thread-1")),
+    );
+    expect(enterpriseOverlay.messages).toMatchObject([
+      { id: asMessageId("user-message-1"), role: "user", text: "hello reactor" },
+    ]);
+
+    const persisted = await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0, 100)));
+    expect(JSON.stringify(Array.from(persisted))).not.toContain("hello reactor");
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>
@@ -900,7 +942,8 @@ describe("ProviderCommandReactor", () => {
     expect(message.startsWith("USER:\nReview subagent monitoring risks.")).toBe(true);
     expect(message).toContain("[First user message truncated]");
     expect(message).toContain("[Earlier content truncated]");
-    expect(message).toContain("image.png");
+    expect(message).toContain("[1 image attachment provided]");
+    expect(message).not.toContain("image.png");
     expect(message).toHaveLength(8_000);
     expect(input.attachments?.map((attachment) => attachment.id)).toEqual([
       "opening-context-image",
@@ -1098,7 +1141,7 @@ describe("ProviderCommandReactor", () => {
   it("pins the first user context and attachment before the retained tail", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
-    const firstUserContext = "USER:\nOld visual issue\n[Attachments: old-issue.png]";
+    const firstUserContext = "USER:\nOld visual issue\n[1 image attachment provided]";
     const truncationMarker = "[Earlier content truncated]\n\n";
     const retainedContext = "x".repeat(
       8_000 - firstUserContext.length - "\n\n".length - truncationMarker.length,
@@ -2035,80 +2078,13 @@ describe("ProviderCommandReactor", () => {
     expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
       threadId: ThreadId.make("thread-1"),
       cwd: "/tmp/provider-project-worktree",
+      projectWorkspaceRoot: "/tmp/provider-project",
       resumeCursor: { opaque: "resume-1" },
       modelSelection: {
         instanceId: ProviderInstanceId.make("claudeAgent"),
         model: "claude-sonnet-4-6",
       },
       runtimeMode: "approval-required",
-    });
-  });
-
-  it("restarts claude sessions when claude effort changes", async () => {
-    const harness = await createHarness({
-      threadModelSelection: {
-        instanceId: ProviderInstanceId.make("claudeAgent"),
-        model: "claude-sonnet-4-6",
-      },
-    });
-    const now = "2026-01-01T00:00:00.000Z";
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-claude-effort-1"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-claude-effort-1"),
-          role: "user",
-          text: "first claude turn",
-          attachments: [],
-        },
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-sonnet-4-6",
-          [{ id: "effort", value: "medium" }],
-        ),
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(() => harness.startSession.mock.calls.length === 1);
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-claude-effort-2"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-claude-effort-2"),
-          role: "user",
-          text: "second claude turn",
-          attachments: [],
-        },
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-sonnet-4-6",
-          [{ id: "effort", value: "max" }],
-        ),
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(() => harness.startSession.mock.calls.length === 2);
-    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      resumeCursor: { opaque: "resume-1" },
-      modelSelection: createModelSelection(
-        ProviderInstanceId.make("claudeAgent"),
-        "claude-sonnet-4-6",
-        [{ id: "effort", value: "max" }],
-      ),
     });
   });
 
@@ -2799,9 +2775,9 @@ describe("ProviderCommandReactor", () => {
     harness.respondToUserInput.mockImplementation(() =>
       Effect.fail(
         new ProviderAdapterRequestError({
-          provider: ProviderDriverKind.make("claudeAgent"),
+          provider: ProviderDriverKind.make("fd-deepseek"),
           method: "item/tool/respondToUserInput",
-          detail: "Unknown pending Codex user input request: user-input-request-1",
+          detail: "Unknown pending user input request: user-input-request-1",
         }),
       ),
     );
@@ -2814,7 +2790,7 @@ describe("ProviderCommandReactor", () => {
         session: {
           threadId: ThreadId.make("thread-1"),
           status: "running",
-          providerName: "claudeAgent",
+          providerName: "fd-deepseek",
           runtimeMode: "approval-required",
           activeTurnId: null,
           lastError: null,

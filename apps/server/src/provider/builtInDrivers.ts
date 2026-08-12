@@ -4,9 +4,7 @@
  *
  * Every driver that the server knows how to instantiate from settings is
  * listed here. The `ProviderInstanceRegistry` iterates this array when
- * resolving `providerInstances` entries; anything not in the array surfaces
- * as an `"unavailable"` shadow snapshot at runtime (see
- * `buildUnavailableProviderSnapshot`).
+ * resolving internal provider instance entries.
  *
  * Adding a new first-party driver means:
  *   1. implement `ProviderDriver` in a sibling `Drivers/<Name>Driver.ts`,
@@ -15,16 +13,11 @@
  *
  * The aggregated `BuiltInDriversEnv` type is the union of every driver's
  * env requirement — the registry layer's `R` is this type, and the runtime
- * layer (ChildProcessSpawner, FileSystem, Path, ServerConfig,
- * OpenCodeRuntime, …) must satisfy it.
+ * layer must satisfy it.
  *
  * @module provider/builtInDrivers
  */
-import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
-import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
-import { CursorDriver, type CursorDriverEnv } from "./Drivers/CursorDriver.ts";
-import { GrokDriver, type GrokDriverEnv } from "./Drivers/GrokDriver.ts";
-import { OpenCodeDriver, type OpenCodeDriverEnv } from "./Drivers/OpenCodeDriver.ts";
+import { FdDeepSeekDriver, type FdDeepSeekDriverEnv } from "./Drivers/FdDeepSeekDriver.ts";
 import type { AnyProviderDriver } from "./ProviderDriver.ts";
 
 /**
@@ -32,12 +25,7 @@ import type { AnyProviderDriver } from "./ProviderDriver.ts";
  * driver. The registry layer declares `R = BuiltInDriversEnv`; the runtime
  * layer must provide every service in this union.
  */
-export type BuiltInDriversEnv =
-  | ClaudeDriverEnv
-  | CodexDriverEnv
-  | CursorDriverEnv
-  | GrokDriverEnv
-  | OpenCodeDriverEnv;
+export type BuiltInDriversEnv = FdDeepSeekDriverEnv;
 
 /**
  * Ordered list of built-in drivers. Order matters only for tie-breaking in
@@ -45,9 +33,5 @@ export type BuiltInDriversEnv =
  * iteration order has no functional effect on instance lookup.
  */
 export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv>> = [
-  CodexDriver,
-  ClaudeDriver,
-  CursorDriver,
-  GrokDriver,
-  OpenCodeDriver,
+  FdDeepSeekDriver,
 ];

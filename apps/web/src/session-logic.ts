@@ -7,7 +7,6 @@ import {
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
-  ProviderDriverKind,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type ThreadId,
@@ -22,37 +21,6 @@ import type {
   ThreadSession,
   TurnDiffSummary,
 } from "./types";
-
-export type ProviderPickerKind = ProviderDriverKind;
-
-export const PROVIDER_OPTIONS: Array<{
-  value: ProviderPickerKind;
-  label: string;
-  available: boolean;
-  /** Shown on the model picker sidebar when relevant */
-  pickerSidebarBadge?: "new" | "soon";
-}> = [
-  { value: ProviderDriverKind.make("codex"), label: "Codex", available: true },
-  { value: ProviderDriverKind.make("claudeAgent"), label: "Claude", available: true },
-  {
-    value: ProviderDriverKind.make("opencode"),
-    label: "OpenCode",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
-  {
-    value: ProviderDriverKind.make("cursor"),
-    label: "Cursor",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
-  {
-    value: ProviderDriverKind.make("grok"),
-    label: "Grok",
-    available: true,
-    pickerSidebarBadge: "new",
-  },
-];
 
 export type WorkLogToolLifecycleStatus =
   | "inProgress"
@@ -378,8 +346,7 @@ function isStalePendingRequestFailureDetail(detail: string | undefined): boolean
     normalized.includes("unknown pending approval request") ||
     normalized.includes("unknown pending permission request") ||
     normalized.includes("unknown pending user-input request") ||
-    normalized.includes("unknown pending user input request") ||
-    normalized.includes("unknown pending codex user input request")
+    normalized.includes("unknown pending user input request")
   );
 }
 
@@ -685,7 +652,7 @@ export function hasActionableProposedPlan(
  * Quiet-timeline guarantee: the work log carries the parent's narrative plus
  * at most one row per agent. Everything an agent does internally lives in the
  * Agents surface:
- * - timelineBypass rows (Codex children, workflow members) never render here;
+ * - timelineBypass rows (child agents and workflow members) never render here;
  * - tool rows attributed to an owning agent (payload.agentId) are re-homed;
  * - task.progress ticks collapse into one row per taskId;
  * - task.updated is fold input only (status patches are not narrative).
@@ -722,7 +689,7 @@ function isAgentInternalActivity(activity: OrchestrationThreadActivity): boolean
   // (review finding: hiding on agentId alone removed nested agents and
   // their anchors). Bypassed agent lifecycle rows also pass — collapse
   // folds every such row into its batch's single CTA row, which is how
-  // Codex children (whose rows are ALL bypassed) get an anchor at the
+  // child agents whose rows are all bypassed get an anchor at the
   // spawn point.
   if (isTaskRow) {
     const ownedByAgent = typeof payload.agentId === "string" && payload.agentId.trim().length > 0;
@@ -928,8 +895,7 @@ function agentSpawnGroupKey(entry: DerivedWorkLogEntry): string {
   // task. Unrelated turn-less spawns (separate fleets whose rows lost their
   // turn) must not collapse into one immortal "direct:no-turn" CTA
   // accumulating every agent the thread ever ran (review finding). Adapters
-  // stamp spawn turns (Codex spawnTurnId; Claude rows ride real turns), so
-  // this path is defensive.
+  // normally stamp spawn turns, so this path is defensive.
   return entry.turnId ? `direct:${entry.turnId}` : `direct:task:${taskId}`;
 }
 
@@ -944,8 +910,8 @@ function collapseDerivedWorkLogEntries(
   // guarantee).
   const spawnRowIndex = new Map<string, number>();
   // Batch membership is decided once, at the FIRST row seen for a taskId.
-  // Claude background subagents settle between turns, so their completion
-  // rows carry fresh synthetic turn ids (or none) — keying each row by its
+  // Background subagents can settle between turns, so their completion rows
+  // carry fresh synthetic turn ids (or none) — keying each row by its
   // own turn splintered one batch into a stream of "Kicked off N subagents"
   // rows (live-test finding, thread 7ac7ef05).
   const groupKeyByTaskId = new Map<string, string>();

@@ -57,7 +57,7 @@ describe("ProjectScriptsControl compact controls", () => {
   it("keeps the standalone Add control compact and expands it with its label", () => {
     const html = renderControl([]);
 
-    expectResponsiveXsControl(buttonTag(html, "Add action"));
+    expectResponsiveXsControl(buttonTag(html, "添加操作"));
     expect(html).toContain(
       'class="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"',
     );

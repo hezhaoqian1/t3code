@@ -14,8 +14,6 @@ function warningProvider(): ServerProvider {
     driver: ProviderDriverKind.make("codex"),
     displayName: "Codex",
     enabled: true,
-    installed: true,
-    version: "1.0.0",
     status: "warning",
     auth: { status: "authenticated" },
     checkedAt: "2026-07-23T12:00:00.000Z",
@@ -40,7 +38,9 @@ describe("ProviderStatusBanner", () => {
     );
 
     expect(markup).toContain('role="alert"');
-    expect(markup).toContain('aria-label="Dismiss Codex provider warning"');
+    expect(markup).toContain('aria-label="关闭服务状态提示"');
+    expect(markup).toContain("部分 FD Skills 暂时不可用");
+    expect(markup).not.toContain("provider");
     expect(markup).toContain("absolute top-2 right-2");
   });
 
@@ -61,6 +61,7 @@ describe("ProviderStatusBanner", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="Dismiss Codex provider error"');
+    expect(markup).toContain('aria-label="关闭服务状态提示"');
+    expect(markup).toContain("智能服务暂不可用");
   });
 });

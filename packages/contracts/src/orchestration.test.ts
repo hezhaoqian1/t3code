@@ -125,8 +125,8 @@ it.effect("trims branded ids and command string fields at decode boundaries", ()
       title: " Project Title ",
       workspaceRoot: " /tmp/workspace ",
       defaultModelSelection: {
-        provider: "codex",
-        model: " gpt-5.2 ",
+        instanceId: "fd-deepseek",
+        model: " deepseek-v4-flash ",
       },
       createdAt: "2026-01-01T00:00:00.000Z",
     });
@@ -136,8 +136,8 @@ it.effect("trims branded ids and command string fields at decode boundaries", ()
     assert.strictEqual(parsed.workspaceRoot, "/tmp/workspace");
     assert.strictEqual(parsed.createWorkspaceRootIfMissing, undefined);
     assert.deepStrictEqual(parsed.defaultModelSelection, {
-      instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-5.2",
+      instanceId: ProviderInstanceId.make("fd-deepseek"),
+      model: "deepseek-v4-flash",
     });
   }),
 );
@@ -158,35 +158,35 @@ it.effect("decodes project.create with createWorkspaceRootIfMissing enabled", ()
   }),
 );
 
-it.effect("decodes historical project.created payloads with a default provider", () =>
+it.effect("decodes project.created payloads with a canonical model selection", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeProjectCreatedPayload({
       projectId: "project-1",
       title: "Project Title",
       workspaceRoot: "/tmp/workspace",
       defaultModelSelection: {
-        provider: "codex",
-        model: "gpt-5.4",
+        instanceId: "fd-deepseek",
+        model: "deepseek-v4-flash",
       },
       scripts: [],
       createdAt: "2026-01-01T00:00:00.000Z",
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
-    assert.strictEqual(parsed.defaultModelSelection?.instanceId, "codex");
+    assert.strictEqual(parsed.defaultModelSelection?.instanceId, "fd-deepseek");
   }),
 );
 
-it.effect("decodes project.meta-updated payloads with explicit default provider", () =>
+it.effect("decodes project.meta-updated payloads with a canonical model selection", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeProjectMetaUpdatedPayload({
       projectId: "project-1",
       defaultModelSelection: {
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        instanceId: "fd-deepseek",
+        model: "deepseek-v4-flash",
       },
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
-    assert.strictEqual(parsed.defaultModelSelection?.instanceId, "claudeAgent");
+    assert.strictEqual(parsed.defaultModelSelection?.instanceId, "fd-deepseek");
   }),
 );
 
@@ -218,15 +218,17 @@ it.effect("decodes thread.turn.start defaults for provider and runtime mode", ()
         text: "hello",
         attachments: [],
       },
+      fdSkillVersionId: 10004,
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.modelSelection, undefined);
+    assert.strictEqual(parsed.fdSkillVersionId, 10004);
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
   }),
 );
 
-it.effect("preserves explicit provider and runtime mode in thread.turn.start", () =>
+it.effect("preserves canonical model selection and runtime mode in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
       type: "thread.turn.start",
@@ -239,15 +241,42 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
         attachments: [],
       },
       modelSelection: {
-        provider: "codex",
-        model: "gpt-5.4",
+        instanceId: "fd-deepseek",
+        model: "deepseek-v4-flash",
       },
       runtimeMode: "full-access",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
-    assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
+    assert.strictEqual(parsed.modelSelection?.instanceId, "fd-deepseek");
     assert.strictEqual(parsed.runtimeMode, "full-access");
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+  }),
+);
+
+it.effect("rejects retired-provider routing in active thread.turn.start commands", () =>
+  Effect.gen(function* () {
+    for (const modelSelection of [
+      { provider: "codex", model: "gpt-5.4" },
+      { provider: "claudeAgent", model: "claude-opus-4-6" },
+    ]) {
+      const result = yield* Effect.exit(
+        decodeThreadTurnStartCommand({
+          type: "thread.turn.start",
+          commandId: "cmd-turn-retired-provider",
+          threadId: "thread-1",
+          message: {
+            messageId: "msg-retired-provider",
+            role: "user",
+            text: "hello",
+            attachments: [],
+          },
+          modelSelection,
+          runtimeMode: "full-access",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+      assert.strictEqual(result._tag, "Failure");
+    }
   }),
 );
 
@@ -268,8 +297,8 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
           projectId: "project-1",
           title: "Bootstrap thread",
           modelSelection: {
-            provider: "codex",
-            model: "gpt-5.4",
+            instanceId: "fd-deepseek",
+            model: "deepseek-v4-flash",
           },
           runtimeMode: "full-access",
           interactionMode: "default",
@@ -294,15 +323,15 @@ it.effect("accepts bootstrap metadata in thread.turn.start", () =>
   }),
 );
 
-it.effect("decodes thread.created runtime mode for historical events", () =>
+it.effect("decodes thread.created runtime mode defaults", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadCreatedPayload({
       threadId: "thread-1",
       projectId: "project-1",
       title: "Thread title",
       modelSelection: {
-        provider: "codex",
-        model: "gpt-5.4",
+        instanceId: "fd-deepseek",
+        model: "deepseek-v4-flash",
       },
       interactionMode: "default",
       branch: null,
@@ -312,11 +341,11 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
     });
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
-    assert.strictEqual(parsed.modelSelection.instanceId, "codex");
+    assert.strictEqual(parsed.modelSelection.instanceId, "fd-deepseek");
   }),
 );
 
-it.effect("decodes thread.meta-updated payloads with explicit provider", () =>
+it.effect("decodes thread.meta-updated payloads with a canonical model selection", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadMetaUpdatedPayload({
       threadId: "thread-1",
@@ -327,14 +356,14 @@ it.effect("decodes thread.meta-updated payloads with explicit provider", () =>
         startedAt: "2026-01-01T00:00:00.000Z",
       },
       modelSelection: {
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        instanceId: "fd-deepseek",
+        model: "deepseek-v4-flash",
       },
       updatedAt: "2026-01-01T00:00:00.000Z",
     });
     assert.strictEqual(parsed.previousTitle, "Previous title");
     assert.strictEqual(parsed.titleRegeneration?.requestId, "cmd-title-regenerate");
-    assert.strictEqual(parsed.modelSelection?.instanceId, "claudeAgent");
+    assert.strictEqual(parsed.modelSelection?.instanceId, "fd-deepseek");
   }),
 );
 
@@ -391,7 +420,7 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
       id: "thread-1",
       projectId: "project-1",
       title: "Historical thread",
-      modelSelection: { provider: "codex", model: "gpt-5.4" },
+      modelSelection: { instanceId: "fd-deepseek", model: "deepseek-v4-flash" },
       runtimeMode: "full-access",
       interactionMode: "default",
       branch: null,
@@ -511,7 +540,7 @@ it.effect("decodes thread settled and unsettled events", () =>
   }),
 );
 
-it.effect("accepts provider-scoped model options in thread.turn.start", () =>
+it.effect("accepts instance-scoped model options in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
       type: "thread.turn.start",
@@ -524,7 +553,7 @@ it.effect("accepts provider-scoped model options in thread.turn.start", () =>
         attachments: [],
       },
       modelSelection: {
-        provider: "codex",
+        instanceId: "codex",
         model: "gpt-5.3-codex",
         options: [
           { id: "reasoningEffort", value: "high" },
@@ -546,7 +575,7 @@ it.effect("normalizes legacy object-shaped modelSelection.options on decode", ()
       projectId: "project-1",
       title: "Legacy options thread",
       modelSelection: {
-        provider: "claudeAgent",
+        instanceId: "claudeAgent",
         model: "claude-opus-4-6",
         options: {
           effort: "max",
@@ -578,7 +607,7 @@ it.effect("normalizes legacy object-shaped defaultModelSelection.options on deco
       title: "Legacy default project",
       workspaceRoot: "/tmp/legacy",
       defaultModelSelection: {
-        provider: "codex",
+        instanceId: "codex",
         model: "gpt-5.4",
         options: { reasoningEffort: "low" },
       },
@@ -602,7 +631,7 @@ it.effect(
         projectId: "project-1",
         title: "Round trip thread",
         modelSelection: {
-          provider: "codex",
+          instanceId: "codex",
           model: "gpt-5.4",
           options: { fastMode: true },
         },
@@ -715,9 +744,11 @@ it.effect(
       const parsed = yield* decodeThreadTurnStartRequestedPayload({
         threadId: "thread-1",
         messageId: "msg-1",
+        fdSkillVersionId: 10004,
         createdAt: "2026-01-01T00:00:00.000Z",
       });
       assert.strictEqual(parsed.modelSelection, undefined);
+      assert.strictEqual(parsed.fdSkillVersionId, 10004);
       assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
       assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
       assert.strictEqual(parsed.sourceProposedPlan, undefined);
@@ -821,33 +852,20 @@ it.effect("preserves proposed plan implementation metadata when present", () =>
   }),
 );
 
-// ── ModelSelection: instance-keyed wire shape + legacy decoder ────────
-//
-// `ModelSelection` is routing-keyed on `instanceId` — never a driver kind.
-// Persisted and in-flight payloads from pre-instance builds carry a
-// `provider` field whose value was a driver kind; those payloads are migrated
-// at the wire boundary by
-// promoting `provider` to the default instance id for that driver
-// (built-in drivers use the driver kind slug as their default instance id, so
-// the migration is a 1:1 rename).
-//
-// These tests pin the rollback/fork tolerance invariant: legacy payloads
-// decode cleanly for fork-provided drivers, and the decoded form uses
-// `instanceId` uniformly regardless of origin.
+// ── ModelSelection: canonical active wire shape ───────────────────────
 
 const decodeModelSelection = Schema.decodeUnknownEffect(ModelSelection);
 const encodeModelSelection = Schema.encodeUnknownEffect(ModelSelection);
 
-it.effect("ModelSelection migrates legacy `provider` field to `instanceId`", () =>
+it.effect("ModelSelection rejects active retired-provider routing payloads", () =>
   Effect.gen(function* () {
-    const parsed = yield* decodeModelSelection({
-      provider: "codex",
-      model: "gpt-5-codex",
-      options: [{ id: "reasoningEffort", value: "high" }],
-    });
-    assert.strictEqual(parsed.instanceId, ProviderInstanceId.make("codex"));
-    assert.strictEqual(parsed.model, "gpt-5-codex");
-    assert.deepStrictEqual(parsed.options, [{ id: "reasoningEffort", value: "high" }]);
+    for (const legacy of [
+      { provider: "codex", model: "gpt-5.4" },
+      { provider: "claudeAgent", model: "claude-opus-4-6" },
+    ]) {
+      const result = yield* Effect.exit(decodeModelSelection(legacy));
+      assert.strictEqual(result._tag, "Failure");
+    }
   }),
 );
 
@@ -861,35 +879,10 @@ it.effect("ModelSelection accepts an explicit instanceId routing key", () =>
   }),
 );
 
-it.effect("ModelSelection prefers explicit instanceId over legacy provider", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decodeModelSelection({
-      provider: "codex",
-      instanceId: "codex_personal",
-      model: "gpt-5-codex",
-    });
-    assert.strictEqual(parsed.instanceId, ProviderInstanceId.make("codex_personal"));
-  }),
-);
-
-it.effect(
-  "ModelSelection decodes unknown driver kinds via legacy provider (rollback / fork invariant)",
-  () =>
-    Effect.gen(function* () {
-      const parsed = yield* decodeModelSelection({
-        provider: "ollama",
-        model: "llama3:70b",
-        options: [{ id: "temperature", value: "0.4" }],
-      });
-      assert.strictEqual(parsed.instanceId, ProviderInstanceId.make("ollama"));
-      assert.strictEqual(parsed.model, "llama3:70b");
-    }),
-);
-
 it.effect("ModelSelection encodes to the canonical instanceId wire form", () =>
   Effect.gen(function* () {
     const decoded = yield* decodeModelSelection({
-      provider: "ollama",
+      instanceId: "ollama",
       model: "llama3:70b",
       options: [{ id: "temperature", value: "0.4" }],
     });

@@ -3,9 +3,7 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/projects"
-  | "/settings/providers"
   | "/settings/source-control"
-  | "/settings/connections"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -20,14 +18,12 @@ export interface SettingsSearchItem {
  * subtitles both render from this record, so each label exists once.
  */
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
-  "/settings/general": "General",
-  "/settings/appearance": "Appearance",
-  "/settings/keybindings": "Keybindings",
-  "/settings/projects": "Projects",
-  "/settings/providers": "Providers",
-  "/settings/source-control": "Source Control",
-  "/settings/connections": "Connections",
-  "/settings/archived": "Archive",
+  "/settings/general": "通用",
+  "/settings/appearance": "外观",
+  "/settings/keybindings": "快捷键",
+  "/settings/projects": "空间",
+  "/settings/source-control": "版本控制",
+  "/settings/archived": "归档",
 };
 
 /**
@@ -39,14 +35,14 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
 export const SETTINGS_SEARCH_ITEMS = [
   {
     id: "color-scheme",
-    title: "Color scheme",
+    title: "配色方案",
     to: "/settings/appearance",
     // The scheme tiles sit at the top of the Appearance section.
     targetId: "appearance",
   },
   {
     id: "theme",
-    title: "Themes",
+    title: "主题",
     to: "/settings/appearance",
     // Theme cards live directly under the scheme tiles; the section is the
     // stable scroll destination for both.
@@ -55,175 +51,169 @@ export const SETTINGS_SEARCH_ITEMS = [
   {
     // Prefixed because the slider control already owns the `glass-opacity` id.
     id: "setting-glass-opacity",
-    title: "Glass opacity",
+    title: "玻璃透明度",
     to: "/settings/appearance",
-  },
-  {
-    id: "environment-identification",
-    title: "Environment identification",
-    to: "/settings/appearance",
-    // The setting is stage-dependent, so its parent section is the stable destination.
-    targetId: "appearance",
   },
   {
     id: "interface-font",
-    title: "Interface font",
+    title: "界面字体",
     to: "/settings/appearance",
   },
   {
     id: "prompt-font",
-    title: "Prompt font",
+    title: "输入框字体",
     to: "/settings/appearance",
   },
   {
     id: "code-font",
-    title: "Code font",
+    title: "代码字体",
     to: "/settings/appearance",
   },
   {
     id: "terminal-font",
-    title: "Terminal font",
+    title: "终端字体",
     to: "/settings/appearance",
   },
   {
     id: "font-smoothing",
-    title: "Font smoothing",
+    title: "字体平滑",
     to: "/settings/appearance",
   },
   {
     id: "word-wrap",
-    title: "Word wrap",
+    title: "自动换行",
     to: "/settings/appearance",
   },
   {
     id: "project-grouping",
-    title: "Project grouping",
+    title: "空间分组",
     to: "/settings/general",
   },
   {
     id: "auto-settle-inactive-threads",
-    title: "Auto-settle inactive threads",
+    title: "自动归纳不活跃任务",
     to: "/settings/general",
   },
   {
     id: "time-format",
-    title: "Time format",
+    title: "时间格式",
     to: "/settings/general",
   },
   {
     id: "hide-whitespace-changes",
-    title: "Hide whitespace changes",
-    to: "/settings/general",
-  },
-  {
-    id: "provider-update-checks",
-    title: "Provider update checks",
+    title: "隐藏空白字符变更",
     to: "/settings/general",
   },
   {
     id: "new-threads",
-    title: "New threads",
+    title: "新任务",
     to: "/settings/general",
   },
   {
     id: "start-from-origin",
-    title: "Start from origin",
+    title: "从远端分支开始",
     to: "/settings/general",
     targetId: "new-threads",
   },
   {
     id: "add-project-starts-in",
-    title: "Add project starts in",
+    title: "添加空间的默认目录",
     to: "/settings/general",
   },
   {
     id: "archive-confirmation",
-    title: "Archive confirmation",
+    title: "归档确认",
     to: "/settings/general",
   },
   {
     id: "delete-confirmation",
-    title: "Delete confirmation",
-    to: "/settings/general",
-  },
-  {
-    id: "text-generation-model",
-    title: "Text generation model",
+    title: "删除确认",
     to: "/settings/general",
   },
   {
     id: "diagnostics",
-    title: "Diagnostics",
+    title: "诊断",
     to: "/settings/general",
   },
   {
     id: "legacy-plan-mode",
-    title: "Plan mode (legacy)",
+    title: "规划模式（兼容）",
     to: "/settings/general",
   },
   {
     id: "legacy-token-streaming",
-    title: "Stream token by token (legacy)",
-    to: "/settings/general",
-  },
-  {
-    id: "legacy-sidebar",
-    title: "Sidebar (legacy)",
+    title: "逐 Token 输出（兼容）",
     to: "/settings/general",
   },
   {
     id: "keybindings",
-    title: "Keybindings",
+    title: "快捷键",
     to: "/settings/keybindings",
   },
   {
     id: "projects",
-    title: "Projects",
-    to: "/settings/projects",
-  },
-  {
-    id: "project-default-model",
-    title: "Project default model",
+    title: "空间",
     to: "/settings/projects",
   },
   {
     id: "project-new-thread-workspace",
-    title: "Project new-thread workspace",
+    title: "空间的新任务工作区",
     to: "/settings/projects",
   },
   {
     id: "project-scripts",
-    title: "Project scripts",
+    title: "空间脚本",
     to: "/settings/projects",
   },
   {
     id: "project-checkouts",
-    title: "Project checkouts",
+    title: "空间检出目录",
     to: "/settings/projects",
   },
   {
-    id: "providers",
-    title: "Providers",
-    to: "/settings/providers",
-  },
-  {
     id: "source-control",
-    title: "Source control",
+    title: "版本控制",
     to: "/settings/source-control",
   },
   {
-    id: "remote-environments",
-    title: "Remote environments",
-    to: "/settings/connections",
-  },
-  {
     id: "archive",
-    title: "Archived threads",
+    title: "已归档任务",
     to: "/settings/archived",
   },
 ] as const satisfies ReadonlyArray<SettingsSearchItem>;
 
 export type SettingsSearchItemId = (typeof SETTINGS_SEARCH_ITEMS)[number]["id"];
+
+const LEGACY_SETTINGS_SEARCH_TITLES: Readonly<Record<SettingsSearchItemId, string>> = {
+  "color-scheme": "Color scheme",
+  theme: "Themes",
+  "setting-glass-opacity": "Glass opacity",
+  "interface-font": "Interface font",
+  "prompt-font": "Prompt font",
+  "code-font": "Code font",
+  "terminal-font": "Terminal font",
+  "font-smoothing": "Font smoothing",
+  "word-wrap": "Word wrap",
+  "project-grouping": "Project grouping",
+  "auto-settle-inactive-threads": "Auto-settle inactive threads",
+  "time-format": "Time format",
+  "hide-whitespace-changes": "Hide whitespace changes",
+  "new-threads": "New threads",
+  "start-from-origin": "Start from origin",
+  "add-project-starts-in": "Add project starts in",
+  "archive-confirmation": "Archive confirmation",
+  "delete-confirmation": "Delete confirmation",
+  diagnostics: "Diagnostics",
+  "legacy-plan-mode": "Plan mode (legacy)",
+  "legacy-token-streaming": "Stream token by token (legacy)",
+  keybindings: "Keybindings",
+  projects: "Projects",
+  "project-new-thread-workspace": "Project new-thread workspace",
+  "project-scripts": "Project scripts",
+  "project-checkouts": "Project checkouts",
+  "source-control": "Source control",
+  archive: "Archived threads",
+};
 
 const SEARCH_ITEMS_BY_ID = Object.fromEntries(
   SETTINGS_SEARCH_ITEMS.map((item) => [item.id, item]),
@@ -258,5 +248,9 @@ export function searchSettings(
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length === 0) return [];
 
-  return items.filter((item) => normalizeSearchText(item.title).includes(normalizedQuery));
+  return items.filter((item) => {
+    if (normalizeSearchText(item.title).includes(normalizedQuery)) return true;
+    const legacyTitle = LEGACY_SETTINGS_SEARCH_TITLES[item.id as SettingsSearchItemId];
+    return legacyTitle !== undefined && normalizeSearchText(legacyTitle).includes(normalizedQuery);
+  });
 }

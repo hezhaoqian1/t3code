@@ -1,0 +1,8 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "artifactKey": "task-2-workspace-graph",
+  "type": "inspection",
+  "source": "pnpm -r list --depth -1 and retired-reference rg",
+  "summary": "Workspace graph loads with 11 projects; active build/release metadata contains no mobile, marketing, relay, SSH, or Tailscale workspace references.",
+  "verifier": "pnpm exit 0; rg returned no active matches"
+}

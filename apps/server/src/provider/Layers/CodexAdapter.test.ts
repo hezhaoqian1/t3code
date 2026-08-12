@@ -5,7 +5,6 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import {
   ApprovalRequestId,
-  CodexSettings,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -45,8 +44,13 @@ import {
   type CodexSessionRuntimeShape,
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
-import { makeCodexAdapter } from "./CodexAdapter.ts";
-const decodeCodexSettings = Schema.decodeSync(CodexSettings);
+import { type FdCodexAdapterConfig, makeCodexAdapter } from "./CodexAdapter.ts";
+const decodeCodexSettings = (input: Partial<FdCodexAdapterConfig>): FdCodexAdapterConfig => ({
+  binaryPath: "codex",
+  homePath: "",
+  launchArgs: "",
+  ...input,
+});
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
 class CodexAdapter extends Context.Service<CodexAdapter, CodexAdapterShape>()(
@@ -298,6 +302,17 @@ const sessionErrorLayer = it.layer(
       const codexConfig = decodeCodexSettings({});
       return yield* makeCodexAdapter(codexConfig, {
         makeRuntime: sessionRuntimeFactory.factory,
+        resolveTurnSkills: ({ cwd, prompt }) =>
+          Effect.succeed(
+            prompt.includes("$weekly-report")
+              ? [
+                  {
+                    name: "weekly-report",
+                    path: NodePath.join(cwd, ".agents", "skills", "weekly-report", "SKILL.md"),
+                  },
+                ]
+              : [],
+          ),
       });
     }),
   ).pipe(
@@ -356,6 +371,39 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         model: "gpt-5.3-codex",
         effort: "high",
         serviceTier: "priority",
+      });
+    }),
+  );
+
+  it.effect("maps selected local Skills into structured runtime input", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-local-skill"),
+        cwd: "/tmp/fd-project",
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* Effect.ignore(
+        adapter.sendTurn({
+          threadId: asThreadId("sess-local-skill"),
+          input: "$weekly-report prepare this week",
+          attachments: [],
+        }),
+      );
+
+      NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: "$weekly-report prepare this week",
+        skills: [
+          {
+            name: "weekly-report",
+            path: "/tmp/fd-project/.agents/skills/weekly-report/SKILL.md",
+          },
+        ],
       });
     }),
   );
@@ -512,6 +560,51 @@ function startLifecycleRuntime() {
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
+  it.effect("keeps forwarding runtime events after the session starter exits", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-short-lived-starter");
+      const starter = yield* adapter
+        .startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId,
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.forkChild);
+      yield* Fiber.join(starter);
+
+      const runtime = lifecycleRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-after-starter-exit"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId,
+        turnId: asTurnId("turn-after-starter-exit"),
+        itemId: asItemId("msg-after-starter-exit"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId,
+          turnId: "turn-after-starter-exit",
+          item: {
+            type: "agentMessage",
+            id: "msg-after-starter-exit",
+            text: "forwarded",
+          },
+        },
+      });
+      yield* Effect.yieldNow;
+      yield* Effect.yieldNow;
+
+      const firstEvent = firstEventFiber.pollUnsafe();
+      NodeAssert.ok(firstEvent);
+    }),
+  );
+
   it.effect("maps completed agent message items to canonical item.completed events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
@@ -788,10 +881,8 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         return;
       }
       NodeAssert.equal(firstEvent.value.turnId, "turn-1");
-      NodeAssert.equal(
-        firstEvent.value.payload.message,
-        "The filename or extension is too long. (os error 206)",
-      );
+      NodeAssert.equal(firstEvent.value.payload.message, "FD Agent runtime reported a diagnostic.");
+      NodeAssert.equal("detail" in firstEvent.value.payload, false);
     }),
   );
 
@@ -858,10 +949,8 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }
       NodeAssert.equal(firstEvent.value.turnId, "turn-1");
       NodeAssert.equal(firstEvent.value.payload.class, "provider_error");
-      NodeAssert.equal(
-        firstEvent.value.payload.message,
-        "2026-03-31T18:14:06.833399Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 503 Service Unavailable, url: wss://chatgpt.com/backend-api/codex/responses",
-      );
+      NodeAssert.equal(firstEvent.value.payload.message, "FD Agent runtime connection failed.");
+      NodeAssert.equal("detail" in firstEvent.value.payload, false);
     }),
   );
 

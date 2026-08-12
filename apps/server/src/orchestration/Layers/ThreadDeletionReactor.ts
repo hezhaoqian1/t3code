@@ -3,9 +3,11 @@ import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { FdEnterpriseThreadRuntime } from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
@@ -41,6 +43,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const providerService = yield* ProviderService;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
 
   const stopProviderSession = (threadId: ThreadDeletedEvent["payload"]["threadId"]) =>
     logCleanupCauseUnlessInterrupted({
@@ -62,6 +65,9 @@ const make = Effect.gen(function* () {
     const { threadId } = event.payload;
     yield* stopProviderSession(threadId);
     yield* closeThreadTerminals(threadId);
+    if (Option.isSome(enterpriseRuntime)) {
+      yield* enterpriseRuntime.value.clearThread(threadId);
+    }
   });
 
   const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>
