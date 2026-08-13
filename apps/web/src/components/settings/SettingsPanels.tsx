@@ -312,7 +312,7 @@ function AboutVersionSection() {
       ? !canCheckForUpdate(updateState)
       : isDesktopUpdateButtonDisabled(updateState);
 
-  const actionLabel: Record<string, string> = { download: "下载更新", install: "重启安装" };
+  const actionLabel: Record<string, string> = { download: "下载更新", install: "退出并安装" };
   const statusLabel: Record<string, string> = {
     checking: "正在检查...",
     downloading: "正在下载...",

@@ -224,15 +224,19 @@ function getAutoUpdateDisabledReason(args: {
   appImage?: string | undefined;
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;
+  mockUpdates: boolean;
 }): string | null {
-  if (!args.hasUpdateFeedConfig) {
-    return "Automatic updates are not available because no update feed is configured.";
-  }
   if (args.isDevelopment || !args.isPackaged) {
     return "Automatic updates are only available in packaged production builds.";
   }
   if (args.disabledByEnv) {
     return "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.";
+  }
+  if (args.platform === "darwin" && !args.mockUpdates) {
+    return "当前为公司内部未签名版本。macOS 请从官网下载新版安装包并覆盖安装。";
+  }
+  if (!args.hasUpdateFeedConfig) {
+    return "Automatic updates are not available because no update feed is configured.";
   }
   if (args.platform === "linux" && !args.appImage) {
     return "Automatic updates on Linux require running the AppImage build.";
@@ -258,6 +262,9 @@ export const make = Effect.gen(function* () {
   const updateCheckInFlightRef = yield* Ref.make(false);
   const updateDownloadInFlightRef = yield* Ref.make(false);
   const updateInstallInFlightRef = yield* Ref.make(false);
+  const installRecoveryInstancesRef = yield* Ref.make<
+    ReadonlyArray<DesktopBackendPool.DesktopBackendInstance>
+  >([]);
   const updaterConfiguredRef = yield* Ref.make(false);
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const updateStateRef = yield* Ref.make<DesktopUpdateState>(
@@ -309,6 +316,7 @@ export const make = Effect.gen(function* () {
         appImage: Option.getOrUndefined(config.appImagePath),
         disabledByEnv: config.disableAutoUpdate,
         hasUpdateFeedConfig: hasFeedConfig,
+        mockUpdates: config.mockUpdates,
       }),
     );
   });
@@ -451,6 +459,14 @@ export const make = Effect.gen(function* () {
     { discard: true },
   );
 
+  const recoverAfterInstallFailure = Effect.gen(function* () {
+    yield* resetInstallAction;
+    const instances = yield* Ref.getAndSet(installRecoveryInstancesRef, []);
+    yield* Effect.forEach(instances, (instance) => instance.start, {
+      concurrency: "unbounded",
+    });
+  });
+
   const installDownloadedUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (
@@ -473,14 +489,21 @@ export const make = Effect.gen(function* () {
       // SIGTERM + grace. Stops run concurrently with the same 5s
       // budget the primary had on its own.
       const instances = yield* pool.list;
+      const runningInstances = yield* Effect.filter(
+        instances,
+        (instance) => instance.snapshot.pipe(Effect.map((snapshot) => snapshot.desiredRunning)),
+        { concurrency: "unbounded" },
+      );
+      yield* Ref.set(installRecoveryInstancesRef, runningInstances);
       yield* Effect.forEach(
         instances,
         (instance) => instance.stop({ timeout: Duration.seconds(5) }),
         { concurrency: "unbounded" },
       );
-      yield* electronWindow.destroyAll;
       yield* electronUpdater.quitAndInstall({
-        isSilent: true,
+        // Keep the Windows installer visible so an upgrade never looks like an
+        // unexplained uninstall. macOS ignores this NSIS-specific flag.
+        isSilent: environment.platform !== "win32",
         isForceRunAfter: true,
       });
       return { accepted: true, completed: false };
@@ -488,7 +511,7 @@ export const make = Effect.gen(function* () {
       Effect.catchTags({
         ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
           function* (error) {
-            yield* resetInstallAction;
+            yield* recoverAfterInstallFailure;
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnInstallFailure(current, error.message),
             );
@@ -508,7 +531,7 @@ export const make = Effect.gen(function* () {
           if (Cause.hasInterruptsOnly(cause)) {
             return yield* Effect.failCause(cause);
           }
-          yield* resetInstallAction;
+          yield* recoverAfterInstallFailure;
           const error = new DesktopUpdateUnexpectedActionError({ action: "install", cause });
           yield* updateState((current) =>
             reduceDesktopUpdateStateOnInstallFailure(current, error.message),
@@ -615,8 +638,7 @@ export const make = Effect.gen(function* () {
       cause,
     });
     if (yield* Ref.get(updateInstallInFlightRef)) {
-      yield* Ref.set(updateInstallInFlightRef, false);
-      yield* Ref.set(desktopState.quitting, false);
+      yield* recoverAfterInstallFailure;
       yield* updateState((current) =>
         reduceDesktopUpdateStateOnInstallFailure(current, error.message),
       );

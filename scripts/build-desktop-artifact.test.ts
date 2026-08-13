@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import * as path from "node:path";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -10,6 +11,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
   BuildCommandFailedError,
+  BUNDLED_CODEX_VERSION,
   createStageWorkspaceConfig,
   createStagePatchedDependencies,
   createBuildConfig,
@@ -28,8 +30,10 @@ import {
   resolveDesktopProductName,
   resolveDesktopUpdateChannel,
   resolveDesktopWebAssetBrand,
+  resolvePackagedCodexBinaryPath,
   resolveResourceMonitorRustTargets,
   resourceMonitorExecutableName,
+  resolveCodexRuntimePackage,
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
   resolvePackageManagerUserAgent,
@@ -273,7 +277,29 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("limits Electron locales without provider-specific package exclusions", () => {
     assert.deepStrictEqual(DESKTOP_ELECTRON_LANGUAGES, ["en-US"]);
-    assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, []);
+    assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, ["!node_modules/@openai/codex{,/**/*}"]);
+  });
+
+  it("pins one native Codex runtime for each desktop artifact", () => {
+    assert.equal(BUNDLED_CODEX_VERSION, "0.147.0");
+    assert.deepStrictEqual(resolveCodexRuntimePackage("mac", "arm64"), {
+      packageSpec: "0.147.0-darwin-arm64",
+      vendorDirectory: "aarch64-apple-darwin",
+      executableName: "codex",
+    });
+    assert.deepStrictEqual(resolveCodexRuntimePackage("win", "x64"), {
+      packageSpec: "0.147.0-win32-x64",
+      vendorDirectory: "x86_64-pc-windows-msvc",
+      executableName: "codex.exe",
+    });
+    assert.equal(
+      resolvePackagedCodexBinaryPath("/stage/dist", "mac", "arm64", path.join),
+      "/stage/dist/mac-arm64/Fangde AI.app/Contents/Resources/codex/bin/codex",
+    );
+    assert.equal(
+      resolvePackagedCodexBinaryPath("/stage/dist", "win", "x64", path.join),
+      "/stage/dist/win-unpacked/resources/codex/bin/codex.exe",
+    );
   });
 
   it.effect("applies platform-specific packaging to the build config", () =>
@@ -367,6 +393,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       assert.equal(win.signAndEditExecutable, true);
       assert.notProperty(win, "azureSignOptions");
       assert.notProperty(config, "forceCodeSigning");
+      assert.deepStrictEqual(config.nsis, {
+        oneClick: true,
+        perMachine: false,
+        createDesktopShortcut: "always",
+        createStartMenuShortcut: true,
+        shortcutName: "Fangde AI",
+        uninstallDisplayName: "Fangde AI",
+        runAfterFinish: true,
+        deleteAppDataOnUninstall: false,
+      });
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
@@ -383,6 +419,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       {
         from: "apps/desktop/prod-resources/connectors/feishu",
         to: "connectors/feishu",
+      },
+      {
+        from: "apps/desktop/prod-resources/codex",
+        to: "codex",
       },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [

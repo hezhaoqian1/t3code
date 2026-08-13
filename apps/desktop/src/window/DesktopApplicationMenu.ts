@@ -65,17 +65,17 @@ const checkForUpdatesFromMenu = Effect.gen(function* () {
   if (updateState.status === "up-to-date") {
     yield* electronDialog.showMessageBox({
       type: "info",
-      title: "You're up to date!",
-      message: `Fangde AI ${updateState.currentVersion} is currently the newest version available.`,
-      buttons: ["OK"],
+      title: "已是最新版本",
+      message: `方德 AI ${updateState.currentVersion} 已是当前最新版本。`,
+      buttons: ["确定"],
     });
   } else if (updateState.status === "error") {
     yield* electronDialog.showMessageBox({
       type: "warning",
-      title: "Update check failed",
-      message: "Could not check for updates.",
-      detail: updateState.message ?? "An unknown error occurred. Please try again later.",
-      buttons: ["OK"],
+      title: "检查更新失败",
+      message: "暂时无法检查更新。",
+      detail: updateState.message ?? "发生未知错误，请稍后重试。",
+      buttons: ["确定"],
     });
   }
 }).pipe(Effect.withSpan("desktop.menu.checkForUpdates"));
@@ -90,10 +90,10 @@ const handleCheckForUpdatesMenuClick = Effect.gen(function* () {
     });
     yield* electronDialog.showMessageBox({
       type: "info",
-      title: "Updates unavailable",
-      message: "Automatic updates are not available right now.",
+      title: "暂时无法更新",
+      message: "当前无法使用自动更新。",
       detail: disabledReason.value,
-      buttons: ["OK"],
+      buttons: ["确定"],
     });
     return;
   }
