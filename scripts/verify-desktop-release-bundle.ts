@@ -13,12 +13,8 @@ export function expectedDesktopReleaseAssets(version: string): ReadonlyArray<str
     "latest.yml",
     `FD-Enterprise-AI-${version}-mac-arm64.dmg`,
     `FD-Enterprise-AI-${version}-mac-arm64.zip`,
-    `FD-Enterprise-AI-${version}-mac-x64.dmg`,
-    `FD-Enterprise-AI-${version}-mac-x64.zip`,
     `FD-Enterprise-AI-${version}-win-x64.exe`,
     `FD-Enterprise-AI-${version}-win-x64.exe.blockmap`,
-    `FD-Enterprise-AI-${version}-win-arm64.exe`,
-    `FD-Enterprise-AI-${version}-win-arm64.exe.blockmap`,
   ];
 }
 
@@ -77,12 +73,8 @@ export async function verifyDesktopReleaseBundle(assetRootArg: string, version: 
   await verifyManifest(assetRoot, "latest-mac.yml", version, [
     `FD-Enterprise-AI-${version}-mac-arm64.zip`,
     `FD-Enterprise-AI-${version}-mac-arm64.dmg`,
-    `FD-Enterprise-AI-${version}-mac-x64.zip`,
-    `FD-Enterprise-AI-${version}-mac-x64.dmg`,
   ]);
   await verifyManifest(assetRoot, "latest.yml", version, [
-    `FD-Enterprise-AI-${version}-win-arm64.exe`,
-    `FD-Enterprise-AI-${version}-win-arm64.exe.blockmap`,
     `FD-Enterprise-AI-${version}-win-x64.exe`,
     `FD-Enterprise-AI-${version}-win-x64.exe.blockmap`,
   ]);

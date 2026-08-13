@@ -92,6 +92,10 @@ export class ServerConfig extends Context.Service<
     readonly desktopTelemetryControlFd?: number | undefined;
     readonly fdRuntimeCredentialFd?: number | undefined;
     readonly resourceMonitorPath?: string | undefined;
+    readonly fdConnectorSkillsRoot?: string | undefined;
+    readonly fdConnectorBinPath?: string | undefined;
+    readonly fdConnectorConfigDir?: string | undefined;
+    readonly fdConnectorStatePath?: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly taskWorkspaceRoot?: string | undefined;
     readonly logWebSocketEvents: boolean;
@@ -206,6 +210,10 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     desktopTelemetryControlFd: undefined,
     fdRuntimeCredentialFd: undefined,
     resourceMonitorPath: undefined,
+    fdConnectorSkillsRoot: undefined,
+    fdConnectorBinPath: undefined,
+    fdConnectorConfigDir: undefined,
+    fdConnectorStatePath: undefined,
     staticDir: undefined,
     devUrl,
     noBrowser: false,

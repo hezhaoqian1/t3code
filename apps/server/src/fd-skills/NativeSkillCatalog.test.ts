@@ -161,4 +161,28 @@ describe("NativeSkillCatalog", () => {
     ]);
     expect(selectedNativeSkillNames("$one then $two $three")).toEqual(["one", "two", "three"]);
   });
+
+  it("discovers FD-managed connector Skill roots without moving them into user home", async () => {
+    const home = await makeTempDirectory();
+    const project = await makeTempDirectory();
+    const connectorRoot = await makeTempDirectory();
+    await writeSkill(connectorRoot, "lark-doc", "Official Feishu document skill.");
+
+    const snapshot = await new NativeSkillCatalog({
+      projectRoot: project,
+      userHome: home,
+      extraRoots: [connectorRoot],
+    }).refresh();
+
+    expect(snapshot.skills).toEqual([
+      expect.objectContaining({
+        name: "lark-doc",
+        source: "connector",
+        scope: "user",
+      }),
+    ]);
+    expect(snapshot.skills[0]?.root).toBe(
+      await NodeFS.realpath(NodePath.join(connectorRoot, "lark-doc")),
+    );
+  });
 });

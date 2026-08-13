@@ -74,6 +74,19 @@ describe("FD managed Codex runtime boundary", () => {
     });
   });
 
+  it("prepends connector binaries to the managed Codex child PATH", () => {
+    const environment = makeFdCodexChildEnvironment({
+      codexHome: "/managed/fd-codex",
+      runtimeApiKey: "runtime-secret-marker",
+      connectorBinPath: "/managed/connectors/feishu/bin",
+      connectorConfigDir: "/managed/connectors/feishu/config",
+      inheritedEnvironment: { PATH: "/usr/bin" },
+    });
+
+    expect(environment.PATH).toBe("/managed/connectors/feishu/bin:/usr/bin");
+    expect(environment.LARKSUITE_CLI_CONFIG_DIR).toBe("/managed/connectors/feishu/config");
+  });
+
   it("rejects invalid managed paths and credentials", () => {
     expect(() =>
       makeFdCodexChildEnvironment({ codexHome: "relative", runtimeApiKey: "secret" }),
@@ -120,6 +133,55 @@ describe("FD managed Codex runtime boundary", () => {
     expect(await readFile(join(second.homePath, "config.toml"), "utf8")).not.toContain(
       "runtime-key",
     );
+  });
+
+  it("enables connector extra Skill roots only when the connector state is enabled", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fd-codex-connector-"));
+    temporaryRoots.add(root);
+    const statePath = join(root, "connector-state.json");
+    const credentials = {
+      userId: 7,
+      runtimeTokenId: 11,
+      newApiOrigin: "http://127.0.0.1:3001" as const,
+      runtimeApiKey: "runtime-key-one",
+      accessToken: "access-token-must-not-enter-child",
+      accessExpiresAt: 4_102_444_800,
+      policy: {
+        version: 1 as const,
+        capability: "general_assistant" as const,
+        model: "deepseek-v4-flash" as const,
+        expiresAt: 4_102_444_800,
+      },
+      generation: 1,
+    };
+
+    await writeFile(statePath, JSON.stringify({ version: 1, enabled: false, lastError: null }));
+    const disabled = await prepareFdCodexRuntime({
+      stateDir: root,
+      credentials,
+      connectorSkillsRoot: "/managed/connectors/skills/connector-feishu",
+      connectorBinPath: "/managed/connectors/feishu/bin",
+      connectorConfigDir: "/managed/connectors/feishu/config",
+      connectorStatePath: statePath,
+      inheritedEnvironment: { PATH: "/usr/bin" },
+    });
+    expect(disabled.skillExtraRoots).toBeUndefined();
+    expect(disabled.environment.PATH).toBe("/usr/bin");
+    expect(disabled.environment.LARKSUITE_CLI_CONFIG_DIR).toBeUndefined();
+
+    await writeFile(statePath, JSON.stringify({ version: 1, enabled: true, lastError: null }));
+    const enabled = await prepareFdCodexRuntime({
+      stateDir: root,
+      credentials,
+      connectorSkillsRoot: "/managed/connectors/skills/connector-feishu",
+      connectorBinPath: "/managed/connectors/feishu/bin",
+      connectorConfigDir: "/managed/connectors/feishu/config",
+      connectorStatePath: statePath,
+      inheritedEnvironment: { PATH: "/usr/bin" },
+    });
+    expect(enabled.skillExtraRoots).toEqual(["/managed/connectors/skills/connector-feishu"]);
+    expect(enabled.environment.PATH).toBe("/managed/connectors/feishu/bin:/usr/bin");
+    expect(enabled.environment.LARKSUITE_CLI_CONFIG_DIR).toBe("/managed/connectors/feishu/config");
   });
 
   it("resolves selected project and personal Skills as structured Codex input", async () => {

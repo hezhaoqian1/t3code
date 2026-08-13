@@ -21,6 +21,8 @@ const INHERITED_ENV_KEYS = [
 export function makeFdCodexChildEnvironment(input: {
   readonly codexHome: string;
   readonly runtimeApiKey: string;
+  readonly connectorBinPath?: string | undefined;
+  readonly connectorConfigDir?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
 }): NodeJS.ProcessEnv {
   if (!isAbsolute(input.codexHome)) {
@@ -39,6 +41,18 @@ export function makeFdCodexChildEnvironment(input: {
   for (const key of INHERITED_ENV_KEYS) {
     const value = source[key];
     if (value !== undefined) environment[key] = value;
+  }
+  if (input.connectorBinPath) {
+    const inheritedPath = environment.PATH ?? "";
+    environment.PATH = inheritedPath
+      ? `${input.connectorBinPath}${process.platform === "win32" ? ";" : ":"}${inheritedPath}`
+      : input.connectorBinPath;
+  }
+  if (input.connectorConfigDir) {
+    if (!isAbsolute(input.connectorConfigDir)) {
+      throw new Error("Connector config directory must be absolute");
+    }
+    environment.LARKSUITE_CLI_CONFIG_DIR = input.connectorConfigDir;
   }
   environment[FD_CODEX_API_KEY_ENV] = input.runtimeApiKey;
   return environment;

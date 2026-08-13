@@ -101,12 +101,14 @@ export function FdSkillPicker(props: {
   threadId: string | null;
   skills: ReadonlyArray<ServerProviderSkill>;
   providerCatalogState?: BusinessCapabilityCatalogState;
+  openRequest?: number;
 }) {
   const providerCatalogState = props.providerCatalogState ?? "ready";
   const [open, setOpen] = useState(false);
   const [revokedNotice, setRevokedNotice] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const lastOpenRequestRef = useRef(props.openRequest ?? 0);
   const [menuPosition, setMenuPosition] = useState<{ bottom: number; left: number } | null>(null);
   const selectedVersionId = useFdSkillSelectionStore((state) =>
     props.threadId ? (state.selectedByThread[props.threadId] ?? null) : null,
@@ -120,6 +122,13 @@ export function FdSkillPicker(props: {
     setOpen(false);
     setRevokedNotice(false);
   }, [props.threadId]);
+
+  useEffect(() => {
+    const openRequest = props.openRequest ?? 0;
+    if (openRequest === lastOpenRequestRef.current) return;
+    lastOpenRequestRef.current = openRequest;
+    if (openRequest > 0 && props.threadId) setOpen(true);
+  }, [props.openRequest, props.threadId]);
 
   useEffect(() => {
     const revoked = clearRevokedFdSkillSelection({

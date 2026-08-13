@@ -21,7 +21,7 @@ export const FD_MANAGED_SKILL_IDENTITIES = new Set([
 ]);
 
 export type NativeSkillScope = "project" | "user";
-export type NativeSkillSource = "agents" | "codex-compat";
+export type NativeSkillSource = "agents" | "codex-compat" | "connector";
 
 export interface NativeSkillSummary {
   readonly name: string;
@@ -59,6 +59,7 @@ export interface NativeSkillCatalogSnapshot {
 export interface NativeSkillCatalogOptions {
   readonly projectRoot?: string;
   readonly userHome?: string;
+  readonly extraRoots?: ReadonlyArray<string>;
   readonly nativeSkillsEnabled?: boolean;
   readonly managedSkillNames?: ReadonlySet<string>;
 }
@@ -210,6 +211,14 @@ function configuredRoots(options: NativeSkillCatalogOptions): ReadonlyArray<Skil
         precedence: 3,
       },
     );
+  }
+  for (const [index, rootPath] of (options.extraRoots ?? []).entries()) {
+    roots.push({
+      path: rootPath,
+      scope: "user",
+      source: "connector",
+      precedence: 4 + index,
+    });
   }
   return roots;
 }

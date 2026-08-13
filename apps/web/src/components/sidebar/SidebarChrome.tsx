@@ -1,6 +1,12 @@
-import { ChartNoAxesColumnIcon, LoaderCircleIcon, LogOutIcon, SettingsIcon } from "lucide-react";
+import {
+  ChartNoAxesColumnIcon,
+  LoaderCircleIcon,
+  LogOutIcon,
+  PlugZapIcon,
+  SettingsIcon,
+} from "lucide-react";
 import { memo, useCallback } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { cn } from "../../lib/utils";
 import {
@@ -55,6 +61,7 @@ function SidebarBrand() {
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
   const account = useFdAccount();
   const { isMobile, setOpenMobile } = useSidebar();
   const handleSettingsClick = useCallback(() => {
@@ -69,6 +76,13 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
       setOpenMobile(false);
     }
     void navigate({ to: "/usage" });
+  }, [isMobile, navigate, setOpenMobile]);
+
+  const handleConnectorsClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void navigate({ to: "/connectors" });
   }, [isMobile, navigate, setOpenMobile]);
 
   return (
@@ -96,13 +110,25 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           </SidebarMenuButton>
         </SidebarMenuItem>
         <SidebarMenuItem>
-          <SidebarMenuButton onClick={handleUsageClick}>
+          <SidebarMenuButton
+            isActive={pathname === "/connectors" || pathname.startsWith("/connectors/")}
+            onClick={handleConnectorsClick}
+          >
+            <PlugZapIcon />
+            <span>连接器</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton isActive={pathname === "/usage"} onClick={handleUsageClick}>
             <ChartNoAxesColumnIcon />
             <span>用量统计</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
         <SidebarMenuItem>
-          <SidebarMenuButton onClick={handleSettingsClick}>
+          <SidebarMenuButton
+            isActive={pathname === "/settings" || pathname.startsWith("/settings/")}
+            onClick={handleSettingsClick}
+          >
             <SettingsIcon />
             <span>设置</span>
           </SidebarMenuButton>

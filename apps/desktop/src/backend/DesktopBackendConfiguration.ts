@@ -12,6 +12,7 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
+import { resolveFeishuConnectorResources } from "../connectors/FeishuConnectorResources.ts";
 import {
   DesktopOfficeWorkspaceBoundaryError,
   prepareDesktopOfficeWorkspace,
@@ -181,6 +182,15 @@ export const make = Effect.gen(function* () {
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
     const taskWorkspaceRoot = environment.path.join(environment.homeDirectory, "FangdeAI", "Tasks");
+    const connectorRoot = environment.path.join(environment.stateDir, "connectors");
+    const feishuConnectorRoot = environment.path.join(connectorRoot, "feishu");
+    const feishuConnectorResources = resolveFeishuConnectorResources(environment);
+    const feishuConnectorSkillsRoot = environment.path.join(
+      connectorRoot,
+      "skills",
+      "connector-feishu",
+    );
+    const feishuConnectorBinPath = feishuConnectorResources.cliBinDir;
     const httpBaseUrl = new URL(`http://${LOOPBACK_HOST}:${String(port)}`);
     return {
       executablePath: process.execPath,
@@ -205,6 +215,10 @@ export const make = Effect.gen(function* () {
         desktopTelemetryFd: 4,
         desktopTelemetryControlFd: 5,
         fdRuntimeCredentialFd: 6,
+        fdConnectorSkillsRoot: feishuConnectorSkillsRoot,
+        fdConnectorBinPath: feishuConnectorBinPath,
+        fdConnectorConfigDir: environment.path.join(feishuConnectorRoot, "config"),
+        fdConnectorStatePath: environment.path.join(feishuConnectorRoot, "connector-state.json"),
         ...Option.match(resourceMonitorPath, {
           onNone: () => ({}),
           onSome: (value) => ({ resourceMonitorPath: value }),

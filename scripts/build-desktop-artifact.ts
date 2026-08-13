@@ -584,6 +584,7 @@ export const DESKTOP_FILE_EXCLUSIONS = [] as const;
 // The Windows primary backend reads the same files through the asar redirect,
 // so nothing is duplicated.
 export const WINDOWS_ASAR_UNPACK = ["apps/server/dist/**", "**/node_modules/**"] as const;
+export const DESKTOP_ASAR_UNPACK = ["node_modules/@larksuite/cli/**"] as const;
 export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/resources/enterprise-config.json",
@@ -592,6 +593,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
+  },
+  {
+    from: "apps/desktop/prod-resources/connectors/feishu",
+    to: "connectors/feishu",
   },
 ] as const;
 
@@ -1190,10 +1195,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     directories: {
       buildResources: "apps/desktop/resources",
     },
-    // Only the Windows WSL backend needs files outside the asar (see
-    // WINDOWS_ASAR_UNPACK); macOS and Linux stay packed — smart unpack
-    // extracts native libraries, which fff-node finds in app.asar.unpacked.
-    ...(platform === "win" ? { asarUnpack: [...WINDOWS_ASAR_UNPACK] } : {}),
+    // The Feishu CLI is a native executable and must stay outside app.asar.
+    // Windows also unpacks the WSL backend and its runtime dependencies.
+    asarUnpack: platform === "win" ? [...WINDOWS_ASAR_UNPACK] : [...DESKTOP_ASAR_UNPACK],
     extraResources: DESKTOP_EXTRA_RESOURCES,
   };
   buildConfig.publish = [

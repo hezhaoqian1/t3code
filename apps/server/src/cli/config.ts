@@ -89,6 +89,22 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  connectorSkillsRoot: Config.string("FD_CONNECTOR_SKILLS_ROOT").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  connectorBinPath: Config.string("FD_CONNECTOR_BIN_PATH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  connectorConfigDir: Config.string("FD_CONNECTOR_CONFIG_DIR").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
+  connectorStatePath: Config.string("FD_CONNECTOR_STATE_PATH").pipe(
+    Config.option,
+    Config.map(Option.getOrUndefined),
+  ),
   devUrl: Config.url("VITE_DEV_SERVER_URL").pipe(Config.option, Config.map(Option.getOrUndefined)),
   noBrowser: Config.boolean("T3CODE_NO_BROWSER").pipe(
     Config.option,
@@ -269,6 +285,10 @@ export const resolveServerConfig = (
     const desktopTelemetryControlFd = bootstrap?.desktopTelemetryControlFd;
     const fdRuntimeCredentialFd = bootstrap?.fdRuntimeCredentialFd;
     const resourceMonitorPath = bootstrap?.resourceMonitorPath;
+    const fdConnectorSkillsRoot = bootstrap?.fdConnectorSkillsRoot ?? env.connectorSkillsRoot;
+    const fdConnectorBinPath = bootstrap?.fdConnectorBinPath ?? env.connectorBinPath;
+    const fdConnectorConfigDir = bootstrap?.fdConnectorConfigDir ?? env.connectorConfigDir;
+    const fdConnectorStatePath = bootstrap?.fdConnectorStatePath ?? env.connectorStatePath;
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
         normalizedFlags.autoBootstrapProjectFromCwd,
@@ -319,6 +339,10 @@ export const resolveServerConfig = (
       desktopTelemetryControlFd,
       fdRuntimeCredentialFd,
       resourceMonitorPath,
+      fdConnectorSkillsRoot,
+      fdConnectorBinPath,
+      fdConnectorConfigDir,
+      fdConnectorStatePath,
       autoBootstrapProjectFromCwd,
       taskWorkspaceRoot: bootstrap?.taskWorkspaceRoot ?? env.taskWorkspaceRoot,
       logWebSocketEvents,

@@ -44,18 +44,10 @@ jobs:
             arch: arm64
             runner: macos-14
             rust_target: aarch64-apple-darwin
-          - platform: mac
-            arch: x64
-            runner: macos-14
-            rust_target: x86_64-apple-darwin
           - platform: win
             arch: x64
             runner: windows-2025
             rust_target: x86_64-pc-windows-msvc
-          - platform: win
-            arch: arm64
-            runner: windows-2025
-            rust_target: aarch64-pc-windows-msvc
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -115,11 +107,8 @@ jobs:
           if [[ "${{ matrix.platform }}" == mac ]]; then
             rm -f release-publish/*.blockmap
           fi
-          if [[ "${{ matrix.platform }}" == mac && "${{ matrix.arch }}" == x64 ]]; then
-            mv release-publish/latest-mac.yml release-publish/latest-mac-x64.yml
-          fi
           if [[ "${{ matrix.platform }}" == win ]]; then
-            mv release-publish/latest.yml "release-publish/latest-win-${{ matrix.arch }}.yml"
+            mv release-publish/latest.yml release-publish/latest-win-x64.yml
           fi
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -150,20 +139,9 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Merge updater manifests
+      - name: Normalize updater manifests
         shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/merge-update-manifests.ts --platform mac \
-            release-assets/latest-mac.yml \
-            release-assets/latest-mac-x64.yml
-          node scripts/merge-update-manifests.ts --platform win \
-            release-assets/latest-win-arm64.yml \
-            release-assets/latest-win-x64.yml \
-            release-assets/latest.yml
-          rm release-assets/latest-mac-x64.yml \
-            release-assets/latest-win-arm64.yml \
-            release-assets/latest-win-x64.yml
+        run: mv release-assets/latest-win-x64.yml release-assets/latest.yml
 
       - name: Finalize updater manifests from release assets
         shell: bash
@@ -173,12 +151,8 @@ jobs:
           set -euo pipefail
           node scripts/finalize-update-manifest.ts release-assets/latest-mac.yml "$VERSION" \
             "FD-Enterprise-AI-$VERSION-mac-arm64.zip" \
-            "FD-Enterprise-AI-$VERSION-mac-arm64.dmg" \
-            "FD-Enterprise-AI-$VERSION-mac-x64.zip" \
-            "FD-Enterprise-AI-$VERSION-mac-x64.dmg"
+            "FD-Enterprise-AI-$VERSION-mac-arm64.dmg"
           node scripts/finalize-update-manifest.ts release-assets/latest.yml "$VERSION" \
-            "FD-Enterprise-AI-$VERSION-win-arm64.exe" \
-            "FD-Enterprise-AI-$VERSION-win-arm64.exe.blockmap" \
             "FD-Enterprise-AI-$VERSION-win-x64.exe" \
             "FD-Enterprise-AI-$VERSION-win-x64.exe.blockmap"
 

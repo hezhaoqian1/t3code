@@ -77,7 +77,11 @@ export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
   readonly resolveRuntime?: () => Effect.Effect<
-    { readonly environment: NodeJS.ProcessEnv; readonly homePath: string },
+    {
+      readonly environment: NodeJS.ProcessEnv;
+      readonly homePath: string;
+      readonly skillExtraRoots?: ReadonlyArray<string>;
+    },
     ProviderAdapterRequestError
   >;
   readonly resolveTurnSkills?: (input: {
@@ -1679,6 +1683,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           : undefined;
         const runtimeEnvironment = resolvedRuntime?.environment ?? options?.environment;
         const runtimeHomePath = resolvedRuntime?.homePath ?? codexConfig.homePath;
+        const skillExtraRoots = resolvedRuntime?.skillExtraRoots;
         const sessionRuntime = options?.resolveSessionRuntime
           ? yield* options.resolveSessionRuntime(input)
           : undefined;
@@ -1696,6 +1701,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, runtimeEnvironment),
           ...(runtimeEnvironment ? { environment: runtimeEnvironment } : {}),
           ...(runtimeHomePath ? { homePath: runtimeHomePath } : {}),
+          ...(skillExtraRoots && skillExtraRoots.length > 0 ? { skillExtraRoots } : {}),
           ...(isCodexResumeCursorSchema(input.resumeCursor)
             ? { resumeCursor: input.resumeCursor }
             : {}),

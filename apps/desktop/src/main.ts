@@ -47,6 +47,7 @@ import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopTelemetryPublisher from "./telemetry/DesktopTelemetryPublisher.ts";
 import * as FdCredentialPublisher from "./fd-identity/FdCredentialPublisher.ts";
 import * as FdIdentity from "./fd-identity/FdIdentity.ts";
+import * as FeishuConnector from "./connectors/FeishuConnector.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as BrowserSession from "./preview/BrowserSession.ts";
 import * as PreviewManager from "./preview/Manager.ts";
@@ -124,6 +125,7 @@ const desktopApplicationLayer = Layer.mergeAll(
   DesktopLinuxUrlHandler.layer,
   DesktopShellEnvironment.layer,
   FdIdentity.layer,
+  FeishuConnector.layer,
 ).pipe(
   Layer.provideMerge(DesktopUpdates.layer),
   Layer.provideMerge(desktopLocalEnvironmentAuthLayer),

@@ -12,7 +12,7 @@ connects to Fangde identity, usage policy, and enterprise FD Skills after sign-i
 - Use the managed `deepseek-v4-flash` runtime without choosing a provider or entering an API key.
 - Select an authorized FD Skill for enterprise data workflows. Local Agent Skills remain available
   through the normal Skill invocation syntax.
-- Download signed Windows x64, Windows ARM64, macOS Apple Silicon, or macOS Intel installers from
+- Download Windows x64 or macOS Apple Silicon installers from
   the [Fangde AI download page](https://ai-api.fdsure.com/api-access).
 
 ## Architecture

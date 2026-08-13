@@ -3,6 +3,7 @@ export type SettingsPath =
   | "/settings/appearance"
   | "/settings/keybindings"
   | "/settings/projects"
+  | "/settings/connectors"
   | "/settings/source-control"
   | "/settings/archived";
 
@@ -22,6 +23,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/appearance": "外观",
   "/settings/keybindings": "快捷键",
   "/settings/projects": "空间",
+  "/settings/connectors": "连接器",
   "/settings/source-control": "版本控制",
   "/settings/archived": "归档",
 };
@@ -156,6 +158,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/projects",
   },
   {
+    id: "connectors",
+    title: "连接器",
+    to: "/settings/connectors",
+  },
+  {
+    id: "feishu-connector",
+    title: "飞书连接器",
+    to: "/settings/connectors",
+  },
+  {
     id: "project-new-thread-workspace",
     title: "空间的新任务工作区",
     to: "/settings/projects",
@@ -208,6 +220,8 @@ const LEGACY_SETTINGS_SEARCH_TITLES: Readonly<Record<SettingsSearchItemId, strin
   "legacy-token-streaming": "Stream token by token (legacy)",
   keybindings: "Keybindings",
   projects: "Projects",
+  connectors: "Connectors",
+  "feishu-connector": "Feishu connector",
   "project-new-thread-workspace": "Project new-thread workspace",
   "project-scripts": "Project scripts",
   "project-checkouts": "Project checkouts",
