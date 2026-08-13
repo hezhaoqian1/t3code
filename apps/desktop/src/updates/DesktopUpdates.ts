@@ -248,6 +248,9 @@ function isArm64HostRunningIntelBuild(runtimeInfo: DesktopRuntimeInfo): boolean 
   return runtimeInfo.hostArch === "arm64" && runtimeInfo.appArch === "x64";
 }
 
+// OSS attachment URLs use unique object prefixes, so an installer URL cannot safely imply its blockmap URL.
+const DISABLE_DIFFERENTIAL_DOWNLOAD = true;
+
 export const make = Effect.gen(function* () {
   const config = yield* DesktopConfig.DesktopConfig;
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
@@ -408,9 +411,7 @@ export const make = Effect.gen(function* () {
     yield* Ref.set(updateDownloadInFlightRef, true);
     return yield* Effect.gen(function* () {
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
-      yield* electronUpdater.setDisableDifferentialDownload(
-        isArm64HostRunningIntelBuild(environment.runtimeInfo),
-      );
+      yield* electronUpdater.setDisableDifferentialDownload(DISABLE_DIFFERENTIAL_DOWNLOAD);
       yield* logUpdaterInfo("downloading update");
       yield* electronUpdater.downloadUpdate;
       return { accepted: true, completed: true };
@@ -756,9 +757,7 @@ export const make = Effect.gen(function* () {
       yield* electronUpdater.setAutoDownload(false);
       yield* electronUpdater.setAutoInstallOnAppQuit(false);
       yield* applyAutoUpdaterChannel(settings.updateChannel);
-      yield* electronUpdater.setDisableDifferentialDownload(
-        isArm64HostRunningIntelBuild(environment.runtimeInfo),
-      );
+      yield* electronUpdater.setDisableDifferentialDownload(DISABLE_DIFFERENTIAL_DOWNLOAD);
 
       if (isArm64HostRunningIntelBuild(environment.runtimeInfo)) {
         yield* logUpdaterInfo(
