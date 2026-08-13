@@ -7,8 +7,24 @@ import {
   enumerateCommandPaletteItems,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
+  shouldUseNativeFolderPicker,
   type CommandPaletteGroup,
 } from "./CommandPalette.logic";
+
+describe("shouldUseNativeFolderPicker", () => {
+  it("uses the operating-system picker for the local desktop environment", () => {
+    expect(shouldUseNativeFolderPicker({ isDesktop: true, isPrimaryEnvironment: true })).toBe(true);
+  });
+
+  it("keeps path browsing for web and remote environments", () => {
+    expect(shouldUseNativeFolderPicker({ isDesktop: false, isPrimaryEnvironment: true })).toBe(
+      false,
+    );
+    expect(shouldUseNativeFolderPicker({ isDesktop: true, isPrimaryEnvironment: false })).toBe(
+      false,
+    );
+  });
+});
 
 describe("reduceCommandPaletteUiState", () => {
   const closedState = { open: false, mode: "command", openIntent: null } as const;

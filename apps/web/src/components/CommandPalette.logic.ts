@@ -23,6 +23,13 @@ export const ADDON_ICON_CLASS = "size-4";
  */
 export type SearchOverlayMode = "command" | "files" | "content";
 
+export function shouldUseNativeFolderPicker(input: {
+  readonly isDesktop: boolean;
+  readonly isPrimaryEnvironment: boolean;
+}): boolean {
+  return input.isDesktop && input.isPrimaryEnvironment;
+}
+
 export interface CommandPaletteOpenIntent {
   readonly kind: "add-project" | "new-thread-in";
 }

@@ -12,6 +12,7 @@ import type {
   ServerProviderSkill,
   ThreadId,
 } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
 import {
   ProviderDriverKind,
   ProviderInstanceId,
@@ -98,6 +99,7 @@ import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
+import { ComposerAddMenu } from "./ComposerAddMenu";
 import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
@@ -106,6 +108,7 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from "./Expanded
 import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
+import { isFeishuConnectorConnected, useFeishuConnectorState } from "../../state/feishuConnector";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -577,6 +580,7 @@ export interface ChatComposerProps {
   ) => void;
 
   toggleInteractionMode: () => void;
+  onToggleTerminal: () => void;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
   handleInteractionModeChange: (mode: ProviderInteractionMode) => void;
 
@@ -650,6 +654,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onPreviousActivePendingUserInputQuestion,
     onChangeActivePendingUserInputCustomAnswer,
     toggleInteractionMode,
+    onToggleTerminal,
     handleRuntimeModeChange,
     handleInteractionModeChange,
     focusComposer,
@@ -658,6 +663,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onExpandImage,
   } = props;
   const isSendDisabled = sendDisabledReason !== null;
+  const navigate = useNavigate();
+  const feishuConnectorState = useFeishuConnectorState();
 
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
@@ -894,6 +901,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [isComposerFocused, setIsComposerFocused] = useState(false);
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
   const [isStashMenuOpen, setIsStashMenuOpen] = useState(false);
+  const [fdSkillPickerOpenRequest, setFdSkillPickerOpenRequest] = useState(0);
   const [stashPulse, setStashPulse] = useState<{ key: number; active: boolean }>({
     key: 0,
     active: false,
@@ -906,6 +914,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Refs
   // ------------------------------------------------------------------
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
+  const composerImageInputRef = useRef<HTMLInputElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const composerSelectLockRef = useRef(false);
@@ -1860,7 +1869,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         // unique image into the overflow list for nothing.
         const existingDedupKeys = new Set(
           composerImagesRef.current.map(
-            (image) => `${image.mimeType} ${image.sizeBytes} ${image.name}`,
+            (image) => `${image.mimeType}\0${image.sizeBytes}\0${image.name}`,
           ),
         );
         const capacity = Math.max(
@@ -1871,7 +1880,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           (attachment) =>
             !existingIds.has(attachment.id) &&
             !existingDedupKeys.has(
-              `${attachment.mimeType} ${attachment.sizeBytes} ${attachment.name}`,
+              `${attachment.mimeType}\0${attachment.sizeBytes}\0${attachment.name}`,
             ),
         );
         // Anything past the attachment limit cannot be restored. The entry is
@@ -1963,7 +1972,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // the composer has been cleared the user can type something genuinely
     // new (or switch threads) while encoding continues, and that deserves its
     // own entry.
-    const snapshotKey = `${String(composerDraftTarget)} ${prompt} ${images
+    const snapshotKey = `${String(composerDraftTarget)}\0${prompt}\0${images
       .map((image) => image.id)
       .join(",")}`;
     if (stashInFlightRef.current.has(snapshotKey)) return;
@@ -2322,6 +2331,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     );
   };
 
+  const openComposerTrigger = (trigger: "@" | "$") => {
+    if (!insertComposerTextAtEnd(trigger, { ensureLeadingBoundary: true })) return;
+    window.requestAnimationFrame(() => {
+      composerEditorRef.current?.focusAtEnd();
+    });
+  };
+
   // File-tree drags land as mentions. Handled in the capture phase so the
   // editor never sees the drop; the load-bearing rules (native stop, "move"
   // effect, no eager focus) live in makeComposerMentionDragHandlers.
@@ -2525,6 +2541,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       className="mx-auto w-full min-w-0 max-w-3xl"
       data-chat-composer-form="true"
     >
+      <input
+        ref={composerImageInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          void addComposerImages(files);
+        }}
+      />
       <div
         className={cn("group rounded-[22px] p-px transition-colors duration-200")}
         onDragEnter={onComposerDragEnter}
@@ -2973,6 +3003,29 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               )}
             >
               <div className="-m-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <ComposerAddMenu
+                  disabled={
+                    isConnecting ||
+                    isComposerApprovalState ||
+                    pendingUserInputs.length > 0 ||
+                    projectSelectionRequired
+                  }
+                  imageDisabled={!activeThreadId}
+                  fdSkillsDisabled={!activeThreadId}
+                  connectorState={{
+                    available: Boolean(window.desktopBridge?.getFeishuConnectorState),
+                    connected: isFeishuConnectorConnected(feishuConnectorState),
+                  }}
+                  onAddImages={() => composerImageInputRef.current?.click()}
+                  onOpenFiles={() => openComposerTrigger("@")}
+                  onOpenTerminal={onToggleTerminal}
+                  onOpenFdSkills={() =>
+                    setFdSkillPickerOpenRequest((currentRequest) => currentRequest + 1)
+                  }
+                  onOpenLocalSkills={() => openComposerTrigger("$")}
+                  onOpenConnectors={() => void navigate({ to: "/connectors" })}
+                />
+
                 {noProviderAvailable ? (
                   <Button
                     type="button"
@@ -2991,6 +3044,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   threadId={activeThreadId}
                   skills={businessCapabilitySkills}
                   providerCatalogState={providerSkillCatalogState}
+                  openRequest={fdSkillPickerOpenRequest}
                 />
 
                 {officeMode ? null : isComposerFooterCompact ? (

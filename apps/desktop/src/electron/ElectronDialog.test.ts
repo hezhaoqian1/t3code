@@ -117,6 +117,28 @@ describe("ElectronDialog", () => {
     }).pipe(Effect.provide(ElectronDialog.layer)),
   );
 
+  it.effect("opens the native directory picker and returns the selected folder", () =>
+    Effect.gen(function* () {
+      const owner = { id: 8 } as BrowserWindow;
+      showOpenDialogMock.mockResolvedValue({
+        canceled: false,
+        filePaths: ["/Users/employee/工作"],
+      });
+      const dialog = yield* ElectronDialog.ElectronDialog;
+
+      const selected = yield* dialog.pickFolder({
+        owner: Option.some(owner),
+        defaultPath: Option.none(),
+      });
+
+      assert.deepEqual(showOpenDialogMock.mock.calls[0], [
+        owner,
+        { properties: ["openDirectory", "createDirectory"] },
+      ]);
+      assert.deepEqual(selected, Option.some("/Users/employee/工作"));
+    }).pipe(Effect.provide(ElectronDialog.layer)),
+  );
+
   it.effect("preserves confirmation request context and cause", () =>
     Effect.gen(function* () {
       const cause = new Error("confirmation failed");

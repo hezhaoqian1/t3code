@@ -16,6 +16,7 @@ import {
   DESKTOP_ELECTRON_LANGUAGES,
   DESKTOP_FILE_EXCLUSIONS,
   DESKTOP_EXTRA_RESOURCES,
+  DESKTOP_ASAR_UNPACK,
   desktopReleaseBuildEnvironment,
   InvalidMockUpdateServerPortError,
   UnsupportedDesktopBuildArchitectureError,
@@ -281,8 +282,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       const linux = yield* createBuildConfig("linux", "AppImage", "1.2.3", false, false, undefined);
       const win = yield* createBuildConfig("win", "nsis", "1.2.3", false, false, undefined);
 
-      assert.notProperty(mac, "asarUnpack");
-      assert.notProperty(linux, "asarUnpack");
+      assert.deepStrictEqual(mac.asarUnpack, DESKTOP_ASAR_UNPACK);
+      assert.deepStrictEqual(linux.asarUnpack, DESKTOP_ASAR_UNPACK);
       assert.deepStrictEqual(win.asarUnpack, WINDOWS_ASAR_UNPACK);
       // Linux must register the renderer schemes so the generated .desktop
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
@@ -369,7 +370,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
   );
 
-  it("stages the resource monitor as an external executable resource", () => {
+  it("stages desktop integrations as external resources", () => {
     assert.deepStrictEqual(DESKTOP_EXTRA_RESOURCES, [
       {
         from: "apps/desktop/resources/enterprise-config.json",
@@ -378,6 +379,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       {
         from: "apps/desktop/prod-resources/resource-monitor",
         to: "resource-monitor",
+      },
+      {
+        from: "apps/desktop/prod-resources/connectors/feishu",
+        to: "connectors/feishu",
       },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [

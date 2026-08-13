@@ -25,11 +25,13 @@ import {
 } from "./methods/window.ts";
 import * as PreviewIpc from "./methods/preview.ts";
 import * as AccountIpc from "./methods/account.ts";
+import * as ConnectorIpc from "./methods/connectors.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* PreviewIpc.installPreviewEventForwarding();
   yield* AccountIpc.installAccountStateForwarding();
+  yield* ConnectorIpc.installConnectorStateForwarding();
 
   yield* ipc.handleSync(getAppBranding);
   yield* ipc.handleSync(getWindowFullscreenState);
@@ -56,5 +58,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   }
   for (const accountMethod of AccountIpc.methods) {
     yield* ipc.handle(accountMethod);
+  }
+  for (const connectorMethod of ConnectorIpc.methods) {
+    yield* ipc.handle(connectorMethod);
   }
 });

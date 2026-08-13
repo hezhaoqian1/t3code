@@ -76,3 +76,30 @@ it.effect("carries only the private FD credential descriptor", () =>
     }
   }),
 );
+
+it.effect("carries connector paths without connector credentials", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeBootstrap({
+      ...validBootstrap,
+      fdConnectorSkillsRoot: "/tmp/fd/connectors/skills/connector-feishu",
+      fdConnectorBinPath: "/app.asar.unpacked/node_modules/@larksuite/cli/bin",
+      fdConnectorConfigDir: "/tmp/fd/connectors/feishu/config",
+      fdConnectorStatePath: "/tmp/fd/connectors/feishu/connector-state.json",
+    });
+    assert.equal(decoded.fdConnectorSkillsRoot, "/tmp/fd/connectors/skills/connector-feishu");
+    assert.equal(decoded.fdConnectorBinPath, "/app.asar.unpacked/node_modules/@larksuite/cli/bin");
+    assert.equal(decoded.fdConnectorConfigDir, "/tmp/fd/connectors/feishu/config");
+    assert.equal(decoded.fdConnectorStatePath, "/tmp/fd/connectors/feishu/connector-state.json");
+
+    for (const field of ["feishuAccessToken", "larkRefreshToken", "deviceCode", "appSecret"]) {
+      const exit = yield* Effect.exit(
+        decodeBootstrap({
+          ...validBootstrap,
+          fdConnectorSkillsRoot: "/tmp/fd/connectors/skills/connector-feishu",
+          [field]: "secret",
+        }),
+      );
+      assert.strictEqual(exit._tag, "Failure", `expected ${field} to be rejected`);
+    }
+  }),
+);

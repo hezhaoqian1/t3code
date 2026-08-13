@@ -109,6 +109,7 @@ export interface CodexSessionRuntimeOptions {
   readonly appServerArgs?: ReadonlyArray<string>;
   readonly developerInstructions?: string;
   readonly dynamicTools?: ReadonlyArray<EffectCodexSchema.V2ThreadStartParams__DynamicToolSpec>;
+  readonly skillExtraRoots?: ReadonlyArray<string>;
   readonly dynamicToolExecutor?: (
     input: EffectCodexSchema.DynamicToolCallParams,
   ) => Effect.Effect<EffectCodexSchema.DynamicToolCallResponse>;
@@ -1804,6 +1805,18 @@ export const makeCodexSessionRuntime = (
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
       yield* client.request("initialize", buildFdCodexInitializeParams());
       yield* client.notify("initialized", undefined);
+      if (options.skillExtraRoots && options.skillExtraRoots.length > 0) {
+        yield* client
+          .request("skills/extraRoots/set", { extraRoots: options.skillExtraRoots })
+          .pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Failed to register Codex Skill extra roots.", {
+                cause,
+                rootCount: options.skillExtraRoots?.length ?? 0,
+              }),
+            ),
+          );
+      }
 
       const requestedModel = normalizeCodexModelSlug(options.model);
 

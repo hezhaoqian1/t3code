@@ -8,9 +8,7 @@
 打开[方德 AI 下载页](https://ai-api.fdsure.com/api-access)，按设备选择：
 
 - Windows x64
-- Windows ARM64
 - macOS Apple Silicon
-- macOS Intel
 
 正式安装包必须经过平台签名。不要使用聊天文件、个人网盘或其他来源的安装包。
 
@@ -24,6 +22,12 @@
 
 普通任务默认使用公司管理的 `deepseek-v4-flash`。账号凭据、模型策略、AI 点数和 FD Skill
 权限由方德平台下发。
+
+## 飞书连接器
+
+桌面端已随安装包内置飞书官方 CLI 和 27 个官方 Skills。首次在“连接器”页面绑定飞书应用并
+完成员工账号授权后，即可在普通任务中让 Agent 按需调用飞书能力。员工无需安装 Node.js、
+npm、WorkBuddy 或单独下载 Skills；飞书授权配置隔离在 FD AI 私有连接器目录，不会写入项目目录。
 
 ## 本地文件
 

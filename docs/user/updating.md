@@ -10,8 +10,9 @@
 4. 应用重新打开后，确认账号、任务和空间正常显示。
 
 更新包来自 `https://ai-api.fdsure.com/downloads/desktop/latest`，并由桌面端校验
-`electron-updater` 清单。macOS 正式包经过 Developer ID 签名和公证，Windows 正式包经过
-Authenticode 签名。
+`electron-updater` 清单。当前内部试用包尚未完成 macOS Developer ID 签名、公证和
+Windows Authenticode 签名，系统可能显示 Gatekeeper 或 SmartScreen 提示；正式生产通道
+启用前必须完成两端签名和真机升级验收。
 
 如果应用内更新失败，可从[方德 AI 下载页](https://ai-api.fdsure.com/api-access)下载对应平台的
 最新安装包覆盖安装。不要卸载或手工删除 `~/FangdeAI`。

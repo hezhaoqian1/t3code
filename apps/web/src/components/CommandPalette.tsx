@@ -102,6 +102,7 @@ import {
   ITEM_ICON_CLASS,
   RECENT_THREAD_LIMIT,
   reduceCommandPaletteUiState,
+  shouldUseNativeFolderPicker,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
@@ -631,6 +632,9 @@ function OpenCommandPaletteDialog(props: {
     null,
   );
   const [isPickingProjectFolder, setIsPickingProjectFolder] = useState(false);
+  const pickLocalProjectFolderRef = useRef<(environmentId: EnvironmentId) => Promise<void>>(
+    async () => {},
+  );
   const [addProjectCloneFlow, setAddProjectCloneFlow] = useState<AddProjectCloneFlow | null>(null);
   const [isRemoteProjectLookingUp, setIsRemoteProjectLookingUp] = useState(false);
   const [isRemoteProjectCloning, setIsRemoteProjectCloning] = useState(false);
@@ -1107,11 +1111,20 @@ function OpenCommandPaletteDialog(props: {
           kind: "action",
           value: `action:add-project:${environmentId}:local`,
           searchTerms: ["local", "folder", "directory", "browse"],
-          title: "本地文件夹",
-          description: "选择磁盘上的文件夹",
+          title: "打开本地文件夹",
+          description: "使用系统窗口选择文件夹",
           icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
           keepOpen: true,
           run: async () => {
+            if (
+              shouldUseNativeFolderPicker({
+                isDesktop: typeof window !== "undefined" && window.desktopBridge !== undefined,
+                isPrimaryEnvironment: environmentId === primaryEnvironmentId,
+              })
+            ) {
+              await pickLocalProjectFolderRef.current(environmentId);
+              return;
+            }
             await startAddProjectBrowse(environmentId);
           },
         },
@@ -1188,7 +1201,7 @@ function OpenCommandPaletteDialog(props: {
 
       return [{ value: `sources:${environmentId}`, label: "来源", items: sourceItems }];
     },
-    [openSourceControlSettings, startAddProjectBrowse, startAddProjectClone],
+    [openSourceControlSettings, primaryEnvironmentId, startAddProjectBrowse, startAddProjectClone],
   );
 
   const startAddProjectSourceSelection = useCallback(
@@ -1980,40 +1993,63 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  const handleOpenProjectFromFileManager = useCallback(async () => {
-    if (!canOpenProjectFromFileManager || isPickingProjectFolder) {
-      return;
-    }
-    const api = readLocalApi();
-    if (!api) {
-      return;
-    }
+  const handleOpenProjectFromFileManager = useCallback(
+    async (environmentId: EnvironmentId | null = browseEnvironmentId) => {
+      if (
+        environmentId === null ||
+        environmentId !== primaryEnvironmentId ||
+        typeof window === "undefined" ||
+        window.desktopBridge === undefined ||
+        isPickingProjectFolder
+      ) {
+        return;
+      }
+      const api = readLocalApi();
+      if (!api) {
+        return;
+      }
 
-    setIsPickingProjectFolder(true);
-    let pickedPath: string | null = null;
-    try {
-      const pickerOptions = {
-        ...(fileManagerInitialPath ? { initialPath: fileManagerInitialPath } : {}),
-      };
-      pickedPath = await api.dialogs.pickFolder(
-        Object.keys(pickerOptions).length > 0 ? pickerOptions : undefined,
-      );
-    } catch {
-      // Ignore picker failures and leave the palette open.
+      setIsPickingProjectFolder(true);
+      let pickedPath: string | null = null;
+      try {
+        const pickerOptions = {
+          ...(fileManagerInitialPath ? { initialPath: fileManagerInitialPath } : {}),
+        };
+        pickedPath = await api.dialogs.pickFolder(
+          Object.keys(pickerOptions).length > 0 ? pickerOptions : undefined,
+        );
+      } catch {
+        // Leave the source picker open so the employee can retry or choose another source.
+        setIsPickingProjectFolder(false);
+        return;
+      }
       setIsPickingProjectFolder(false);
-      return;
-    }
-    setIsPickingProjectFolder(false);
-    if (!pickedPath) {
-      return;
-    }
-    await handleAddProject(pickedPath);
-  }, [
-    canOpenProjectFromFileManager,
-    fileManagerInitialPath,
-    handleAddProject,
-    isPickingProjectFolder,
-  ]);
+      if (!pickedPath) {
+        return;
+      }
+      await handleAddProjectForEnvironment({
+        environmentId,
+        rawCwd: pickedPath,
+        platform: browseEnvironmentPlatform,
+        currentProjectCwd: getBrowseCwdForEnvironment(environmentId),
+      });
+    },
+    [
+      browseEnvironmentId,
+      browseEnvironmentPlatform,
+      fileManagerInitialPath,
+      getBrowseCwdForEnvironment,
+      handleAddProjectForEnvironment,
+      isPickingProjectFolder,
+      primaryEnvironmentId,
+    ],
+  );
+
+  useLayoutEffect(() => {
+    pickLocalProjectFolderRef.current = async (environmentId) => {
+      await handleOpenProjectFromFileManager(environmentId);
+    };
+  }, [handleOpenProjectFromFileManager]);
 
   const inputAccessory =
     addProjectCloneFlow?.step === "repository" ? (
@@ -2104,7 +2140,7 @@ function OpenCommandPaletteDialog(props: {
       className="h-auto px-2 text-muted-foreground text-xs hover:bg-transparent hover:text-foreground"
       disabled={isPickingProjectFolder}
       onClick={() => {
-        void handleOpenProjectFromFileManager();
+        void handleOpenProjectFromFileManager(browseEnvironmentId);
       }}
     >
       {`Open in ${fileManagerName}`}

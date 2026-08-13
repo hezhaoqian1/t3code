@@ -5953,6 +5953,7 @@ function ChatViewContent(props: ChatViewProps) {
                               onChangeActivePendingUserInputCustomAnswer
                             }
                             toggleInteractionMode={toggleInteractionMode}
+                            onToggleTerminal={toggleTerminalVisibility}
                             handleRuntimeModeChange={handleRuntimeModeChange}
                             handleInteractionModeChange={handleInteractionModeChange}
                             focusComposer={focusComposer}

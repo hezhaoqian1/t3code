@@ -7,6 +7,11 @@ import type {
 import { contextBridge, ipcRenderer } from "electron";
 
 import {
+  parseFdConnectorActionResult,
+  parseFdConnectorSetEnabledInput,
+  parseFdConnectorState,
+} from "./connectors/ConnectorPreloadCodec.ts";
+import {
   parseFdAccountLoginInput,
   parseFdAccountLoginResult,
   parseFdAccountLogoutResult,
@@ -64,6 +69,42 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   },
   getFdUsageSummary: () =>
     ipcRenderer.invoke(IpcChannels.FD_USAGE_GET_SUMMARY_CHANNEL).then(parseFdUsageSummary),
+  getFeishuConnectorState: () =>
+    ipcRenderer.invoke(IpcChannels.FEISHU_CONNECTOR_GET_STATE_CHANNEL).then(parseFdConnectorState),
+  refreshFeishuConnector: () =>
+    ipcRenderer
+      .invoke(IpcChannels.FEISHU_CONNECTOR_REFRESH_CHANNEL)
+      .then(parseFdConnectorActionResult),
+  connectFeishuConnector: () =>
+    ipcRenderer
+      .invoke(IpcChannels.FEISHU_CONNECTOR_CONNECT_CHANNEL)
+      .then(parseFdConnectorActionResult),
+  disconnectFeishuConnector: () =>
+    ipcRenderer
+      .invoke(IpcChannels.FEISHU_CONNECTOR_DISCONNECT_CHANNEL)
+      .then(parseFdConnectorActionResult),
+  setFeishuConnectorEnabled: (input) =>
+    ipcRenderer
+      .invoke(
+        IpcChannels.FEISHU_CONNECTOR_SET_ENABLED_CHANNEL,
+        parseFdConnectorSetEnabledInput(input),
+      )
+      .then(parseFdConnectorActionResult),
+  onFeishuConnectorState: (listener) => {
+    const wrappedListener = (_event: Electron.IpcRendererEvent, raw: unknown) => {
+      try {
+        listener(parseFdConnectorState(raw));
+      } catch {
+        // Ignore malformed connector broadcasts at the renderer boundary.
+      }
+    };
+    ipcRenderer.on(IpcChannels.FEISHU_CONNECTOR_STATE_CHANGED_CHANNEL, wrappedListener);
+    return () =>
+      ipcRenderer.removeListener(
+        IpcChannels.FEISHU_CONNECTOR_STATE_CHANGED_CHANNEL,
+        wrappedListener,
+      );
+  },
   getClientSettings: () => ipcRenderer.invoke(IpcChannels.GET_CLIENT_SETTINGS_CHANNEL),
   setClientSettings: (settings) =>
     ipcRenderer.invoke(IpcChannels.SET_CLIENT_SETTINGS_CHANNEL, settings),

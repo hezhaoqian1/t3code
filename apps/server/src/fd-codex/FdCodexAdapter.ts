@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { ProviderInstanceId } from "@t3tools/contracts";
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { ServerConfig } from "../config.ts";
@@ -19,12 +20,16 @@ export async function resolveFdCodexTurnSkills(input: {
   readonly cwd: string;
   readonly prompt: string;
   readonly userHome?: string;
+  readonly extraRoots?: ReadonlyArray<string>;
+  readonly connectorStatePath?: string | undefined;
 }): Promise<ReadonlyArray<{ readonly name: string; readonly path: string }>> {
   const selectedNames = selectedNativeSkillNames(input.prompt);
   if (selectedNames.length === 0) return [];
+  const connectorEnabled = await readConnectorEnabled(input.connectorStatePath);
 
   const catalog = new NativeSkillCatalog({
     projectRoot: input.cwd,
+    extraRoots: connectorEnabled ? (input.extraRoots ?? []) : [],
     ...(input.userHome ? { userHome: input.userHome } : {}),
   });
   const snapshot = await catalog.refresh();
@@ -38,18 +43,32 @@ export async function resolveFdCodexTurnSkills(input: {
 export async function prepareFdCodexRuntime(input: {
   readonly stateDir: string;
   readonly credentials: FdServerRuntimeCredentialProjection;
+  readonly connectorSkillsRoot?: string | undefined;
+  readonly connectorBinPath?: string | undefined;
+  readonly connectorConfigDir?: string | undefined;
+  readonly connectorStatePath?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
-}): Promise<{ readonly environment: NodeJS.ProcessEnv; readonly homePath: string }> {
+}): Promise<{
+  readonly environment: NodeJS.ProcessEnv;
+  readonly homePath: string;
+  readonly skillExtraRoots?: ReadonlyArray<string>;
+}> {
   const codexHome = join(input.stateDir, "codex-home");
+  const connectorEnabled = await readConnectorEnabled(input.connectorStatePath);
   await prepareFdManagedCodexHome({
     codexHome,
     newApiOrigin: input.credentials.newApiOrigin,
   });
   return {
     homePath: codexHome,
+    ...(connectorEnabled && input.connectorSkillsRoot
+      ? { skillExtraRoots: [input.connectorSkillsRoot] }
+      : {}),
     environment: makeFdCodexChildEnvironment({
       codexHome,
       runtimeApiKey: input.credentials.runtimeApiKey,
+      connectorBinPath: connectorEnabled ? input.connectorBinPath : undefined,
+      connectorConfigDir: connectorEnabled ? input.connectorConfigDir : undefined,
       ...(input.inheritedEnvironment ? { inheritedEnvironment: input.inheritedEnvironment } : {}),
     }),
   };
@@ -88,6 +107,10 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
               prepareFdCodexRuntime({
                 stateDir: serverConfig.stateDir,
                 credentials: projection,
+                connectorSkillsRoot: serverConfig.fdConnectorSkillsRoot,
+                connectorBinPath: serverConfig.fdConnectorBinPath,
+                connectorConfigDir: serverConfig.fdConnectorConfigDir,
+                connectorStatePath: serverConfig.fdConnectorStatePath,
               }),
             catch: () =>
               new ProviderAdapterRequestError({
@@ -99,7 +122,14 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
         }),
       resolveTurnSkills: (turn) =>
         Effect.tryPromise({
-          try: () => resolveFdCodexTurnSkills(turn),
+          try: () =>
+            resolveFdCodexTurnSkills({
+              ...turn,
+              connectorStatePath: serverConfig.fdConnectorStatePath,
+              extraRoots: serverConfig.fdConnectorSkillsRoot
+                ? [serverConfig.fdConnectorSkillsRoot]
+                : [],
+            }),
           catch: () =>
             new ProviderAdapterRequestError({
               provider: FD_DEEPSEEK_DRIVER_KIND,
@@ -177,3 +207,13 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
     },
   );
 });
+
+async function readConnectorEnabled(statePath: string | undefined): Promise<boolean> {
+  if (!statePath) return false;
+  try {
+    const parsed = JSON.parse(await readFile(statePath, "utf8")) as { enabled?: unknown };
+    return parsed.enabled === true;
+  } catch {
+    return false;
+  }
+}

@@ -38,6 +38,7 @@ export default defineConfig({
       "**/routeTree.gen.ts",
       "apps/web/public/mockServiceWorker.js",
       "apps/web/src/lib/vendor/qrcodegen.ts",
+      "apps/desktop/resources/connectors/feishu/skills/**",
       "*.icon/**",
     ],
     sortPackageJson: {},

@@ -14,6 +14,7 @@ import {
   GitBranchIcon,
   KeyboardIcon,
   PaletteIcon,
+  PlugZapIcon,
   SearchIcon,
   Settings2Icon,
   XIcon,
@@ -47,6 +48,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/appearance": PaletteIcon,
   "/settings/keybindings": KeyboardIcon,
   "/settings/projects": FolderIcon,
+  "/settings/connectors": PlugZapIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/archived": ArchiveIcon,
 };

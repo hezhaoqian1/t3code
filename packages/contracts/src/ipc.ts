@@ -105,6 +105,11 @@ import type {
   FdAccountState,
   FdRetryRevocationResult,
 } from "./fd/account.ts";
+import type {
+  FdConnectorActionResult,
+  FdConnectorSetEnabledInput,
+  FdConnectorState,
+} from "./fd/connectors.ts";
 import type { FdUsageSummary } from "./fd/usage.ts";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -819,6 +824,14 @@ export interface DesktopBridge {
   retryFdAccountRevocation: () => Promise<FdRetryRevocationResult>;
   onFdAccountState: (listener: (state: FdAccountState) => void) => () => void;
   getFdUsageSummary?: () => Promise<FdUsageSummary>;
+  getFeishuConnectorState?: () => Promise<FdConnectorState>;
+  refreshFeishuConnector?: () => Promise<FdConnectorActionResult>;
+  connectFeishuConnector?: () => Promise<FdConnectorActionResult>;
+  disconnectFeishuConnector?: () => Promise<FdConnectorActionResult>;
+  setFeishuConnectorEnabled?: (
+    input: FdConnectorSetEnabledInput,
+  ) => Promise<FdConnectorActionResult>;
+  onFeishuConnectorState?: (listener: (state: FdConnectorState) => void) => () => void;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;

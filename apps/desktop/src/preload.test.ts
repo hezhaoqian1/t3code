@@ -11,6 +11,23 @@ const authenticatedState = {
   expiresAt: 2_000_000_000,
 } as const;
 
+const connectedFeishuState = {
+  id: "feishu",
+  displayName: "飞书",
+  enabled: true,
+  busy: false,
+  installState: "installed",
+  authState: "authenticated",
+  cliVersion: "1.0.86",
+  installedCliPath: "/tmp/fd/connectors/feishu/lark-cli",
+  skillsRoot: "/tmp/fd/connectors/skills/connector-feishu",
+  skillCount: 27,
+  installedSkillNames: ["lark-doc", "lark-sheets"],
+  lastError: null,
+  message: null,
+  authAction: null,
+} as const;
+
 const mocks = vi.hoisted(() => ({
   bridge: undefined as DesktopBridge | undefined,
   invoke: vi.fn(),
@@ -227,5 +244,53 @@ describe("FD account preload bridge", () => {
 
     mocks.invoke.mockResolvedValue({ ...summary, accessToken: "must-not-cross" });
     await expect(mocks.bridge?.getFdUsageSummary?.()).rejects.toBeDefined();
+  });
+
+  it("decodes Feishu connector state without widening the renderer contract", async () => {
+    mocks.invoke.mockResolvedValue(connectedFeishuState);
+
+    await expect(mocks.bridge?.getFeishuConnectorState?.()).resolves.toEqual(connectedFeishuState);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(IpcChannels.FEISHU_CONNECTOR_GET_STATE_CHANNEL);
+
+    mocks.invoke.mockResolvedValue({ ...connectedFeishuState, accessToken: "must-not-cross" });
+    await expect(mocks.bridge?.getFeishuConnectorState?.()).rejects.toBeDefined();
+  });
+
+  it("forwards only schema-valid Feishu connector state events", () => {
+    const listener = vi.fn();
+    const unsubscribe = mocks.bridge?.onFeishuConnectorState?.(listener);
+    const emit = mocks.listeners.get(IpcChannels.FEISHU_CONNECTOR_STATE_CHANGED_CHANNEL);
+
+    emit?.({}, connectedFeishuState);
+    emit?.({}, { ...connectedFeishuState, deviceCode: "must-not-cross" });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(JSON.stringify(listener.mock.calls)).not.toMatch(/deviceCode|must-not-cross/);
+    unsubscribe?.();
+    expect(mocks.removeListener).toHaveBeenCalledWith(
+      IpcChannels.FEISHU_CONNECTOR_STATE_CHANGED_CHANNEL,
+      emit,
+    );
+  });
+
+  it("normalizes Feishu connector enablement input before IPC invocation", async () => {
+    mocks.invoke.mockResolvedValue({ state: { ...connectedFeishuState, enabled: false } });
+
+    await expect(mocks.bridge?.setFeishuConnectorEnabled?.({ enabled: false })).resolves.toEqual({
+      state: { ...connectedFeishuState, enabled: false },
+    });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(
+      IpcChannels.FEISHU_CONNECTOR_SET_ENABLED_CHANNEL,
+      {
+        enabled: false,
+      },
+    );
+
+    expect(() =>
+      mocks.bridge?.setFeishuConnectorEnabled?.({
+        enabled: true,
+        accessToken: "must-not-cross",
+      } as never),
+    ).toThrow();
   });
 });

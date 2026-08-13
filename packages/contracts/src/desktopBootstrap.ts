@@ -16,6 +16,10 @@ export const DesktopBackendBootstrap = Schema.Struct({
   desktopTelemetryControlFd: Schema.optionalKey(PositiveInt),
   fdRuntimeCredentialFd: Schema.optionalKey(Schema.Literal(6)),
   resourceMonitorPath: Schema.optionalKey(TrimmedNonEmptyString),
+  fdConnectorSkillsRoot: Schema.optionalKey(TrimmedNonEmptyString),
+  fdConnectorBinPath: Schema.optionalKey(TrimmedNonEmptyString),
+  fdConnectorConfigDir: Schema.optionalKey(TrimmedNonEmptyString),
+  fdConnectorStatePath: Schema.optionalKey(TrimmedNonEmptyString),
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;
