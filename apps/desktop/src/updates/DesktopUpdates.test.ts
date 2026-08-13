@@ -28,7 +28,7 @@ interface UpdatesHarnessOptions {
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
   >;
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
-  readonly setDisableDifferentialDownload?: Effect.Effect<void>;
+  readonly setDisableDifferentialDownload?: (value: boolean) => Effect.Effect<void>;
   readonly stopBackend?: Effect.Effect<void>;
   readonly backendDesiredRunning?: boolean;
   readonly platform?: NodeJS.Platform;
@@ -86,7 +86,8 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       Effect.sync(() => {
         fullChangelog = value;
       }),
-    setDisableDifferentialDownload: () => options.setDisableDifferentialDownload ?? Effect.void,
+    setDisableDifferentialDownload: (value) =>
+      options.setDisableDifferentialDownload?.(value) ?? Effect.void,
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
@@ -301,6 +302,28 @@ describe("DesktopUpdates", () => {
     }).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("uses complete downloads when OSS attachment URLs cannot share blockmap paths", () => {
+    const differentialSettings: boolean[] = [];
+    const harness = makeHarness({
+      setDisableDifferentialDownload: (value) =>
+        Effect.sync(() => {
+          differentialSettings.push(value);
+        }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        yield* updates.download;
+
+        assert.deepEqual(differentialSettings, [true, true]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("updates and broadcasts state from updater events", () => {
     const harness = makeHarness();
 
@@ -437,12 +460,13 @@ describe("DesktopUpdates", () => {
   it.effect("recovers download state after an unexpected setup failure", () => {
     let disableDifferentialCalls = 0;
     const harness = makeHarness({
-      setDisableDifferentialDownload: Effect.suspend(() => {
-        disableDifferentialCalls += 1;
-        return disableDifferentialCalls === 1
-          ? Effect.void
-          : Effect.die(new Error("download setup failed"));
-      }),
+      setDisableDifferentialDownload: () =>
+        Effect.suspend(() => {
+          disableDifferentialCalls += 1;
+          return disableDifferentialCalls === 1
+            ? Effect.void
+            : Effect.die(new Error("download setup failed"));
+        }),
     });
 
     return Effect.scoped(
@@ -472,16 +496,17 @@ describe("DesktopUpdates", () => {
       const actionStarted = yield* Deferred.make<void>();
       let disableDifferentialCalls = 0;
       const harness = makeHarness({
-        setDisableDifferentialDownload: Effect.suspend(() => {
-          disableDifferentialCalls += 1;
-          if (disableDifferentialCalls === 1) {
+        setDisableDifferentialDownload: () =>
+          Effect.suspend(() => {
+            disableDifferentialCalls += 1;
+            if (disableDifferentialCalls === 1) {
+              return Effect.void;
+            }
+            if (disableDifferentialCalls === 2) {
+              return Deferred.succeed(actionStarted, undefined).pipe(Effect.andThen(Effect.never));
+            }
             return Effect.void;
-          }
-          if (disableDifferentialCalls === 2) {
-            return Deferred.succeed(actionStarted, undefined).pipe(Effect.andThen(Effect.never));
-          }
-          return Effect.void;
-        }),
+          }),
       });
 
       yield* Effect.scoped(
