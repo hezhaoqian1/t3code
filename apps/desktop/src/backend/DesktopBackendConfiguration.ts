@@ -72,6 +72,26 @@ function resourceMonitorBinaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "t3-resource-monitor.exe" : "t3-resource-monitor";
 }
 
+function codexBinaryName(platform: NodeJS.Platform): string {
+  return platform === "win32" ? "codex.exe" : "codex";
+}
+
+const resolveBundledCodexBinaryPath = Effect.fn(
+  "desktop.backendConfiguration.resolveBundledCodexBinaryPath",
+)(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  if (!environment.isPackaged) return Option.none<string>();
+
+  return Option.some(
+    environment.path.join(
+      environment.resourcesPath,
+      "codex",
+      "bin",
+      codexBinaryName(environment.platform),
+    ),
+  );
+});
+
 const resolveResourceMonitorPath = Effect.fn(
   "desktop.backendConfiguration.resolveResourceMonitorPath",
 )(function* () {
@@ -177,6 +197,10 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
+    const bundledCodexBinaryPath = yield* resolveBundledCodexBinaryPath().pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
+    );
     const officeWorkspaceRoot = yield* prepareDesktopOfficeWorkspace().pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
@@ -202,7 +226,14 @@ export const make = Effect.gen(function* () {
       ],
       entryPath: environment.backendEntryPath,
       cwd: officeWorkspaceRoot,
-      env: { ...childEnvPatch(), ELECTRON_RUN_AS_NODE: "1" },
+      env: {
+        ...childEnvPatch(),
+        ELECTRON_RUN_AS_NODE: "1",
+        ...Option.match(bundledCodexBinaryPath, {
+          onNone: () => ({}),
+          onSome: (value) => ({ FD_CODEX_BINARY: value }),
+        }),
+      },
       extendEnv: true,
       bootstrap: {
         mode: "desktop",

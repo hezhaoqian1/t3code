@@ -71,23 +71,21 @@ on loopback and delivers its bootstrap credential to the renderer over trusted I
 
 ### Desktop `.dmg` packaging notes
 
-- Default build is unsigned/not notarized for local sharing.
+- Default local and CI builds are unsigned/not notarized for company-internal distribution.
 - The DMG build uses `assets/fd/fangde-ai-1024.png` as the Fangde AI app icon source.
 - Desktop production windows load the bundled UI from the `fdai://app/` root URL (not a
   `127.0.0.1` document URL, and not an explicit `index.html` path).
 - Desktop packaging includes `apps/server/dist` (the `t3` backend) and starts it on loopback with an
   auth token for WebSocket/API traffic.
+- Desktop packaging includes a pinned, platform-native Codex runtime under Electron resources. The
+  FD provider uses its absolute path, so employees do not install Codex separately.
 - Your tester can still open it on macOS by right-clicking the app and choosing **Open** on first
   launch.
 - To keep staging files for debugging package contents, run: `vp run dist:desktop:dmg --keep-stage`
-- To allow code-signing/notarization when configured in CI/secrets, add: `--signed`.
-- Signed macOS builds also require `T3CODE_APPLE_TEAM_ID` and
-  `T3CODE_MACOS_PROVISIONING_PROFILE`.
-- Windows `--signed` uses Azure Trusted Signing and expects:
-  `AZURE_TRUSTED_SIGNING_ENDPOINT`, `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`,
-  `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`, and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`.
-- Azure authentication env vars are also required (for example service principal with secret):
-  `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`.
+- Windows internal builds can use the in-app updater, with a visible installer and automatic
+  relaunch. macOS internal builds use manual DMG replacement because the native updater requires a
+  signed application.
+- The optional `--signed` build path remains available if the company later adopts platform signing.
 
 ## Browser development
 

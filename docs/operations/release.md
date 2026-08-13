@@ -10,29 +10,15 @@ and writes `SHA256SUMS`. The native runners also install the matching pinned Fei
 the 27 official `lark-*` Skills are bundled from the repository resources. Employee machines do
 not need Node.js, npm, or WorkBuddy.
 
-The current workflow produces internal unsigned packages. macOS Gatekeeper and Windows SmartScreen
-may show trust prompts. A production-signed channel must pass `--signed` and configure the signing
-secrets below before it can be described as signed.
+The company-internal channel is intentionally unsigned. Employees may see macOS Gatekeeper or
+Windows SmartScreen prompts on first install. Windows supports the in-app update handoff; macOS does
+not advertise in-app installation because Electron's macOS updater requires a signed application.
+Mac employees download the new DMG from the company website and replace the existing application.
 
-## Production Signing Secrets
-
-macOS signing and notarization:
-
-- `CSC_LINK`
-- `CSC_KEY_PASSWORD`
-- `APPLE_API_KEY`
-- `APPLE_API_KEY_ID`
-- `APPLE_API_ISSUER`
-
-Windows Azure Trusted Signing:
-
-- `AZURE_TENANT_ID`
-- `AZURE_CLIENT_ID`
-- `AZURE_CLIENT_SECRET`
-- `AZURE_TRUSTED_SIGNING_ENDPOINT`
-- `AZURE_TRUSTED_SIGNING_ACCOUNT_NAME`
-- `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`
-- `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`
+Each artifact bundles the pinned native Codex App Server runtime for its platform. Employee machines
+do not need a global Codex installation or a PATH entry. The build verifies the staged runtime and
+then executes `codex --version` again from the final unpacked Electron application before accepting
+the release artifact.
 
 ## Build And Publish
 
@@ -53,6 +39,8 @@ manifest byte sizes and hashes before atomically switching the public
 ## Acceptance
 
 After activation, verify `latest.json`, `latest-mac.yml`, `latest.yml`, both download buttons,
-application update check, download, and restart/install on a real Apple Silicon Mac and a Windows
-x64 machine. Keep the prior release until this check is complete; then remove the retired release
-and confirm no old alias or backup remains.
+manual DMG replacement on a real Apple Silicon Mac, and application update check, download, visible
+installation, and restart on a Windows x64 machine. Also verify that the bundled Codex App Server
+answers a real task without a system-wide Codex install, and that Windows retains both desktop and
+Start menu shortcuts. Keep the prior release until this check is complete; then remove the retired
+release and confirm no old alias or backup remains.

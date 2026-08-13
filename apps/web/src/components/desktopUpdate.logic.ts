@@ -59,41 +59,41 @@ export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null):
 
 export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState): string {
   if (!shouldShowArm64IntelBuildWarning(state)) {
-    return "This install is using the correct architecture.";
+    return "当前安装包与这台 Mac 的芯片架构匹配。";
   }
 
   const action = resolveDesktopUpdateButtonAction(state);
   if (action === "download") {
-    return "This Mac has Apple Silicon, but 方德 AI is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
+    return "这台 Mac 使用 Apple 芯片，但方德 AI 仍通过 Rosetta 运行 Intel 版。请下载更新并切换到 Apple 芯片原生版本。";
   }
   if (action === "install") {
-    return "This Mac has Apple Silicon, but 方德 AI is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+    return "这台 Mac 使用 Apple 芯片，但方德 AI 仍通过 Rosetta 运行 Intel 版。请重启安装已下载的 Apple 芯片原生版本。";
   }
-  return "This Mac has Apple Silicon, but 方德 AI is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
+  return "这台 Mac 使用 Apple 芯片，但方德 AI 仍通过 Rosetta 运行 Intel 版。下次更新会替换为 Apple 芯片原生版本。";
 }
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
   if (state.status === "available") {
-    return `Update ${state.availableVersion ?? "available"} ready to download`;
+    return `发现新版本 ${state.availableVersion ?? ""}，点击下载`.trim();
   }
   if (state.status === "downloading") {
     const progress =
       typeof state.downloadPercent === "number" ? ` (${Math.floor(state.downloadPercent)}%)` : "";
-    return `Downloading update${progress}`;
+    return `正在下载更新${progress}`;
   }
   if (state.status === "downloaded") {
-    return `Update ${state.downloadedVersion ?? state.availableVersion ?? "ready"} downloaded. Click to restart and install.`;
+    return `版本 ${state.downloadedVersion ?? state.availableVersion ?? ""} 已下载，点击退出并安装`.trim();
   }
   if (state.status === "error") {
     if (state.errorContext === "download" && state.availableVersion) {
-      return `Download failed for ${state.availableVersion}. Click to retry.`;
+      return `版本 ${state.availableVersion} 下载失败，点击重试`;
     }
     if (state.errorContext === "install" && state.downloadedVersion) {
-      return `Install failed for ${state.downloadedVersion}. Click to retry.`;
+      return `版本 ${state.downloadedVersion} 安装失败，点击重试`;
     }
-    return state.message ?? "Update failed";
+    return state.message ?? "更新失败";
   }
-  return "Up to date";
+  return "已是最新版本";
 }
 
 export function getDesktopUpdateInstallConfirmationMessage(
@@ -102,9 +102,9 @@ export function getDesktopUpdateInstallConfirmationMessage(
 ): string {
   const version = state.downloadedVersion ?? state.availableVersion;
   const windowsInstallWarning = isWindowsPlatform(platform)
-    ? "\n\nOn Windows, 方德 AI may remain closed for several minutes while the update installs, and no installer window may appear. 方德 AI will reopen automatically when installation finishes."
-    : "";
-  return `Install update${version ? ` ${version}` : ""} and restart 方德 AI?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.${windowsInstallWarning}`;
+    ? "\n\nWindows 将显示安装进度，安装完成后会自动重新打开方德 AI。"
+    : "\n\n安装完成后会自动重新打开方德 AI。";
+  return `退出并安装${version ? ` ${version}` : "新版本"}？\n\n正在运行的任务会被中断，请确认任务已经保存。${windowsInstallWarning}`;
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {

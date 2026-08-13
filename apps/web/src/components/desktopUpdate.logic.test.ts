@@ -55,7 +55,7 @@ describe("desktop update button state", () => {
     };
     expect(shouldShowDesktopUpdateButton(state)).toBe(true);
     expect(resolveDesktopUpdateButtonAction(state)).toBe("download");
-    expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to retry");
+    expect(getDesktopUpdateButtonTooltip(state)).toContain("点击重试");
   });
 
   it("keeps install action available after an install error", () => {
@@ -70,7 +70,7 @@ describe("desktop update button state", () => {
     };
     expect(shouldShowDesktopUpdateButton(state)).toBe(true);
     expect(resolveDesktopUpdateButtonAction(state)).toBe("install");
-    expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to retry");
+    expect(getDesktopUpdateButtonTooltip(state)).toContain("点击重试");
   });
 
   it("prefers install when a downloaded version already exists", () => {
@@ -209,8 +209,8 @@ describe("desktop update UI helpers", () => {
     };
 
     expect(shouldShowArm64IntelBuildWarning(state)).toBe(true);
-    expect(getArm64IntelBuildWarningDescription(state)).toContain("Apple Silicon");
-    expect(getArm64IntelBuildWarningDescription(state)).toContain("Intel build");
+    expect(getArm64IntelBuildWarningDescription(state)).toContain("Apple 芯片");
+    expect(getArm64IntelBuildWarningDescription(state)).toContain("Intel 版");
   });
 
   it("changes the warning copy when a native build update is ready to download", () => {
@@ -223,7 +223,7 @@ describe("desktop update UI helpers", () => {
       availableVersion: "1.1.0",
     };
 
-    expect(getArm64IntelBuildWarningDescription(state)).toContain("Download the available update");
+    expect(getArm64IntelBuildWarningDescription(state)).toContain("请下载更新");
   });
 
   it("includes the downloaded version in the install confirmation copy", () => {
@@ -232,7 +232,7 @@ describe("desktop update UI helpers", () => {
         availableVersion: "1.1.0",
         downloadedVersion: "1.1.1",
       }),
-    ).toContain("Install update 1.1.1 and restart 方德 AI?");
+    ).toContain("退出并安装 1.1.1？");
   });
 
   it("falls back to generic install confirmation copy when no version is available", () => {
@@ -241,10 +241,10 @@ describe("desktop update UI helpers", () => {
         availableVersion: null,
         downloadedVersion: null,
       }),
-    ).toContain("Install update and restart 方德 AI?");
+    ).toContain("退出并安装新版本？");
   });
 
-  it("warns Windows users that a silent installation can take several minutes", () => {
+  it("tells Windows users that installation progress will be visible", () => {
     const message = getDesktopUpdateInstallConfirmationMessage(
       {
         availableVersion: "1.1.0",
@@ -253,12 +253,11 @@ describe("desktop update UI helpers", () => {
       "Win32",
     );
 
-    expect(message).toContain("may remain closed for several minutes");
-    expect(message).toContain("no installer window may appear");
-    expect(message).toContain("will reopen automatically");
+    expect(message).toContain("Windows 将显示安装进度");
+    expect(message).toContain("安装完成后会自动重新打开方德 AI");
   });
 
-  it("keeps the additional silent installation warning Windows-specific", () => {
+  it("keeps the Windows installer progress message platform-specific", () => {
     const message = getDesktopUpdateInstallConfirmationMessage(
       {
         availableVersion: "1.1.0",
@@ -267,7 +266,8 @@ describe("desktop update UI helpers", () => {
       "MacIntel",
     );
 
-    expect(message).not.toContain("may remain closed for several minutes");
+    expect(message).not.toContain("Windows 将显示安装进度");
+    expect(message).toContain("安装完成后会自动重新打开方德 AI");
   });
 });
 
@@ -328,10 +328,10 @@ describe("canCheckForUpdate", () => {
 });
 
 describe("getDesktopUpdateButtonTooltip", () => {
-  it("returns 'Up to date' for non-actionable states", () => {
-    expect(getDesktopUpdateButtonTooltip({ ...baseState, status: "idle" })).toBe("Up to date");
+  it("returns localized up-to-date copy for non-actionable states", () => {
+    expect(getDesktopUpdateButtonTooltip({ ...baseState, status: "idle" })).toBe("已是最新版本");
     expect(getDesktopUpdateButtonTooltip({ ...baseState, status: "up-to-date" })).toBe(
-      "Up to date",
+      "已是最新版本",
     );
   });
 });

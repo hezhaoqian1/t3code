@@ -32,6 +32,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const DESKTOP_APP_ID = "com.fdsure.enterprise-ai";
+export const BUNDLED_CODEX_VERSION = "0.147.0";
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
@@ -576,7 +577,7 @@ interface StagePackageJson {
 
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
 export const DESKTOP_ELECTRON_LANGUAGES = ["en-US"] as const;
-export const DESKTOP_FILE_EXCLUSIONS = [] as const;
+export const DESKTOP_FILE_EXCLUSIONS = ["!node_modules/@openai/codex{,/**/*}"] as const;
 // The WSL backend launches the server with plain `wsl.exe -- node`, which
 // cannot read inside an asar archive — and the server bundle externalizes its
 // runtime deps, so the whole node_modules tree must be unpacked, not just the
@@ -598,7 +599,69 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/connectors/feishu",
     to: "connectors/feishu",
   },
+  {
+    from: "apps/desktop/prod-resources/codex",
+    to: "codex",
+  },
 ] as const;
+
+export function resolveCodexRuntimePackage(
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+): {
+  readonly packageSpec: string;
+  readonly vendorDirectory: string;
+  readonly executableName: string;
+} {
+  if (arch === "universal") {
+    throw new Error("A universal desktop build requires one Codex runtime per architecture.");
+  }
+
+  const runtimePlatform = platform === "mac" ? "darwin" : platform === "win" ? "win32" : "linux";
+  const rustTarget =
+    platform === "mac"
+      ? arch === "arm64"
+        ? "aarch64-apple-darwin"
+        : "x86_64-apple-darwin"
+      : platform === "win"
+        ? arch === "arm64"
+          ? "aarch64-pc-windows-msvc"
+          : "x86_64-pc-windows-msvc"
+        : arch === "arm64"
+          ? "aarch64-unknown-linux-gnu"
+          : "x86_64-unknown-linux-gnu";
+
+  return {
+    packageSpec: `${BUNDLED_CODEX_VERSION}-${runtimePlatform}-${arch}`,
+    vendorDirectory: rustTarget,
+    executableName: platform === "win" ? "codex.exe" : "codex",
+  };
+}
+
+export function resolvePackagedCodexBinaryPath(
+  stageDistDir: string,
+  platform: typeof BuildPlatform.Type,
+  arch: typeof BuildArch.Type,
+  joinPath: (...paths: ReadonlyArray<string>) => string,
+): string {
+  const executableName = platform === "win" ? "codex.exe" : "codex";
+  if (platform === "mac") {
+    const macDirectory = arch === "arm64" ? "mac-arm64" : "mac";
+    return joinPath(
+      stageDistDir,
+      macDirectory,
+      "Fangde AI.app",
+      "Contents",
+      "Resources",
+      "codex",
+      "bin",
+      executableName,
+    );
+  }
+
+  const unpackedDirectory = platform === "win" ? "win-unpacked" : "linux-unpacked";
+  return joinPath(stageDistDir, unpackedDirectory, "resources", "codex", "bin", executableName);
+}
 
 export function resolveFffNativeDependencies(
   platform: typeof BuildPlatform.Type,
@@ -1260,6 +1323,16 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       winConfig.azureSignOptions = yield* AzureTrustedSigningOptionsConfig;
     }
     buildConfig.win = winConfig;
+    buildConfig.nsis = {
+      oneClick: true,
+      perMachine: false,
+      createDesktopShortcut: "always",
+      createStartMenuShortcut: true,
+      shortcutName: "Fangde AI",
+      uninstallDisplayName: "Fangde AI",
+      runAfterFinish: true,
+      deleteAppDataOnUninstall: false,
+    };
   }
 
   return buildConfig;
@@ -1522,6 +1595,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
           serverPackageJson.dependencies["@ff-labs/fff-node"],
         )
       : {}),
+    "@openai/codex": resolveCodexRuntimePackage(options.platform, options.arch).packageSpec,
   };
   const stagePatchedDependencies = createStagePatchedDependencies(
     workspacePatchedDependencies,
@@ -1579,6 +1653,30 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     }),
     { label: "vp install --prod", verbose: options.verbose },
   );
+
+  const codexRuntime = resolveCodexRuntimePackage(options.platform, options.arch);
+  const codexVendorSource = path.join(
+    stageAppDir,
+    "node_modules/@openai/codex/vendor",
+    codexRuntime.vendorDirectory,
+  );
+  const codexResourceDir = path.join(stageAppDir, "apps/desktop/prod-resources/codex");
+  const codexBinaryPath = path.join(codexResourceDir, "bin", codexRuntime.executableName);
+  if (!(yield* fs.exists(codexVendorSource))) {
+    return yield* new MissingDesktopBuildInputError({
+      artifact: "desktop-resources",
+      artifactPath: codexVendorSource,
+      buildCommand: "vp run build:desktop",
+    });
+  }
+  yield* fs.copy(codexVendorSource, codexResourceDir);
+  if (options.platform !== "win") {
+    yield* fs.chmod(codexBinaryPath, 0o755);
+  }
+  yield* runCommand(ChildProcess.make(codexBinaryPath, ["--version"]), {
+    label: "bundled codex --version",
+    verbose: options.verbose,
+  });
   // WSL is Windows-only, so only the Windows artifact carries the Linux backend
   // binary; other platforms ignore the prebuild input.
   if (options.platform === "win") {
@@ -1663,6 +1761,24 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       arch: options.arch,
     });
   }
+
+  const packagedCodexBinaryPath = resolvePackagedCodexBinaryPath(
+    stageDistDir,
+    options.platform,
+    options.arch,
+    path.join,
+  );
+  if (!(yield* fs.exists(packagedCodexBinaryPath))) {
+    return yield* new MissingDesktopBuildInputError({
+      artifact: "desktop-resources",
+      artifactPath: packagedCodexBinaryPath,
+      buildCommand: "electron-builder",
+    });
+  }
+  yield* runCommand(ChildProcess.make(packagedCodexBinaryPath, ["--version"]), {
+    label: "packaged codex --version",
+    verbose: options.verbose,
+  });
 
   const stageEntries = yield* fs.readDirectory(stageDistDir);
   yield* fs.makeDirectory(options.outputDir, { recursive: true });

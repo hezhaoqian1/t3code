@@ -8,16 +8,20 @@ import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 
-function makeEnvironmentLayer(baseDir: string) {
+function makeEnvironmentLayer(
+  baseDir: string,
+  resourcesPath = "/missing/resources",
+  platform: NodeJS.Platform = "darwin",
+) {
   return DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
     homeDirectory: baseDir,
-    platform: "darwin",
+    platform,
     processArch: "x64",
     appVersion: "1.2.3",
     appPath: "/repo",
     isPackaged: true,
-    resourcesPath: "/missing/resources",
+    resourcesPath,
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
@@ -34,6 +38,10 @@ const withHarness = <A, E, R>(
     | DesktopEnvironment.DesktopEnvironment
     | DesktopBackendConfiguration.DesktopBackendConfiguration
   >,
+  options: {
+    readonly resourcesPath?: string;
+    readonly platform?: NodeJS.Platform;
+  } = {},
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -43,7 +51,9 @@ const withHarness = <A, E, R>(
     return yield* effect.pipe(
       Effect.provide(
         DesktopBackendConfiguration.layer.pipe(
-          Layer.provideMerge(makeEnvironmentLayer(baseDir)),
+          Layer.provideMerge(
+            makeEnvironmentLayer(baseDir, options.resourcesPath, options.platform),
+          ),
           Layer.provideMerge(NodeServices.layer),
         ),
       ),
@@ -74,6 +84,33 @@ describe("DesktopBackendConfiguration", () => {
       }),
     ),
   );
+
+  for (const [platform, executableName] of [
+    ["darwin", "codex"],
+    ["win32", "codex.exe"],
+  ] as const) {
+    it.effect(
+      `uses the packaged ${platform} Codex runtime without relying on the employee PATH`,
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const resourcesPath = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "fd-desktop-codex-resources-",
+          });
+          const codexBinaryPath = `${resourcesPath}/codex/bin/${executableName}`;
+
+          yield* withHarness(
+            Effect.gen(function* () {
+              const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+              yield* configuration.configurePort(4889);
+              const resolved = yield* configuration.resolvePrimary;
+              assert.equal(resolved.env.FD_CODEX_BINARY, codexBinaryPath);
+            }),
+            { resourcesPath, platform },
+          );
+        }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    );
+  }
 
   it.effect("clears inherited network exposure variables", () =>
     withHarness(
