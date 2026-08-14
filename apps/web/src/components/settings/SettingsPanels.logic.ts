@@ -27,6 +27,15 @@ export function projectGroupingModeFromToggle(
   return lastEnabledMode === "repository_path" ? "repository_path" : "repository";
 }
 
+export function localizeRelativeTimeLabel(label: string): string {
+  if (label === "just now") return "刚刚";
+  const compact = label.endsWith(" ago") ? label.slice(0, -4) : label;
+  const match = /^(\d+)([mhdw])$/.exec(compact);
+  if (!match) return compact;
+  const [, amount, unit] = match;
+  return `${amount}${unit === "m" ? "分钟" : unit === "h" ? "小时" : unit === "d" ? "天" : "周"}前`;
+}
+
 const LAST_ENABLED_PROJECT_GROUPING_MODE_KEY = "t3code:last-enabled-project-grouping-mode";
 
 export function readLastEnabledProjectGroupingMode(): SidebarProjectGroupingMode {

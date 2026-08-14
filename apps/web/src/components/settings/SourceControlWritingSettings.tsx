@@ -11,18 +11,16 @@ import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayo
 const MODE_OPTIONS: Record<SourceControlWritingStyleMode, { label: string; description: string }> =
   {
     repo_conventions: {
-      label: "Repository conventions",
-      description: "In each project, matches recent change descriptions and change request titles.",
+      label: "仓库约定",
+      description: "在每个项目中参考近期的变更说明和变更请求标题。",
     },
     conventional_commits: {
-      label: "Conventional Commits",
-      description:
-        "Uses Conventional Commit prefixes for change descriptions; change request titles and descriptions stay concise.",
+      label: "约定式提交",
+      description: "变更说明使用约定式提交前缀，变更请求标题和描述保持简洁。",
     },
     custom: {
-      label: "Custom instructions",
-      description:
-        "Applies your instructions to change descriptions and change request titles and descriptions in every project.",
+      label: "自定义说明",
+      description: "在每个项目的变更说明、变更请求标题和描述中应用你的自定义要求。",
     },
   };
 
@@ -36,14 +34,14 @@ export function SourceControlWritingSettingsSection() {
     style.mode !== defaults.mode || style.customInstructions !== defaults.customInstructions;
 
   return (
-    <SettingsSection title="Text generation">
+    <SettingsSection title="文本生成">
       <SettingsRow
-        title="Source control writing style"
+        title="版本控制文案风格"
         description={MODE_OPTIONS[style.mode].description}
         resetAction={
           isSourceControlWritingStyleDirty ? (
             <SettingResetButton
-              label="source control writing style"
+              label="版本控制文案风格"
               onClick={() =>
                 updateSettings({
                   sourceControlWritingStyle: {
@@ -68,7 +66,7 @@ export function SourceControlWritingSettingsSection() {
               });
             }}
           >
-            <SelectTrigger className="w-full sm:w-56" aria-label="Source control writing style">
+            <SelectTrigger className="w-full sm:w-56" aria-label="版本控制文案风格">
               <SelectValue>{MODE_OPTIONS[style.mode].label}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -94,20 +92,20 @@ export function SourceControlWritingSettingsSection() {
                 }
               }}
               rows={4}
-              placeholder="Keep titles concise. Use short bullet points in descriptions."
-              aria-label="Custom source control writing instructions"
+              placeholder="例如：标题保持简洁，描述使用短句要点。"
+              aria-label="自定义版本控制文案说明"
             />
           </div>
         ) : null}
       </SettingsRow>
 
       <SettingsRow
-        title="Follow change request templates"
-        description="Structures change request descriptions using the current repository's template when one is available."
+        title="遵循变更请求模板"
+        description="如果当前仓库提供模板，就按模板组织变更请求描述。"
         resetAction={
           style.followChangeRequestTemplates !== defaults.followChangeRequestTemplates ? (
             <SettingResetButton
-              label="change request templates"
+              label="变更请求模板"
               onClick={() =>
                 updateSettings({
                   sourceControlWritingStyle: {
@@ -128,7 +126,7 @@ export function SourceControlWritingSettingsSection() {
                 },
               })
             }
-            aria-label="Follow change request templates"
+            aria-label="遵循变更请求模板"
           />
         }
       />

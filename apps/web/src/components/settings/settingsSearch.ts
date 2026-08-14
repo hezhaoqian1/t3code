@@ -5,6 +5,7 @@ export type SettingsPath =
   | "/settings/projects"
   | "/settings/connectors"
   | "/settings/source-control"
+  | "/settings/settled"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -25,6 +26,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/projects": "空间",
   "/settings/connectors": "连接器",
   "/settings/source-control": "版本控制",
+  "/settings/settled": "已归纳任务",
   "/settings/archived": "归档",
 };
 
@@ -188,6 +190,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/source-control",
   },
   {
+    id: "settled",
+    title: "已归纳任务",
+    to: "/settings/settled",
+  },
+  {
     id: "archive",
     title: "已归档任务",
     to: "/settings/archived",
@@ -226,6 +233,7 @@ const LEGACY_SETTINGS_SEARCH_TITLES: Readonly<Record<SettingsSearchItemId, strin
   "project-scripts": "Project scripts",
   "project-checkouts": "Project checkouts",
   "source-control": "Source control",
+  settled: "Settled threads",
   archive: "Archived threads",
 };
 

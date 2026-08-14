@@ -82,17 +82,17 @@ const THEME_EDITOR_ROLE_GROUPS: ReadonlyArray<{
 }> = [
   {
     id: "main",
-    title: "Main colors",
+    title: "主要颜色",
     roles: THEME_EDITOR_PRIMARY_ROLES,
   },
   {
     id: "status",
-    title: "Status colors",
+    title: "状态颜色",
     roles: THEME_EDITOR_STATUS_ROLES,
   },
   {
     id: "additional",
-    title: "Other colors",
+    title: "其他颜色",
     roles: THEME_EDITOR_ADVANCED_ROLES,
   },
 ];
@@ -630,7 +630,7 @@ export function ThemeEditorPanel({
 
   const handleSubmit = useCallback(() => {
     if (!name.trim()) {
-      setError("Name your theme first.");
+      setError("请先填写主题名称。");
       return;
     }
 
@@ -771,17 +771,13 @@ export function ThemeEditorPanel({
             // Storage is failing wholesale; the error below covers it.
           }
         }
-        setError("Theme saved, but it could not be made active. Try again.");
+        setError("主题已保存，但无法启用，请重试。");
         return;
       }
       onOpenChange(false);
     } catch (cause) {
       setError(
-        cause instanceof Error
-          ? cause.message
-          : isEditing
-            ? "Could not save the theme."
-            : "Could not create the theme.",
+        cause instanceof Error ? cause.message : isEditing ? "无法保存主题。" : "无法创建主题。",
       );
     }
   }, [
@@ -801,7 +797,7 @@ export function ThemeEditorPanel({
 
   const renderNameField = () => (
     <label className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3">
-      <span className="text-sm font-medium">Theme name</span>
+      <span className="text-sm font-medium">主题名称</span>
       <Input
         autoFocus
         onChange={(event) => {
@@ -810,7 +806,7 @@ export function ThemeEditorPanel({
           // the stale message goes with the old name.
           setError(null);
         }}
-        placeholder={isEditing ? "Theme name" : "e.g. Aurora"}
+        placeholder={isEditing ? "主题名称" : "例如：晨曦"}
         value={name}
       />
     </label>
@@ -832,7 +828,7 @@ export function ThemeEditorPanel({
           if (lockReason === null) setActiveAppearance(appearance);
         }}
       >
-        {appearance === "light" ? "Light" : "Dark"}
+        {appearance === "light" ? "浅色" : "深色"}
       </Button>
     );
     if (lockReason === null) return button;
@@ -846,8 +842,8 @@ export function ThemeEditorPanel({
 
   const renderAppearanceButtons = () => (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3">
-      <span className="text-sm font-medium">Appearance</span>
-      <div aria-label="Theme appearance" className="grid grid-cols-2 gap-2" role="group">
+      <span className="text-sm font-medium">外观模式</span>
+      <div aria-label="主题外观模式" className="grid grid-cols-2 gap-2" role="group">
         {renderAppearanceButton("light")}
         {renderAppearanceButton("dark")}
       </div>
@@ -856,11 +852,11 @@ export function ThemeEditorPanel({
 
   const renderSidebarArtworkToggle = () => (
     <label className="grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3">
-      <span className="text-sm font-medium">Sidebar artwork</span>
+      <span className="text-sm font-medium">侧栏图案</span>
       <span className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>Show 方德 AI environment artwork</span>
+        <span>显示方德 AI 环境图案</span>
         <Switch
-          aria-label="Allow sidebar artwork with this theme"
+          aria-label="允许该主题显示侧栏图案"
           checked={sidebarArtwork}
           onCheckedChange={(checked) => setSidebarArtwork(Boolean(checked))}
         />
@@ -871,26 +867,26 @@ export function ThemeEditorPanel({
   const renderColorsHeader = () => (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start gap-3">
       <div>
-        <h3 className="text-sm font-medium">Colors</h3>
+        <h3 className="text-sm font-medium">颜色</h3>
         {isAdvanced ? null : (
-          <p className="text-xs text-muted-foreground">Two colors, rest derived</p>
+          <p className="text-xs text-muted-foreground">选择两个主色，其余颜色自动生成</p>
         )}
       </div>
       <div className="flex min-w-0 items-start gap-3">
         {isAdvanced ? (
           <Input
-            aria-label="Filter colors"
+            aria-label="筛选颜色"
             className="min-w-0 flex-1"
             onChange={(event) => setRoleQuery(event.currentTarget.value)}
-            placeholder="Filter colors"
+            placeholder="筛选颜色"
             size="sm"
             value={roleQuery}
           />
         ) : null}
         <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-2 pt-0.5 text-sm font-medium">
-          <span>Advanced</span>
+          <span>高级</span>
           <Switch
-            aria-label="Use advanced theme colors"
+            aria-label="使用高级主题配色"
             checked={isAdvanced}
             onCheckedChange={(checked) => handleAdvancedChange(Boolean(checked))}
           />
@@ -934,7 +930,7 @@ export function ThemeEditorPanel({
             {renderRoleFields(group.roles, "grid gap-1")}
           </section>
         ))}
-        {groups.length === 0 ? <p className="text-xs text-muted-foreground">No matches.</p> : null}
+        {groups.length === 0 ? <p className="text-xs text-muted-foreground">没有匹配项。</p> : null}
       </div>
     ) : (
       <div className="grid gap-1">
@@ -945,7 +941,7 @@ export function ThemeEditorPanel({
             onSelect={selectThemeRole}
             onToggleSelected={toggleThemeRole}
             role={role}
-            label={role === "canvas" ? "Background" : "Accent"}
+            label={role === "canvas" ? "背景色" : "强调色"}
             selected={selectedRole === role}
             value={colorsByAppearance[activeAppearance][role]}
           />
@@ -1031,7 +1027,7 @@ export function ThemeEditorPanel({
 
   return (
     <div
-      aria-label={isEditing ? "Edit theme" : "Create theme"}
+      aria-label={isEditing ? "编辑主题" : "创建主题"}
       className={cn(
         "dialog-glass fixed z-[110] flex max-h-[min(42rem,calc(100dvh-6rem))] w-[min(26rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border text-popover-foreground",
         position === null && "bottom-4 right-4",
@@ -1057,15 +1053,15 @@ export function ThemeEditorPanel({
       >
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <h2 className="shrink-0 truncate text-sm font-medium">
-            {isEditing ? "Edit theme" : "Create theme"}
+            {isEditing ? "编辑主题" : "创建主题"}
           </h2>
           {isMinimized ? null : (
             <p className="truncate text-xs text-muted-foreground">
               {isInspecting
-                ? "Select an element · Esc to cancel"
+                ? "选择界面元素 · 按 Esc 取消"
                 : selectedRole
-                  ? `${getThemeRoleLabel(selectedRole)} · ${usageCount ?? 0} ${usageCount === 1 ? "use" : "uses"}`
-                  : "Select a color below"}
+                  ? `${getThemeRoleLabel(selectedRole)} · ${usageCount ?? 0} 处使用`
+                  : "在下方选择颜色"}
             </p>
           )}
         </div>
@@ -1073,7 +1069,7 @@ export function ThemeEditorPanel({
           <TooltipTrigger
             render={
               <Button
-                aria-label={isInspecting ? "Cancel inspecting app colors" : "Inspect app colors"}
+                aria-label={isInspecting ? "取消检查界面颜色" : "检查界面颜色"}
                 aria-pressed={isInspecting}
                 size="xs"
                 variant={isInspecting ? "secondary" : "ghost"}
@@ -1086,16 +1082,16 @@ export function ThemeEditorPanel({
                 }}
               >
                 <MousePointer2Icon />
-                {isInspecting ? "Cancel" : "Inspect"}
+                {isInspecting ? "取消" : "检查"}
               </Button>
             }
           />
           <TooltipPopup data-theme-editor-panel="">
-            {isInspecting ? "Cancel and clear the selection" : "Pick a color from the app"}
+            {isInspecting ? "取消并清除选择" : "从界面中选取颜色"}
           </TooltipPopup>
         </Tooltip>
         <Button
-          aria-label={isMinimized ? "Expand the theme editor" : "Minimize the theme editor"}
+          aria-label={isMinimized ? "展开主题编辑器" : "最小化主题编辑器"}
           size="icon-xs"
           variant="ghost"
           onClick={() => setIsMinimized(!isMinimized)}
@@ -1103,7 +1099,7 @@ export function ThemeEditorPanel({
           {isMinimized ? <ChevronUpIcon /> : <ChevronDownIcon />}
         </Button>
         <Button
-          aria-label="Close the theme editor"
+          aria-label="关闭主题编辑器"
           size="icon-xs"
           variant="ghost"
           onClick={() => onOpenChange(false)}
@@ -1132,24 +1128,24 @@ export function ThemeEditorPanel({
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-border/70 px-3 py-2">
             <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              取消
             </Button>
             <Button disabled={!name.trim()} size="sm" onClick={handleSubmit}>
               {isEditing ? (
                 mergeTarget ? (
-                  `Merge into “${mergeTarget.label}”`
+                  `合并到“${mergeTarget.label}”`
                 ) : (
-                  "Save changes"
+                  "保存更改"
                 )
               ) : mergeTarget ? (
                 <>
                   <PlusIcon />
-                  {`Add ${activeAppearance} palette`}
+                  {`添加${activeAppearance === "light" ? "浅色" : "深色"}配色`}
                 </>
               ) : (
                 <>
                   <PlusIcon />
-                  Create theme
+                  创建主题
                 </>
               )}
             </Button>

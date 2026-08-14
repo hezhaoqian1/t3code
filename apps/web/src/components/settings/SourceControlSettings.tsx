@@ -124,7 +124,7 @@ function BackgroundPolicyTooltip({ children }: { readonly children: string }) {
           <button
             type="button"
             className="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-            aria-label="Background policy details"
+            aria-label="后台策略详情"
           >
             <InfoIcon className="size-3.5" />
           </button>
@@ -156,21 +156,21 @@ function authPresentation(auth: SourceControlProviderAuth): {
   readonly badge: "warning" | null;
 } {
   if (auth.status === "authenticated") {
-    return { label: "Authenticated", badge: null };
+    return { label: "已登录", badge: null };
   }
   if (auth.status === "unauthenticated") {
-    return { label: "Not authenticated", badge: "warning" };
+    return { label: "未登录", badge: "warning" };
   }
-  return { label: "Status unknown", badge: null };
+  return { label: "状态未知", badge: null };
 }
 
 function RedactedAccount(props: { readonly account: string | null }) {
   return (
     <RedactedSensitiveText
       value={props.account}
-      ariaLabel="Toggle source control account visibility"
-      revealTooltip="Click to reveal account"
-      hideTooltip="Click to hide account"
+      ariaLabel="显示或隐藏版本控制账号"
+      revealTooltip="显示账号"
+      hideTooltip="隐藏账号"
     />
   );
 }
@@ -220,21 +220,21 @@ function itemSummary({
   readonly authAccount: string | null;
 }) {
   if (isVcsNotReady(item)) {
-    return <span>Support for {item.label} is coming soon.</span>;
+    return <span>{item.label} 支持即将上线。</span>;
   }
 
   if (item.status !== "available") {
-    return <span>Not available on this server: {item.installHint}</span>;
+    return <span>当前服务器不可用：{item.installHint}</span>;
   }
 
   if (auth) {
     if (auth.status === "authenticated") {
       return (
         <>
-          <span>Authenticated</span>
+          <span>已登录</span>
           {authAccount ? (
             <>
-              <span aria-hidden>as</span>
+              <span aria-hidden>账号</span>
               <RedactedAccount account={authAccount} />
             </>
           ) : null}
@@ -243,26 +243,26 @@ function itemSummary({
     }
 
     if (!item.executable) {
-      return <span>Available. {item.installHint}</span>;
+      return <span>可用。{item.installHint}</span>;
     }
 
     if (auth.status === "unauthenticated") {
       return (
         <span>
-          {item.label} is not authenticated on this server. Sign in or configure credentials using
-          the <code className="rounded bg-muted px-1 py-px text-[11px]">{item.executable}</code>{" "}
-          tool on the server host to enable change request features.
+          {item.label} 尚未在此服务器登录。请在服务器上使用{" "}
+          <code className="rounded bg-muted px-1 py-px text-[11px]">{item.executable}</code>{" "}
+          登录或配置凭据，以启用变更请求功能。
         </span>
       );
     }
     return (
       <span>
-        Could not verify {item.label}. {item.installHint}
+        无法验证 {item.label}。{item.installHint}
       </span>
     );
   }
 
-  return <span>Available</span>;
+  return <span>可用</span>;
 }
 
 function DiscoveryItemRow({
@@ -300,7 +300,7 @@ function DiscoveryItemRow({
               {version ? <code className="text-xs text-muted-foreground">{version}</code> : null}
               {isVcsNotReady(item) ? (
                 <Badge variant="warning" size="sm">
-                  Coming Soon
+                  即将上线
                 </Badge>
               ) : null}
               {authStatus?.badge ? (
@@ -321,7 +321,7 @@ function DiscoveryItemRow({
                 className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => setIsExpanded((open) => !open)}
                 aria-expanded={isExpanded}
-                aria-label={`Toggle ${item.label} details`}
+                aria-label={`展开或收起 ${item.label} 详情`}
               >
                 <ChevronDownIcon
                   className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
@@ -329,7 +329,7 @@ function DiscoveryItemRow({
               </Button>
             ) : null}
             {!isVcsNotReady(item) ? (
-              <Switch checked={enabled} disabled aria-label={`${item.label} availability`} />
+              <Switch checked={enabled} disabled aria-label={`${item.label} 可用状态`} />
             ) : null}
           </div>
         </div>
@@ -366,11 +366,10 @@ function GitFetchIntervalSettings() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex min-w-0 items-center gap-1">
-            <span className="text-xs font-medium text-foreground">Fetch interval</span>
+            <span className="text-xs font-medium text-foreground">拉取间隔</span>
             <BackgroundPolicyTooltip>
-              This interval is configured for Git only. The shared Background activity policy still
-              decides whether Git refreshes may run when the timer fires. Custom intervals appear as
-              Advanced in General settings.
+              此间隔仅用于 Git。计时到期时是否执行 Git
+              刷新，仍由统一的后台活动策略决定。自定义间隔会在通用设置中显示为高级配置。
             </BackgroundPolicyTooltip>
             <span
               className={cn(
@@ -381,7 +380,7 @@ function GitFetchIntervalSettings() {
             >
               {canResetFetchInterval ? (
                 <SettingResetButton
-                  label="fetch interval"
+                  label="拉取间隔"
                   onClick={() =>
                     updateSettings(
                       backgroundActivityOverrideSettings(settings.backgroundActivity, {
@@ -394,8 +393,7 @@ function GitFetchIntervalSettings() {
             </span>
           </div>
           <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
-            Refresh remote branch status in the background. Set this to 0 seconds if Git credentials
-            or security keys should only be prompted by explicit Git actions.
+            在后台刷新远程分支状态。如果只希望在手动 Git 操作时请求凭据或安全密钥，请将其设为 0 秒。
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -414,12 +412,12 @@ function GitFetchIntervalSettings() {
             }
           >
             <NumberFieldGroup>
-              <NumberFieldDecrement aria-label="Decrease fetch interval" />
-              <NumberFieldInput aria-label="Automatic Git fetch interval in seconds" />
-              <NumberFieldIncrement aria-label="Increase fetch interval" />
+              <NumberFieldDecrement aria-label="减少拉取间隔" />
+              <NumberFieldInput aria-label="Git 自动拉取间隔（秒）" />
+              <NumberFieldIncrement aria-label="增加拉取间隔" />
             </NumberFieldGroup>
           </NumberField>
-          <span className="text-xs text-muted-foreground">seconds</span>
+          <span className="text-xs text-muted-foreground">秒</span>
         </div>
       </div>
     </div>
@@ -475,19 +473,17 @@ function EmptySourceControlDiscovery({
   const hasError = error !== null;
 
   return (
-    <SettingsSection id={searchableSetting("source-control").id} title="Local source control">
+    <SettingsSection id={searchableSetting("source-control").id} title="本地版本控制">
       <Empty className="min-h-88">
         <EmptyMedia variant="icon">
           <GitPullRequestIcon />
         </EmptyMedia>
         <EmptyHeader>
-          <EmptyTitle>
-            {hasError ? "Could not scan local source control" : "Nothing detected yet"}
-          </EmptyTitle>
+          <EmptyTitle>{hasError ? "无法扫描本地版本控制" : "暂未检测到版本控制工具"}</EmptyTitle>
           <EmptyDescription>
             {hasError
               ? error
-              : "Install Git, add optional hosting integrations or credentials your workspace needs, then rescan."}
+              : "安装 Git，可选配置代码托管平台或工作空间需要的凭据，然后重新扫描。"}
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -499,7 +495,7 @@ function EmptySourceControlDiscovery({
             disabled={isPending}
           >
             <RefreshCwIcon className={cn("size-3.5", isPending && "animate-spin")} />
-            Scan
+            扫描
           </Button>
         </EmptyContent>
       </Empty>
@@ -534,13 +530,13 @@ export function SourceControlSettingsPanel() {
             className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
             onClick={handleScan}
             disabled={discovery.isPending}
-            aria-label="Rescan local source control"
+            aria-label="重新扫描本地版本控制"
           >
             <RefreshCwIcon className={cn("size-3", discovery.isPending && "animate-spin")} />
           </Button>
         }
       />
-      <TooltipPopup side="top">Rescan Git and hosting integrations</TooltipPopup>
+      <TooltipPopup side="top">重新扫描 Git 和代码托管平台</TooltipPopup>
     </Tooltip>
   );
 
@@ -548,15 +544,15 @@ export function SourceControlSettingsPanel() {
     <SettingsPageContainer>
       {isInitialScanPending ? (
         <>
-          <SourceControlSectionSkeleton title="Version Control" headerAction={scanButton} />
-          <SourceControlSectionSkeleton title="Source Control Providers" />
+          <SourceControlSectionSkeleton title="版本控制" headerAction={scanButton} />
+          <SourceControlSectionSkeleton title="代码托管平台" />
         </>
       ) : hasDiscoveryItems ? (
         <>
           {hasVersionControlSystems ? (
             <SettingsSection
               id={searchableSetting("source-control").id}
-              title="Version Control"
+              title="版本控制"
               headerAction={scanButton}
             >
               {result.versionControlSystems.map((item) => (
@@ -570,7 +566,7 @@ export function SourceControlSettingsPanel() {
           {result.sourceControlProviders.length > 0 ? (
             <SettingsSection
               id={hasVersionControlSystems ? undefined : searchableSetting("source-control").id}
-              title="Source Control Providers"
+              title="代码托管平台"
               headerAction={hasVersionControlSystems ? null : scanButton}
             >
               {result.sourceControlProviders.map((item) => (

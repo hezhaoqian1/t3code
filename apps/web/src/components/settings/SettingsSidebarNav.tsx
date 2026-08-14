@@ -50,6 +50,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/projects": FolderIcon,
   "/settings/connectors": PlugZapIcon,
   "/settings/source-control": GitBranchIcon,
+  "/settings/settled": ArchiveIcon,
   "/settings/archived": ArchiveIcon,
 };
 

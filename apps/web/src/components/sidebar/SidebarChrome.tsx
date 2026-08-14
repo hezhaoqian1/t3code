@@ -5,7 +5,7 @@ import {
   PlugZapIcon,
   SettingsIcon,
 } from "lucide-react";
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { cn } from "../../lib/utils";
@@ -24,8 +24,10 @@ import { useFdAccount } from "../../fd/FdAccountProvider";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
+  endAction,
 }: {
   isElectron: boolean;
+  endAction?: ReactNode;
 }) {
   return (
     <SidebarHeader
@@ -36,6 +38,11 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
     >
       <SidebarTrigger className="relative z-10 md:hidden" />
       <SidebarBrand />
+      {endAction ? (
+        <div className="relative z-10 ml-auto mr-2 flex shrink-0 items-center [-webkit-app-region:no-drag]">
+          {endAction}
+        </div>
+      ) : null}
     </SidebarHeader>
   );
 });
@@ -45,19 +52,41 @@ function SidebarBrand() {
     <Link
       aria-label="返回任务列表"
       className={cn(
-        "sidebar-brand relative z-10 ml-[var(--workspace-titlebar-content-left)] h-9 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2",
+        "sidebar-brand relative z-10 ml-[var(--workspace-titlebar-content-left)] inline-flex h-10 w-fit min-w-0 shrink-0 translate-y-px items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2",
         "text-foreground",
       )}
       to="/"
     >
       <img
-        className="h-6 w-auto max-w-32 object-contain dark:brightness-0 dark:invert"
+        className="h-7 w-auto max-w-36 object-contain dark:brightness-0 dark:invert"
         src={fdsureWordmark}
         alt="方德 AI"
       />
     </Link>
   );
 }
+
+export const SidebarConnectorButton = memo(function SidebarConnectorButton() {
+  const navigate = useNavigate();
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const { isMobile, setOpenMobile } = useSidebar();
+  const handleConnectorsClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    void navigate({ to: "/connectors" });
+  }, [isMobile, navigate, setOpenMobile]);
+
+  return (
+    <SidebarMenuButton
+      isActive={pathname === "/connectors" || pathname.startsWith("/connectors/")}
+      onClick={handleConnectorsClick}
+    >
+      <PlugZapIcon />
+      <span>连接器</span>
+    </SidebarMenuButton>
+  );
+});
 
 export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
@@ -78,46 +107,10 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
 
-  const handleConnectorsClick = useCallback(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-    void navigate({ to: "/connectors" });
-  }, [isMobile, navigate, setOpenMobile]);
-
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarUpdatePill />
       <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            disabled={account.busy !== null}
-            title={
-              account.state.status === "authenticated" ? account.state.profile.username : undefined
-            }
-            onClick={() => void account.logout()}
-          >
-            {account.busy === "logout" ? (
-              <LoaderCircleIcon className="animate-spin" />
-            ) : (
-              <LogOutIcon />
-            )}
-            <span className="truncate">
-              {account.state.status === "authenticated"
-                ? (account.state.profile.displayName ?? account.state.profile.username)
-                : "退出登录"}
-            </span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            isActive={pathname === "/connectors" || pathname.startsWith("/connectors/")}
-            onClick={handleConnectorsClick}
-          >
-            <PlugZapIcon />
-            <span>连接器</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton isActive={pathname === "/usage"} onClick={handleUsageClick}>
             <ChartNoAxesColumnIcon />
@@ -131,6 +124,22 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           >
             <SettingsIcon />
             <span>设置</span>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            disabled={account.busy !== null}
+            title={
+              account.state.status === "authenticated" ? account.state.profile.username : undefined
+            }
+            onClick={() => void account.logout()}
+          >
+            {account.busy === "logout" ? (
+              <LoaderCircleIcon className="animate-spin" />
+            ) : (
+              <LogOutIcon />
+            )}
+            <span>退出登录</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>

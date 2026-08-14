@@ -33,7 +33,6 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
-  ArchiveIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -170,17 +169,16 @@ import {
   MenuTrigger,
 } from "./ui/menu";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
-import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import {
+  SidebarChromeFooter,
+  SidebarChromeHeader,
+  SidebarConnectorButton,
+} from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { isGeneratedTaskWorkspaceRoot, isOfficeWorkspaceShellContext } from "../officeMode";
 import { projectEnvironment } from "../state/projects";
-
-// Settled-tail paging: recent history is the common lookup; the deep tail
-// stays behind an explicit Show more.
-const SETTLED_TAIL_INITIAL_COUNT = 10;
-const SETTLED_TAIL_PAGE_COUNT = 25;
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "刚刚";
@@ -1729,6 +1727,7 @@ export default function Sidebar() {
   ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
   const isSearchingThreads = threadSearchQuery.trim().length > 0;
@@ -1779,6 +1778,12 @@ export default function Sidebar() {
   }, [threadSearchResultOrderKey]);
 
   useEffect(() => {
+    if (threadSearchOpen) {
+      threadSearchInputRef.current?.focus();
+    }
+  }, [threadSearchOpen]);
+
+  useEffect(() => {
     if (!isSearchingThreads) return;
     document
       .getElementById(`sidebar-thread-search-result-${activeSearchResultIndex}`)
@@ -1803,62 +1808,16 @@ export default function Sidebar() {
     return () => window.clearTimeout(id);
   }, [snoozedThreads]);
 
-  // The settled tail renders in pages: history shouldn't dominate the
-  // sidebar, and the common lookups are recent. Expansion resets when the
-  // filter context changes so a scope/search flip never inherits a deep
-  // page state.
-  const [settledVisibleCount, setSettledVisibleCount] = useState(SETTLED_TAIL_INITIAL_COUNT);
-  const settledResetKey = projectScopeKey ?? "all";
-  const lastSettledResetKeyRef = useRef(settledResetKey);
-  if (lastSettledResetKeyRef.current !== settledResetKey) {
-    lastSettledResetKeyRef.current = settledResetKey;
-    setSettledVisibleCount(SETTLED_TAIL_INITIAL_COUNT);
-  }
-  const visibleSettledThreads = useMemo(() => {
-    if (settledThreads.length <= settledVisibleCount) return settledThreads;
-    const visible = settledThreads.slice(0, settledVisibleCount);
-    // The open thread must never hide under "Show more": navigating into a
-    // deep settled thread (search, deep link) pulls its row into the visible
-    // tail so the highlight and the un-settle affordance stay reachable.
-    if (routeThreadKey !== null) {
-      const routeThread = settledThreads
-        .slice(settledVisibleCount)
-        .find(
-          (thread) =>
-            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
-        );
-      if (routeThread !== undefined) visible.push(routeThread);
-    }
-    return visible;
-  }, [routeThreadKey, settledThreads, settledVisibleCount]);
-  const hiddenSettledCount = settledThreads.length - visibleSettledThreads.length;
-  const showMoreSettled = useCallback(
-    () => setSettledVisibleCount((count) => count + SETTLED_TAIL_PAGE_COUNT),
-    [],
-  );
-  const [settledShelfExpanded, setSettledShelfExpanded] = useState(false);
-  const toggleSettledShelf = useCallback(() => setSettledShelfExpanded((value) => !value), []);
-  const renderedSettledThreads = useMemo(() => {
-    if (settledShelfExpanded) return visibleSettledThreads;
-    if (routeThreadKey === null) return [];
-    const routeThread = visibleSettledThreads.find(
-      (thread) =>
-        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
-    );
-    return routeThread === undefined ? [] : [routeThread];
-  }, [routeThreadKey, settledShelfExpanded, visibleSettledThreads]);
-
   // The snoozed shelf is collapsed by default: out of the way, never gone.
-  // Collapsed threads don't render (and so don't participate in jump
-  // shortcuts or multi-select), matching the settled tail's paging model.
+  // Collapsed threads don't render, so they don't participate in jump
+  // shortcuts or multi-select.
   const [snoozedShelfExpanded, setSnoozedShelfExpanded] = useState(false);
   const toggleSnoozedShelf = useCallback(() => setSnoozedShelfExpanded((value) => !value), []);
   const visibleSnoozedThreads = useMemo(() => {
     if (snoozedShelfExpanded) return snoozedThreads;
     // The open thread must never vanish behind the collapsed shelf: a
     // snoozed thread reached by route (deep link, open before snoozing
-    // elsewhere) keeps its row — with highlight and wake affordance — same
-    // exception the settled tail's "Show more" makes.
+    // elsewhere) keeps its row with its highlight and wake affordance.
     if (routeThreadKey === null) return [];
     const routeThread = snoozedThreads.find(
       (thread) =>
@@ -1967,22 +1926,26 @@ export default function Sidebar() {
     setThreadSearchQuery("");
     setActiveSearchResultIndex(0);
   }, []);
+  const closeThreadSearch = useCallback(() => {
+    clearThreadSearch();
+    setThreadSearchOpen(false);
+  }, [clearThreadSearch]);
   const selectThreadSearchResult = useCallback(
     (thread: EnvironmentThreadShell) => {
-      clearThreadSearch();
+      closeThreadSearch();
       navigateToThread(scopeThreadRef(thread.environmentId, thread.id));
     },
-    [clearThreadSearch, navigateToThread],
+    [closeThreadSearch, navigateToThread],
   );
   const handleThreadSearchKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLInputElement>) => {
       // IME composition (Japanese/Chinese input) uses the same keys; committing
       // a candidate must not move the highlight or navigate away mid-compose.
       if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-      if (event.key === "Escape" && isSearchingThreads) {
+      if (event.key === "Escape" && threadSearchOpen) {
         event.preventDefault();
         event.stopPropagation();
-        clearThreadSearch();
+        closeThreadSearch();
         return;
       }
       if (threadSearchResults.length === 0) return;
@@ -2006,9 +1969,10 @@ export default function Sidebar() {
     },
     [
       activeSearchResultIndex,
-      clearThreadSearch,
+      closeThreadSearch,
       isSearchingThreads,
       selectThreadSearchResult,
+      threadSearchOpen,
       threadSearchResults,
     ],
   );
@@ -2434,8 +2398,8 @@ export default function Sidebar() {
       const api = readLocalApi();
       if (!api) return;
       // One exact actionable set: keys whose rows are actually rendered
-      // right now. Selections can outlive their rows (settled-tail paging,
-      // thread deletion elsewhere) and the menu labels must count only what
+      // right now. Selections can outlive their rows (for example, after a
+      // thread is settled or deleted elsewhere), and the menu labels must count only what
       // the actions will touch.
       const threadKeys = [...useThreadSelectionStore.getState().selectedThreadKeys].filter(
         (threadKey) => threadByKeyRef.current.has(threadKey),
@@ -3044,15 +3008,63 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.newLocal");
   return (
     <>
-      <SidebarChromeHeader isElectron={isElectron} />
+      <SidebarChromeHeader
+        isElectron={isElectron}
+        endAction={
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  className="text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                  aria-label={threadSearchOpen ? "关闭任务搜索" : "搜索任务"}
+                  aria-pressed={threadSearchOpen}
+                  onClick={() => {
+                    if (threadSearchOpen) {
+                      closeThreadSearch();
+                    } else {
+                      setThreadSearchOpen(true);
+                    }
+                  }}
+                />
+              }
+            >
+              {threadSearchOpen ? <XIcon className="size-4" /> : <SearchIcon className="size-4" />}
+            </TooltipTrigger>
+            <TooltipPopup side="bottom">{threadSearchOpen ? "关闭搜索" : "搜索任务"}</TooltipPopup>
+          </Tooltip>
+        }
+      />
       <SidebarContent
         className="gap-0"
         fixedHeader={
           // Lifted above the stage backdrop, whose fade bleeds below the
           // header and would otherwise paint across the search row's outline.
-          <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
-            <div className="flex items-center gap-1">
-              <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
+          <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)] pt-1">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <SidebarMenuButton
+                    type="button"
+                    className="h-10 w-full justify-start bg-sidebar-accent px-3 font-semibold text-sidebar-accent-foreground shadow-xs hover:bg-sidebar-accent/85"
+                    onClick={handleNewThreadClick}
+                    disabled={isElectron ? !newThreadContext.canStartTask : projects.length === 0}
+                    aria-label="新建任务"
+                  />
+                }
+              >
+                <SquarePenIcon className="size-4" />
+                <span>新建任务</span>
+              </TooltipTrigger>
+              <TooltipPopup side="right">
+                {newThreadShortcutLabel ? `新建任务 (${newThreadShortcutLabel})` : "新建任务"}
+              </TooltipPopup>
+            </Tooltip>
+            <SidebarConnectorButton />
+            {threadSearchOpen ? (
+              <div className="flex h-9 min-w-0 items-center gap-2 rounded-md bg-sidebar-control-surface px-2 text-sm text-sidebar-muted-foreground ring-1 ring-sidebar-border/70 focus-within:ring-ring">
                 <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
                 <Input
                   ref={threadSearchInputRef}
@@ -3082,50 +3094,18 @@ export default function Sidebar() {
                   }
                   className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:font-medium [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
                 />
-                {isSearchingThreads ? (
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-5 shrink-0 rounded-sm text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
-                    aria-label="清除任务搜索"
-                    onClick={() => {
-                      clearThreadSearch();
-                      threadSearchInputRef.current?.focus();
-                    }}
-                  >
-                    <XIcon className="size-3" />
-                  </Button>
-                ) : null}
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  className="size-5 shrink-0 rounded-sm text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                  aria-label="关闭任务搜索"
+                  onClick={closeThreadSearch}
+                >
+                  <XIcon className="size-3" />
+                </Button>
               </div>
-              <div className="shrink-0">
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <SidebarMenuButton
-                        size="icon"
-                        type="button"
-                        className="relative focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        onClick={handleNewThreadClick}
-                        disabled={
-                          isElectron ? !newThreadContext.canStartTask : projects.length === 0
-                        }
-                        aria-label="新建任务"
-                      />
-                    }
-                  >
-                    <SquarePenIcon />
-                    <span
-                      className="pointer-events-none absolute left-1/2 top-1/2 size-[max(100%,3rem)] -translate-1/2 pointer-fine:hidden"
-                      aria-hidden="true"
-                    />
-                  </TooltipTrigger>
-                  <TooltipPopup side="right">
-                    {newThreadShortcutLabel ? `新建任务 (${newThreadShortcutLabel})` : "新建任务"}
-                  </TooltipPopup>
-                </Tooltip>
-              </div>
-            </div>
+            ) : null}
           </SidebarGroup>
         }
       >
@@ -3408,51 +3388,6 @@ export default function Sidebar() {
                             );
                           })
                         : null}
-                      {settledThreads.length > 0 ? (
-                        <li className="list-none pt-3" data-thread-selection-safe>
-                          <button
-                            type="button"
-                            aria-expanded={settledShelfExpanded}
-                            onClick={toggleSettledShelf}
-                            className="flex min-h-12 w-full items-center gap-3 rounded-lg border border-sidebar-border bg-sidebar-control-surface px-3 text-left transition-colors hover:bg-sidebar-row-hover"
-                          >
-                            <span className="flex size-7 shrink-0 items-center justify-center rounded-md border border-sidebar-border bg-sidebar-accent text-sidebar-muted-foreground">
-                              <ArchiveIcon className="size-3.5" aria-hidden />
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-xs font-semibold text-sidebar-foreground">
-                                已归纳任务
-                              </span>
-                              <span className="block text-[11px] text-sidebar-muted-foreground">
-                                {settledThreads.length} 个已完成任务
-                              </span>
-                            </span>
-                            <ChevronRightIcon
-                              aria-hidden
-                              className={cn(
-                                "size-3.5 shrink-0 text-sidebar-muted-foreground transition-transform",
-                                settledShelfExpanded && "rotate-90",
-                              )}
-                            />
-                          </button>
-                          {settledShelfExpanded ? (
-                            <ul role="list" className="mt-1 flex flex-col gap-px">
-                              {renderedSettledThreads.map((thread) => renderThreadRow(thread))}
-                              {hiddenSettledCount > 0 ? (
-                                <li className="list-none">
-                                  <button
-                                    type="button"
-                                    onClick={showMoreSettled}
-                                    className="flex h-8 w-full items-center px-2.5 text-left text-xs text-sidebar-muted-foreground hover:text-sidebar-foreground"
-                                  >
-                                    再显示 {hiddenSettledCount} 个
-                                  </button>
-                                </li>
-                              ) : null}
-                            </ul>
-                          ) : null}
-                        </li>
-                      ) : null}
                     </>
                   );
                 })()}

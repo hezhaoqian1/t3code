@@ -9,12 +9,14 @@ import {
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import {
   DEFAULT_UNIFIED_SETTINGS,
   MAX_CODE_FONT_SIZE,
@@ -51,7 +53,12 @@ import {
   useTheme,
 } from "../../hooks/useTheme";
 import { useLocalStorage } from "../../hooks/useLocalStorage";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
+import { useNowMinute } from "../../hooks/useNowMinute";
+import {
+  useClientSettings,
+  usePrimarySettings,
+  useUpdatePrimarySettings,
+} from "../../hooks/useSettings";
 import { useThreadActions } from "../../hooks/useThreadActions";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
@@ -59,6 +66,9 @@ import { isMacPlatform } from "../../lib/utils";
 import { primaryServerObservabilityAtom } from "../../state/server";
 import { useArchivedThreadSnapshot } from "../../lib/archivedThreadsState";
 import { usePrimaryEnvironmentId } from "../../state/environments";
+import { usePrimaryProjects, usePrimaryThreadShells, useServerConfigs } from "../../state/entities";
+import { useEnvironmentQuery } from "../../state/query";
+import { vcsEnvironment } from "../../state/vcs";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -105,6 +115,7 @@ import {
   normalizeIntervalSeconds,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
+  localizeRelativeTimeLabel,
   projectGroupingModeFromToggle,
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
@@ -120,6 +131,189 @@ import {
 } from "./settingsLayout";
 import { searchableSetting } from "./settingsSearch";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { resolveThreadPr } from "../ThreadStatusIndicators";
+
+type SettledChangeRequestState = "open" | "closed" | "merged";
+
+function SettledThreadStateProbe({
+  thread,
+  projectCwd,
+  onStateChange,
+}: {
+  readonly thread: EnvironmentThreadShell;
+  readonly projectCwd: string | null;
+  readonly onStateChange: (threadKey: string, state: SettledChangeRequestState | null) => void;
+}) {
+  const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+  const gitCwd = thread.worktreePath ?? projectCwd;
+  const gitStatus = useEnvironmentQuery(
+    (thread.branch !== null || thread.worktreePath !== null) && gitCwd !== null
+      ? vcsEnvironment.status({
+          environmentId: thread.environmentId,
+          input: { cwd: gitCwd },
+        })
+      : null,
+  );
+  const state =
+    resolveThreadPr({
+      threadBranch: thread.branch,
+      gitStatus: gitStatus.data,
+    })?.state ?? null;
+
+  useEffect(() => {
+    onStateChange(threadKey, state);
+  }, [onStateChange, state, threadKey]);
+
+  return null;
+}
+
+export function SettledThreadsPanel() {
+  const projects = usePrimaryProjects();
+  const threads = usePrimaryThreadShells();
+  const serverConfigs = useServerConfigs();
+  const nowMinute = useNowMinute();
+  const autoSettleAfterDays = useClientSettings((settings) => settings.sidebarAutoSettleAfterDays);
+  const { unsettleThread } = useThreadActions();
+  const [restoringThreadKeys, setRestoringThreadKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
+    ReadonlyMap<string, SettledChangeRequestState>
+  >(() => new Map());
+  const handleChangeRequestState = useCallback(
+    (threadKey: string, state: SettledChangeRequestState | null) => {
+      setChangeRequestStateByKey((current) => {
+        if ((current.get(threadKey) ?? null) === state) return current;
+        const next = new Map(current);
+        if (state === null) next.delete(threadKey);
+        else next.set(threadKey, state);
+        return next;
+      });
+    },
+    [],
+  );
+  const projectByKey = useMemo(
+    () =>
+      new Map(
+        projects.map((project) => [`${project.environmentId}:${project.id}`, project] as const),
+      ),
+    [projects],
+  );
+  const settlementCandidates = useMemo(() => {
+    const preciseNow = new Date().toISOString();
+    return threads.filter((thread) => {
+      if (thread.archivedAt !== null || thread.pinnedAt !== null) return false;
+      const capabilities = serverConfigs.get(thread.environmentId)?.environment.capabilities;
+      if (capabilities?.threadSettlement !== true) return false;
+      return !(capabilities.threadSnooze === true && effectiveSnoozed(thread, { now: preciseNow }));
+    });
+  }, [nowMinute, serverConfigs, threads]);
+  const settledThreads = useMemo(
+    () =>
+      settlementCandidates
+        .filter((thread) => {
+          const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+          return effectiveSettled(thread, {
+            now: `${nowMinute}:00.000Z`,
+            autoSettleAfterDays,
+            changeRequestState: changeRequestStateByKey.get(threadKey) ?? null,
+          });
+        })
+        .toSorted((left, right) => {
+          const leftAt = Date.parse(left.settledAt ?? left.updatedAt);
+          const rightAt = Date.parse(right.settledAt ?? right.updatedAt);
+          return rightAt - leftAt;
+        }),
+    [autoSettleAfterDays, changeRequestStateByKey, nowMinute, settlementCandidates],
+  );
+
+  return (
+    <>
+      {settlementCandidates.map((thread) => {
+        const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null;
+        return (
+          <SettledThreadStateProbe
+            key={`${thread.environmentId}:${thread.id}`}
+            thread={thread}
+            projectCwd={project?.workspaceRoot ?? null}
+            onStateChange={handleChangeRequestState}
+          />
+        );
+      })}
+      <SettingsPageContainer>
+        <SettingsSection
+          id={searchableSetting("settled").id}
+          title="已归纳任务"
+          icon={<ArchiveIcon className="size-4 text-muted-foreground" />}
+        >
+          {settledThreads.length === 0 ? (
+            <SettingsRow
+              title="暂无已归纳任务"
+              description="归纳后的任务会保留在这里，不再占用主任务列表。"
+            />
+          ) : (
+            settledThreads.map((thread) => {
+              const project = projectByKey.get(`${thread.environmentId}:${thread.projectId}`);
+              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+              const restoring = restoringThreadKeys.has(threadKey);
+              return (
+                <SettingsRow
+                  key={threadKey}
+                  title={thread.title}
+                  description={`${project?.title ?? "未命名空间"} · 最近活动 ${localizeRelativeTimeLabel(formatRelativeTimeLabel(thread.updatedAt))}`}
+                  control={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 shrink-0 gap-1.5 px-2.5"
+                      disabled={restoring}
+                      onClick={() => {
+                        void (async () => {
+                          if (restoring) return;
+                          setRestoringThreadKeys((current) => new Set(current).add(threadKey));
+                          try {
+                            const result = await unsettleThread(
+                              scopeThreadRef(thread.environmentId, thread.id),
+                            );
+                            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+                              const error = squashAtomCommandFailure(result);
+                              toastManager.add(
+                                stackedThreadToast({
+                                  type: "error",
+                                  title: "恢复任务失败",
+                                  description:
+                                    error instanceof Error ? error.message : "恢复任务时发生错误。",
+                                }),
+                              );
+                            }
+                          } finally {
+                            setRestoringThreadKeys((current) => {
+                              const next = new Set(current);
+                              next.delete(threadKey);
+                              return next;
+                            });
+                          }
+                        })();
+                      }}
+                    >
+                      {restoring ? (
+                        <LoaderIcon className="size-3.5 animate-spin" />
+                      ) : (
+                        <ArchiveX className="size-3.5" />
+                      )}
+                      {restoring ? "正在恢复" : "恢复任务"}
+                    </Button>
+                  }
+                />
+              );
+            })
+          )}
+        </SettingsSection>
+      </SettingsPageContainer>
+    </>
+  );
+}
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "跟随系统",
@@ -156,10 +350,10 @@ const BACKGROUND_ACTIVITY_BOOLEAN_OVERRIDES: ReadonlyArray<{
     | "pauseWhenOnBattery";
   readonly label: string;
 }> = [
-  { key: "pauseWhenHostLocked", label: "Pause when host is locked" },
-  { key: "pauseWhenHostLowPower", label: "Pause on host low power" },
-  { key: "pauseWhenClientLowPower", label: "Pause on client low power" },
-  { key: "pauseWhenOnBattery", label: "Pause on battery" },
+  { key: "pauseWhenHostLocked", label: "电脑锁定时暂停" },
+  { key: "pauseWhenHostLowPower", label: "电脑低电量时暂停" },
+  { key: "pauseWhenClientLowPower", label: "客户端低电量时暂停" },
+  { key: "pauseWhenOnBattery", label: "使用电池供电时暂停" },
 ];
 
 function resetBackgroundActivitySettings() {
@@ -398,58 +592,56 @@ export function useSettingsRestore(onRestored?: () => void) {
 
   const changedSettingLabels = useMemo(
     () => [
-      ...(theme !== "system" ? ["Theme"] : []),
-      ...(!followSystem ? ["Follow system"] : []),
-      ...(themeHalves !== null ? ["Theme mix"] : []),
-      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
+      ...(theme !== "system" ? ["主题"] : []),
+      ...(!followSystem ? ["跟随系统"] : []),
+      ...(themeHalves !== null ? ["主题组合"] : []),
+      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["玻璃透明度"] : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
-        ? ["Time format"]
+        ? ["时间格式"]
         : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-        ? ["Visible threads"]
+        ? ["可见任务数"]
         : []),
       ...(settings.sidebarProjectGroupingMode !==
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
-        ? ["Project Grouping"]
+        ? ["空间分组"]
         : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
-        ? ["Auto-settle inactive threads"]
+        ? ["自动归纳不活跃任务"]
         : []),
-      ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
-      ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans
-        ? ["Interface font"]
-        : []),
+      ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["自动换行"] : []),
+      ...(settings.fontFamilySans !== DEFAULT_UNIFIED_SETTINGS.fontFamilySans ? ["界面字体"] : []),
       ...(settings.fontFamilyComposer !== DEFAULT_UNIFIED_SETTINGS.fontFamilyComposer
-        ? ["Prompt font"]
+        ? ["输入框字体"]
         : []),
-      ...(settings.fontFamilyCode !== DEFAULT_UNIFIED_SETTINGS.fontFamilyCode ? ["Code font"] : []),
+      ...(settings.fontFamilyCode !== DEFAULT_UNIFIED_SETTINGS.fontFamilyCode ? ["代码字体"] : []),
       ...(settings.fontFamilyTerminal !== DEFAULT_UNIFIED_SETTINGS.fontFamilyTerminal
-        ? ["Terminal font"]
+        ? ["终端字体"]
         : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
-        ? ["Diff whitespace changes"]
+        ? ["差异空白字符"]
         : []),
       ...(settings.enableLegacyTokenStreaming !==
       DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming
-        ? ["Stream token by token"]
+        ? ["逐 Token 输出"]
         : []),
-      ...(isBackgroundActivityDirty ? ["Background activity"] : []),
+      ...(isBackgroundActivityDirty ? ["后台活动"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-        ? ["New thread mode"]
+        ? ["新任务模式"]
         : []),
       ...(settings.newWorktreesStartFromOrigin !==
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
-        ? ["New worktrees start from origin"]
+        ? ["从远端分支创建工作树"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Add project base directory"]
+        ? ["导入空间默认目录"]
         : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
-        ? ["Archive confirmation"]
+        ? ["归纳确认"]
         : []),
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
-        ? ["Delete confirmation"]
+        ? ["删除确认"]
         : []),
     ],
     [
@@ -484,9 +676,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     if (changedSettingLabels.length === 0) return;
     const api = readLocalApi();
     const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
-      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
-        "\n",
-      ),
+      ["恢复默认设置？", `以下设置将被重置：${changedSettingLabels.join("、")}。`].join("\n"),
     );
     if (!confirmed) return;
 
@@ -513,8 +703,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Couldn’t restore theme settings",
-          description: "Try again.",
+          title: "恢复主题设置失败",
+          description: "请重试。",
         }),
       );
     };
@@ -607,18 +797,16 @@ function BackgroundActivityAdvancedDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogPopup className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Background Activity</DialogTitle>
-          <DialogDescription>
-            Tune the shared power policy and the background intervals that feed it.
-          </DialogDescription>
+          <DialogTitle>后台活动</DialogTitle>
+          <DialogDescription>调整统一的电源策略和相关后台检查间隔。</DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-0 px-6 pb-5">
           <div className="overflow-hidden rounded-xl border bg-card text-card-foreground">
             <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Shared policy</div>
+                <div className="text-sm font-medium">统一策略</div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Controls whether background work may run after a subscribed interval fires.
+                  控制后台检查到期后是否允许运行。
                 </p>
               </div>
               <Select
@@ -635,7 +823,7 @@ function BackgroundActivityAdvancedDialog({
                   }
                 }}
               >
-                <SelectTrigger className="w-full sm:w-40" aria-label="Shared background policy">
+                <SelectTrigger className="w-full sm:w-40" aria-label="统一后台策略">
                   <SelectValue>{BACKGROUND_ACTIVITY_PROFILE_LABELS[activeProfile]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -654,9 +842,9 @@ function BackgroundActivityAdvancedDialog({
 
             <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Git fetch interval</div>
+                <div className="text-sm font-medium">Git 拉取间隔</div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Refresh remote branch status in the background.
+                  在后台刷新远程分支状态。
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -681,20 +869,20 @@ function BackgroundActivityAdvancedDialog({
                   }
                 >
                   <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease Git fetch interval" />
-                    <NumberFieldInput aria-label="Git fetch interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase Git fetch interval" />
+                    <NumberFieldDecrement aria-label="减少 Git 拉取间隔" />
+                    <NumberFieldInput aria-label="Git 拉取间隔（秒）" />
+                    <NumberFieldIncrement aria-label="增加 Git 拉取间隔" />
                   </NumberFieldGroup>
                 </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
+                <span className="text-xs text-muted-foreground">秒</span>
               </div>
             </div>
 
             <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Host power monitor</div>
+                <div className="text-sm font-medium">电脑电源监控</div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Poll host power state while clients are active.
+                  客户端活跃时轮询电脑电源状态。
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -719,20 +907,20 @@ function BackgroundActivityAdvancedDialog({
                   }
                 >
                   <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease active host power interval" />
-                    <NumberFieldInput aria-label="Active host power interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase active host power interval" />
+                    <NumberFieldDecrement aria-label="减少活跃时电源检查间隔" />
+                    <NumberFieldInput aria-label="活跃时电源检查间隔（秒）" />
+                    <NumberFieldIncrement aria-label="增加活跃时电源检查间隔" />
                   </NumberFieldGroup>
                 </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
+                <span className="text-xs text-muted-foreground">秒</span>
               </div>
             </div>
 
             <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 space-y-1">
-                <div className="text-sm font-medium">Idle host monitor</div>
+                <div className="text-sm font-medium">空闲电源监控</div>
                 <p className="text-xs leading-relaxed text-muted-foreground">
-                  Poll host power state when no foreground client is active.
+                  没有前台客户端活跃时轮询电脑电源状态。
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -757,12 +945,12 @@ function BackgroundActivityAdvancedDialog({
                   }
                 >
                   <NumberFieldGroup>
-                    <NumberFieldDecrement aria-label="Decrease idle host power interval" />
-                    <NumberFieldInput aria-label="Idle host power interval in seconds" />
-                    <NumberFieldIncrement aria-label="Increase idle host power interval" />
+                    <NumberFieldDecrement aria-label="减少空闲时电源检查间隔" />
+                    <NumberFieldInput aria-label="空闲时电源检查间隔（秒）" />
+                    <NumberFieldIncrement aria-label="增加空闲时电源检查间隔" />
                   </NumberFieldGroup>
                 </NumberField>
-                <span className="text-xs text-muted-foreground">seconds</span>
+                <span className="text-xs text-muted-foreground">秒</span>
               </div>
             </div>
 
@@ -798,9 +986,9 @@ function BackgroundActivityAdvancedDialog({
             variant="outline"
             onClick={() => updateSettings(resetBackgroundActivitySettings())}
           >
-            Reset all
+            全部重置
           </Button>
-          <Button onClick={() => onOpenChange(false)}>Done</Button>
+          <Button onClick={() => onOpenChange(false)}>完成</Button>
         </DialogFooter>
       </DialogPopup>
     </Dialog>
@@ -831,7 +1019,7 @@ export function AppearanceSettingsPanel() {
 
   return (
     <SettingsPageContainer>
-      <SettingsSection id="appearance" title="Appearance">
+      <SettingsSection id="appearance" title="外观">
         <div id={searchableSetting("theme").id}>
           <ThemeLibrary
             appearanceMode={appearanceMode}
@@ -850,11 +1038,11 @@ export function AppearanceSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("setting-glass-opacity")}
-          description="Control how transparent glass surfaces are. Higher values make menus, dialogs, and the composer more solid."
+          description="调整玻璃界面的透明程度。数值越高，菜单、弹窗和输入框越不透明。"
           resetAction={
             settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? (
               <SettingResetButton
-                label="glass opacity"
+                label="玻璃透明度"
                 onClick={() =>
                   updateSettings({ glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity })
                 }
@@ -870,7 +1058,7 @@ export function AppearanceSettingsPanel() {
                 {settings.glassOpacity}%
               </output>
               <input
-                aria-label="Glass opacity"
+                aria-label="玻璃透明度"
                 className="settings-slider min-w-0 flex-1"
                 id="glass-opacity"
                 max={MAX_GLASS_OPACITY}
@@ -907,8 +1095,8 @@ function useFontDefaultFamilies() {
   // hardcoded.
   const defaults = useMemo(
     () => ({
-      sans: resolveDefaultFamilyLabel(DEFAULT_SANS_FONT_STACK) ?? "System default",
-      code: resolveDefaultFamilyLabel(DEFAULT_CODE_FONT_STACK) ?? "System monospace",
+      sans: resolveDefaultFamilyLabel(DEFAULT_SANS_FONT_STACK) ?? "系统默认",
+      code: resolveDefaultFamilyLabel(DEFAULT_CODE_FONT_STACK) ?? "系统等宽字体",
     }),
     [],
   );
@@ -927,12 +1115,12 @@ function InterfaceFontRow({ preview }: { preview?: ReactNode }) {
   return (
     <FontFamilySettingsRow
       {...searchableSetting("interface-font")}
-      description="Everything outside code blocks and the terminal."
+      description="用于代码块和终端以外的所有界面文字。"
       defaultFamily={defaults.sans}
       value={settings.fontFamilySans}
       onValueChange={(fontFamilySans) => updateSettings({ fontFamilySans })}
       size={{
-        label: "Interface font size",
+        label: "界面字体大小",
         min: MIN_INTERFACE_FONT_SIZE,
         max: MAX_INTERFACE_FONT_SIZE,
         value: settings.fontSizeInterface,
@@ -950,12 +1138,12 @@ function PromptFontRow() {
   return (
     <FontFamilySettingsRow
       {...searchableSetting("prompt-font")}
-      description="Only the box you write prompts in. Mono works well here."
+      description="仅用于任务输入框，也可以选择等宽字体。"
       defaultFamily={defaults.interfaceFamily}
       value={settings.fontFamilyComposer}
       onValueChange={(fontFamilyComposer) => updateSettings({ fontFamilyComposer })}
       size={{
-        label: "Prompt font size",
+        label: "输入框字体大小",
         min: MIN_PROMPT_FONT_SIZE,
         max: MAX_PROMPT_FONT_SIZE,
         value: settings.fontSizePrompt,
@@ -968,7 +1156,7 @@ function PromptFontRow() {
 
 function CodeFontRow({
   title,
-  description = "Code blocks, diffs, and file previews.",
+  description = "用于代码块、差异和文件预览。",
   preview,
 }: {
   title?: string;
@@ -988,7 +1176,7 @@ function CodeFontRow({
       onValueChange={(fontFamilyCode) => updateSettings({ fontFamilyCode })}
       requireMonospace
       size={{
-        label: "Code font size",
+        label: "代码字体大小",
         min: MIN_CODE_FONT_SIZE,
         max: MAX_CODE_FONT_SIZE,
         value: settings.fontSizeCode,
@@ -1006,13 +1194,13 @@ function TerminalFontRow() {
   return (
     <FontFamilySettingsRow
       {...searchableSetting("terminal-font")}
-      description="Terminal output, independent from code blocks and diffs."
+      description="用于终端输出，独立于代码块和差异视图。"
       defaultFamily={defaults.code}
       value={settings.fontFamilyTerminal}
       onValueChange={(fontFamilyTerminal) => updateSettings({ fontFamilyTerminal })}
       requireMonospace
       size={{
-        label: "Terminal font size",
+        label: "终端字体大小",
         min: MIN_TERMINAL_FONT_SIZE,
         max: MAX_TERMINAL_FONT_SIZE,
         value: settings.fontSizeTerminal,
@@ -1039,11 +1227,11 @@ function FontSmoothingRow() {
   return (
     <SettingsRow
       {...searchableSetting("font-smoothing")}
-      description="Render text with thinner grayscale anti-aliasing instead of macOS's heavier default."
+      description="使用更轻的灰度抗锯齿效果，替代 macOS 默认的较粗渲染。"
       resetAction={
         settings.fontSmoothing !== DEFAULT_UNIFIED_SETTINGS.fontSmoothing ? (
           <SettingResetButton
-            label="font smoothing"
+            label="字体平滑"
             onClick={() =>
               updateSettings({ fontSmoothing: DEFAULT_UNIFIED_SETTINGS.fontSmoothing })
             }
@@ -1054,7 +1242,7 @@ function FontSmoothingRow() {
         <Switch
           checked={settings.fontSmoothing}
           onCheckedChange={(checked) => updateSettings({ fontSmoothing: Boolean(checked) })}
-          aria-label="Font smoothing"
+          aria-label="字体平滑"
         />
       }
     />
@@ -1067,11 +1255,11 @@ function WordWrapRow() {
   return (
     <SettingsRow
       {...searchableSetting("word-wrap")}
-      description="Wrap long lines in code blocks, tables, diffs, and file previews by default."
+      description="默认在代码块、表格、差异和文件预览中自动换行。"
       resetAction={
         settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? (
           <SettingResetButton
-            label="word wrapping"
+            label="自动换行"
             onClick={() => updateSettings({ wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap })}
           />
         ) : null
@@ -1080,7 +1268,7 @@ function WordWrapRow() {
         <Switch
           checked={settings.wordWrap}
           onCheckedChange={(checked) => updateSettings({ wordWrap: Boolean(checked) })}
-          aria-label="Wrap code, tables, diffs, and file previews by default"
+          aria-label="代码、表格、差异和文件预览默认自动换行"
         />
       }
     />
@@ -1110,8 +1298,8 @@ function SimpleFontRows() {
     <>
       <InterfaceFontRow preview={<PromptFontPreview />} />
       <CodeFontRow
-        title="Monospace font"
-        description="Code blocks, diffs, file previews, and the terminal."
+        title="等宽字体"
+        description="用于代码块、差异、文件预览和终端。"
         preview={
           <>
             <CodeFontPreview />
@@ -1170,14 +1358,14 @@ function TypographySection() {
   }, [searchTargetId, setAdvanced]);
   return (
     <SettingsSection
-      title="Typography"
+      title="字体"
       headerAction={
         <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-muted-foreground">
-          Advanced
+          高级
           <Switch
             checked={advanced}
             onCheckedChange={(checked) => setAdvanced(Boolean(checked))}
-            aria-label="Show advanced typography settings"
+            aria-label="显示高级字体设置"
           />
         </label>
       }
@@ -1405,7 +1593,7 @@ function AutoSettleDaysInput({
         }
       }}
       onBlur={() => setDraft(String(value))}
-      aria-label="Days of inactivity before auto-settle"
+      aria-label="自动归纳前的无活动天数"
     />
   );
 }
@@ -1463,7 +1651,7 @@ function LegacyFeaturesSection() {
                   onCheckedChange={(checked) =>
                     updateSettings({ planModeEnabled: Boolean(checked) })
                   }
-                  aria-label="Plan mode (legacy)"
+                  aria-label="规划模式（兼容）"
                 />
               }
             />
@@ -1482,14 +1670,14 @@ function LegacyFeaturesSection() {
                       const api = readLocalApi();
                       const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
                         [
-                          "Turn on token-by-token output?",
-                          "It is significantly slower than the default buffered output and hurts the reading experience. This switch exists only for backwards compatibility.",
+                          "启用逐 Token 输出？",
+                          "它比默认的分段输出明显更慢，也会影响阅读体验。此开关仅用于兼容旧行为。",
                         ].join("\n"),
                       );
                       if (confirmed) updateSettings({ enableLegacyTokenStreaming: true });
                     })();
                   }}
-                  aria-label="Stream token by token (legacy)"
+                  aria-label="逐 Token 输出（兼容）"
                 />
               }
             />
@@ -1521,9 +1709,9 @@ export function GeneralSettingsPanel() {
   const backgroundActivityProfileOption = resolveBackgroundActivityProfileOption(settings);
   const backgroundActivityDescription =
     backgroundActivityProfileOption === "advanced"
-      ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} Current shared policy: ${
+      ? `${ADVANCED_BACKGROUND_ACTIVITY_DESCRIPTION} 当前统一策略：${
           BACKGROUND_ACTIVITY_PROFILE_LABELS[activeBackgroundActivityProfile]
-        }.`
+        }。`
       : BACKGROUND_ACTIVITY_PROFILE_DESCRIPTIONS[resolvedBackgroundActivity.profile];
   const canResetBackgroundActivity = !Equal.equals(
     settings.backgroundActivity,
@@ -1564,7 +1752,7 @@ export function GeneralSettingsPanel() {
                   ),
                 });
               }}
-              aria-label="Project grouping"
+              aria-label="空间分组"
             />
           }
         />
@@ -1593,7 +1781,7 @@ export function GeneralSettingsPanel() {
                   sidebarAutoSettleAfterDays: checked ? AUTO_SETTLE_DEFAULT_DAYS : null,
                 })
               }
-              aria-label="Auto-settle inactive threads"
+              aria-label="自动归纳不活跃任务"
             />
           }
         />
@@ -1634,7 +1822,7 @@ export function GeneralSettingsPanel() {
                 }
               }}
             >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Timestamp format">
+              <SelectTrigger className="w-full sm:w-40" aria-label="时间格式">
                 <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -1673,7 +1861,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ diffIgnoreWhitespace: Boolean(checked) })
               }
-              aria-label="Hide whitespace changes by default"
+              aria-label="默认隐藏空白字符变更"
             />
           }
         />
@@ -1712,7 +1900,7 @@ export function GeneralSettingsPanel() {
                   }
                 }}
               >
-                <SelectTrigger className="w-full sm:w-40" aria-label="Background activity profile">
+                <SelectTrigger className="w-full sm:w-40" aria-label="后台活动模式">
                   <SelectValue>
                     {BACKGROUND_ACTIVITY_PROFILE_OPTION_LABELS[backgroundActivityProfileOption]}
                   </SelectValue>
@@ -1827,7 +2015,7 @@ export function GeneralSettingsPanel() {
                 onCheckedChange={(checked) =>
                   updateSettings({ newWorktreesStartFromOrigin: Boolean(checked) })
                 }
-                aria-label="Start new worktrees from origin by default"
+                aria-label="默认从远端分支创建工作树"
               />
             }
           />
@@ -1856,7 +2044,7 @@ export function GeneralSettingsPanel() {
               onCommit={(next) => updateSettings({ addProjectBaseDirectory: next })}
               placeholder="~/"
               spellCheck={false}
-              aria-label="Add project base directory"
+              aria-label="导入空间默认目录"
             />
           }
         />
@@ -1882,7 +2070,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ confirmThreadArchive: Boolean(checked) })
               }
-              aria-label="Confirm thread archiving"
+              aria-label="归纳任务前确认"
             />
           }
         />
@@ -1908,7 +2096,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ confirmThreadDelete: Boolean(checked) })
               }
-              aria-label="Confirm thread deletion"
+              aria-label="删除任务前确认"
             />
           }
         />
@@ -1991,8 +2179,8 @@ export function ArchivedThreadsPanel() {
       if (!api) return;
       const clicked = await api.contextMenu.show(
         [
-          { id: "unarchive", label: "Unarchive" },
-          { id: "delete", label: "Delete", destructive: true },
+          { id: "unarchive", label: "恢复任务" },
+          { id: "delete", label: "删除任务", destructive: true },
         ],
         position,
       );
@@ -2006,8 +2194,8 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to unarchive thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: "恢复任务失败",
+              description: error instanceof Error ? error.message : "恢复任务时发生错误。",
             }),
           );
         }
@@ -2023,8 +2211,8 @@ export function ArchivedThreadsPanel() {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to delete thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: "删除任务失败",
+              description: error instanceof Error ? error.message : "删除任务时发生错误。",
             }),
           );
         }
@@ -2049,16 +2237,16 @@ export function ArchivedThreadsPanel() {
                   <ArchiveIcon className="size-3.5 text-muted-foreground" />
                 )}
                 {isLoadingArchive
-                  ? "Loading archived threads"
+                  ? "正在加载归档任务"
                   : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
+                    ? "归档任务加载失败"
+                    : "暂无归档任务"}
               </span>
             }
             description={
               isLoadingArchive
-                ? "Checking the local archive."
-                : (archiveError ?? "Archived threads will appear here.")
+                ? "正在检查本地归档。"
+                : (archiveError ?? "归档后的任务会显示在这里。")
             }
           />
         </SettingsSection>
@@ -2090,9 +2278,9 @@ export function ArchivedThreadsPanel() {
                       toastManager.add(
                         stackedThreadToast({
                           type: "error",
-                          title: "Archived thread action failed",
+                          title: "归档任务操作失败",
                           description:
-                            error instanceof Error ? error.message : "An error occurred.",
+                            error instanceof Error ? error.message : "操作归档任务时发生错误。",
                         }),
                       );
                     }
@@ -2101,8 +2289,8 @@ export function ArchivedThreadsPanel() {
                 title={thread.title}
                 description={
                   <>
-                    Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
+                    归档于 {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
+                    {" \u00b7 创建于 "}
                     {formatRelativeTimeLabel(thread.createdAt)}
                   </>
                 }
@@ -2126,9 +2314,9 @@ export function ArchivedThreadsPanel() {
                           toastManager.add(
                             stackedThreadToast({
                               type: "error",
-                              title: "Failed to unarchive thread",
+                              title: "恢复任务失败",
                               description:
-                                error instanceof Error ? error.message : "An error occurred.",
+                                error instanceof Error ? error.message : "恢复任务时发生错误。",
                             }),
                           );
                         }
@@ -2136,7 +2324,7 @@ export function ArchivedThreadsPanel() {
                     }}
                   >
                     <ArchiveX className="size-3.5" />
-                    <span>Unarchive</span>
+                    <span>恢复任务</span>
                   </Button>
                 }
               />

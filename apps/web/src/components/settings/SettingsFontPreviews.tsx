@@ -19,9 +19,9 @@ const EMPTY_SKILLS: ReadonlyArray<never> = [];
 // markdown-style file links render as chips, so the preview shows prompt
 // text and pills exactly as the real composer draws them.
 const PROMPT_PREVIEW_TEXT =
-  "Use $frontend-design to fix the flaky test in " +
-  "[surface.test.ts](apps/web/src/terminal/ghostty/surface.test.ts) and align the header with " +
-  "[SettingsPanels.tsx](apps/web/src/components/settings/SettingsPanels.tsx) before shipping.";
+  "使用 $frontend-design 修复 " +
+  "[surface.test.ts](apps/web/src/terminal/ghostty/surface.test.ts) 中不稳定的测试，并参考 " +
+  "[SettingsPanels.tsx](apps/web/src/components/settings/SettingsPanels.tsx) 调整标题栏。";
 
 function noop() {}
 
@@ -43,7 +43,7 @@ export function PromptFontPreview() {
         terminalContexts={EMPTY_TERMINAL_CONTEXTS}
         skills={EMPTY_SKILLS}
         disabled={false}
-        placeholder="Ask for follow-up changes or attach images"
+        placeholder="继续提出修改，或添加图片"
         className="max-h-40 min-h-12"
         onRemoveTerminalContext={noop}
         onChange={onChange}
@@ -266,7 +266,7 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
     <div
       ref={mountRef}
       className="relative mt-1 mb-2 h-52 overflow-hidden rounded-lg border border-border"
-      aria-label="Terminal font preview"
+      aria-label="终端字体预览"
     />
   );
 }

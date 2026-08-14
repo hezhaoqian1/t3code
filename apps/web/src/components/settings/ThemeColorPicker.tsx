@@ -6,20 +6,63 @@ import { Input } from "../ui/input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 export function getThemeRoleLabel(role: ThemeColorRole): string {
   const labels: Partial<Record<ThemeColorRole, string>> = {
-    canvas: "Background",
-    toolbar: "Toolbar background",
-    toolbarForeground: "Toolbar text",
-    toolbarBorder: "Toolbar border",
-    toolbarControl: "Toolbar control",
-    toolbarControlForeground: "Toolbar control text",
-    toolbarControlHover: "Toolbar control hover",
-    accent: "Accent color",
-    errorForeground: "Error text",
-    errorSurface: "Error background",
-    warningForeground: "Warning text",
-    warningSurface: "Warning background",
-    updateForeground: "Update text",
-    updateSurface: "Update background",
+    canvas: "背景色",
+    chrome: "窗口框架",
+    toolbar: "工具栏背景",
+    toolbarForeground: "工具栏文字",
+    toolbarBorder: "工具栏边框",
+    toolbarControl: "工具栏控件",
+    toolbarControlForeground: "工具栏控件文字",
+    toolbarControlHover: "工具栏控件悬停色",
+    surface: "内容表面",
+    surfaceRaised: "浮起表面",
+    surfaceOverlay: "覆盖层表面",
+    text: "主要文字",
+    textMuted: "次要文字",
+    border: "边框",
+    input: "输入框",
+    focus: "焦点",
+    accent: "强调色",
+    accentForeground: "强调色文字",
+    secondary: "次级控件",
+    secondaryForeground: "次级控件文字",
+    muted: "弱化背景",
+    mutedForeground: "弱化文字",
+    placeholder: "占位文字",
+    secondaryLabel: "次级标签",
+    iconMuted: "弱化图标",
+    error: "错误色",
+    errorForeground: "错误文字",
+    errorSurface: "错误背景",
+    warning: "警告色",
+    warningForeground: "警告文字",
+    warningSurface: "警告背景",
+    update: "更新提示色",
+    updateForeground: "更新文字",
+    updateSurface: "更新背景",
+    accentSurface: "强调色表面",
+    accentSurfaceForeground: "强调色表面文字",
+    messageSurface: "消息背景",
+    messageForeground: "消息文字",
+    messageAction: "消息操作",
+    messageActionForeground: "消息操作文字",
+    messageActionHover: "消息操作悬停色",
+    codeBackground: "代码背景",
+    codeForeground: "代码文字",
+    sidebar: "侧栏背景",
+    sidebarForeground: "侧栏文字",
+    sidebarMutedForeground: "侧栏次要文字",
+    sidebarControlSurface: "侧栏控件背景",
+    sidebarRowHover: "侧栏行悬停色",
+    sidebarRowActive: "侧栏行激活色",
+    sidebarRowSelected: "侧栏行选中色",
+    sidebarBorder: "侧栏边框",
+    terminalBackground: "终端背景",
+    terminalForeground: "终端文字",
+    terminalCursor: "终端光标",
+    terminalSelection: "终端选区",
+    terminalScrollbar: "终端滚动条",
+    terminalScrollbarHover: "终端滚动条悬停色",
   };
   const label = labels[role];
   if (label) return label;
@@ -317,7 +360,7 @@ function ThemeColorPickerPanel({
       <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold text-foreground">{label}</p>
-          <p className="text-[11px] text-muted-foreground">Choose a color</p>
+          <p className="text-[11px] text-muted-foreground">选择颜色</p>
         </div>
         <span
           className="size-7 shrink-0 rounded-full shadow-sm"
@@ -326,8 +369,8 @@ function ThemeColorPickerPanel({
       </div>
       <div className="grid gap-3 px-3 pb-3 pt-3">
         <div
-          aria-label={`${label} saturation and brightness`}
-          aria-valuetext={`saturation ${Math.round(hsv.s * 100)}%, brightness ${Math.round(hsv.v * 100)}%`}
+          aria-label={`${label}饱和度与亮度`}
+          aria-valuetext={`饱和度 ${Math.round(hsv.s * 100)}%，亮度 ${Math.round(hsv.v * 100)}%`}
           className="relative h-32 cursor-crosshair touch-none overflow-hidden rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-popover"
           role="slider"
           style={{
@@ -354,7 +397,7 @@ function ThemeColorPickerPanel({
           />
         </div>
         <div
-          aria-label={`${label} hue`}
+          aria-label={`${label}色相`}
           aria-valuemax={360}
           aria-valuemin={0}
           aria-valuenow={Math.round(hsv.h)}
@@ -398,7 +441,7 @@ function ThemeColorPickerPanel({
                 style={{ backgroundColor: currentColor }}
               />
               <input
-                aria-label={`${label} picker hex value`}
+                aria-label={`${label}十六进制值`}
                 className="h-8 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
                 onBlur={() => {
                   isEditingTextRef.current = false;
@@ -420,7 +463,7 @@ function ThemeColorPickerPanel({
             </span>
             <span className="flex min-w-0 items-center rounded-lg border border-input bg-background px-2 focus-within:border-ring">
               <input
-                aria-label={`${label} picker RGB value`}
+                aria-label={`${label} RGB 值`}
                 className="h-8 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
                 onBlur={() => {
                   isEditingTextRef.current = false;
@@ -458,11 +501,11 @@ function ThemeColorPicker({
       <PopoverTrigger
         render={
           <button
-            aria-label={`Choose ${label} color`}
+            aria-label={`选择${label}`}
             className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-foreground/30 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             onFocus={onInteract}
             onPointerDown={onInteract}
-            title={`Choose ${label} color`}
+            title={`选择${label}`}
             type="button"
           >
             <span
@@ -515,11 +558,11 @@ export const ThemeColorField = memo(function ThemeColorField({
       data-theme-color-role={role}
     >
       <button
-        aria-label={`${selected ? "Hide" : "Show"} ${label} usage`}
+        aria-label={`${selected ? "隐藏" : "显示"}${label}使用位置`}
         aria-pressed={selected}
         className="flex min-w-0 flex-1 cursor-pointer items-center rounded-md text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => onToggleSelected?.(role)}
-        title={`${selected ? "Hide" : "Show"} where ${label} is used`}
+        title={`${selected ? "隐藏" : "显示"}${label}的使用位置`}
         type="button"
       >
         <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -533,7 +576,7 @@ export const ThemeColorField = memo(function ThemeColorField({
         />
         <Input
           aria-invalid={!isColorValue}
-          aria-label={`${label} hex value`}
+          aria-label={`${label}十六进制值`}
           className="w-28 shrink-0 rounded-md border-0 bg-black/10 font-mono text-xs text-foreground shadow-none focus-within:bg-black/15 focus-within:ring-0 dark:bg-black/20 dark:focus-within:bg-black/25 [&_[data-slot=input]]:text-right"
           id={`${role}-hex`}
           nativeInput

@@ -157,7 +157,7 @@ function getLocalFileManagerName(platform: string): string {
   if (isWindowsPlatform(platform)) {
     return "Explorer";
   }
-  return "Files";
+  return "文件管理器";
 }
 
 function getEnvironmentBrowsePlatform(os: string | null | undefined): string {
@@ -219,7 +219,7 @@ function remoteProjectSourceLabel(source: AddProjectRemoteSource): string {
     case "azure-devops":
       return "Azure DevOps";
     case "url":
-      return "Git URL";
+      return "Git 地址";
   }
 }
 
@@ -234,7 +234,7 @@ function remoteProjectSourcePathHint(source: AddProjectRemoteSource): string {
     case "azure-devops":
       return "project/repository";
     case "url":
-      return "URL";
+      return "地址";
   }
 }
 
@@ -263,9 +263,9 @@ function remoteProjectInputPlaceholder(flow: AddProjectCloneFlow | null): string
   if (!flow) return null;
   if (flow.step === "confirm") return null;
   if (flow.source === "url") {
-    return "Enter Git clone URL";
+    return "输入 Git 克隆地址";
   }
-  return `Enter ${remoteProjectSourceLabel(flow.source)} repository (${remoteProjectSourcePathHint(flow.source)})`;
+  return `输入 ${remoteProjectSourceLabel(flow.source)} 仓库（${remoteProjectSourcePathHint(flow.source)}）`;
 }
 
 function sourceProviderKind(source: AddProjectRemoteSource): AddProjectRemoteProviderKind | null {
@@ -295,7 +295,7 @@ function buildAddProjectRemoteSourceReadiness(
 ): AddProjectRemoteSourceReadiness {
   const unavailable = {
     ready: false,
-    hint: "Provider status unavailable. Open Settings -> Source Control and rescan.",
+    hint: "代码托管平台状态不可用，请前往“设置 > 版本控制”重新扫描。",
   } as const;
   const defaultReadiness: AddProjectRemoteSourceReadiness = {
     url: { ready: true, hint: null },
@@ -331,7 +331,7 @@ function buildAddProjectRemoteSourceReadiness(
         ready: false,
         hint:
           Option.getOrNull(provider.auth.detail) ??
-          `${provider.label} is not authenticated. Open Settings -> Source Control for setup guidance.`,
+          `${provider.label} 尚未登录，请前往“设置 > 版本控制”完成配置。`,
       };
       continue;
     }
@@ -345,7 +345,7 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
-  return "An error occurred.";
+  return "操作时发生错误。";
 }
 
 const OVERLAY_MODE_BY_COMMAND = {
@@ -1137,7 +1137,7 @@ function OpenCommandPaletteDialog(props: {
 
       for (const source of orderedSources) {
         const label = remoteProjectSourceLabel(source);
-        const title = source === "url" ? "Git URL" : `${label} 仓库`;
+        const title = source === "url" ? "Git 地址" : `${label} 仓库`;
         const description =
           source === "url"
             ? "从远程 URL 克隆"
@@ -1163,7 +1163,7 @@ function OpenCommandPaletteDialog(props: {
                 }
               />
               <TooltipPopup align="end" side="left">
-                {disabledHint ?? "Open Settings -> Source Control to configure this provider."}
+                {disabledHint ?? "请前往“设置 > 版本控制”配置此平台。"}
               </TooltipPopup>
             </Tooltip>
           </span>
@@ -1213,8 +1213,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Local service unavailable",
-            description: "Reconnect the local service before adding a project.",
+            title: "本地服务不可用",
+            description: "请重新连接本地服务后再导入工作空间。",
           }),
         );
         return;
@@ -1247,8 +1247,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Unable to browse projects",
-          description: "The local service is not available.",
+          title: "无法浏览工作空间",
+          description: "本地服务当前不可用。",
         }),
       );
       return;
@@ -1289,7 +1289,7 @@ function OpenCommandPaletteDialog(props: {
       groups: [
         {
           value: "projects",
-          label: "Projects",
+          label: "工作空间",
           items: enumerateCommandPaletteItems(prioritized),
         },
       ],
@@ -1492,8 +1492,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Local service unavailable",
-            description: "Reconnect the local service before adding a project.",
+            title: "本地服务不可用",
+            description: "请重新连接本地服务后再导入工作空间。",
           }),
         );
         return;
@@ -1504,8 +1504,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to add project",
-            description: "Windows-style paths are only supported on Windows.",
+            title: "导入工作空间失败",
+            description: "Windows 格式的路径只能在 Windows 上使用。",
           }),
         );
         return;
@@ -1515,8 +1515,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to add project",
-            description: "Relative paths require an active project.",
+            title: "导入工作空间失败",
+            description: "使用相对路径前，需要先打开一个工作空间。",
           }),
         );
         return;
@@ -1551,8 +1551,8 @@ function OpenCommandPaletteDialog(props: {
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "Failed to open project",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                title: "打开工作空间失败",
+                description: error instanceof Error ? error.message : "打开工作空间时发生错误。",
               }),
             );
             return;
@@ -1579,8 +1579,8 @@ function OpenCommandPaletteDialog(props: {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Failed to add project",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              title: "导入工作空间失败",
+              description: error instanceof Error ? error.message : "导入工作空间时发生错误。",
             }),
           );
         }
@@ -1595,8 +1595,8 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Failed to add project",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            title: "导入工作空间失败",
+            description: error instanceof Error ? error.message : "导入工作空间时发生错误。",
           }),
         );
         return;
@@ -1649,8 +1649,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Local service unavailable",
-          description: "Reconnect the local service before cloning a repository.",
+          title: "本地服务不可用",
+          description: "请重新连接本地服务后再克隆仓库。",
         }),
       );
       return;
@@ -1693,7 +1693,7 @@ function OpenCommandPaletteDialog(props: {
           toastManager.add(
             stackedThreadToast({
               type: "error",
-              title: "Repository lookup failed",
+              title: "查询仓库失败",
               description: errorMessage(squashAtomCommandFailure(lookupResult)),
             }),
           );
@@ -1725,8 +1725,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Clone failed",
-          description: "Windows-style paths are only supported on Windows.",
+          title: "克隆失败",
+          description: "Windows 格式的路径只能在 Windows 上使用。",
         }),
       );
       return;
@@ -1736,8 +1736,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Clone failed",
-          description: "Relative paths require an active project.",
+          title: "克隆失败",
+          description: "使用相对路径前，需要先打开一个工作空间。",
         }),
       );
       return;
@@ -1765,7 +1765,7 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Clone failed",
+            title: "克隆失败",
             description: errorMessage(squashAtomCommandFailure(cloneResult)),
           }),
         );
@@ -1828,7 +1828,7 @@ function OpenCommandPaletteDialog(props: {
   const cloneDestinationBrowseGroups = useMemo(
     () =>
       browseGroups.map((group) =>
-        group.value === "directories" ? { ...group, label: "Select where to clone" } : group,
+        group.value === "directories" ? { ...group, label: "选择克隆位置" } : group,
       ),
     [browseGroups],
   );
@@ -1874,16 +1874,16 @@ function OpenCommandPaletteDialog(props: {
   const isCloneDestinationStep = addProjectCloneFlow?.step === "confirm";
   const submitActionLabel = isCloneDestinationStep
     ? willCreateProjectPath
-      ? "Create & Clone"
-      : "Clone"
+      ? "创建目录并克隆"
+      : "克隆"
     : willCreateProjectPath
-      ? "Create & Add"
-      : "Add";
+      ? "创建目录并导入"
+      : "导入";
   const addShortcutLabel = hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter";
   const remoteProjectButtonLabel = addProjectCloneFlow
     ? addProjectCloneFlow.source === "url"
-      ? "Continue"
-      : "Lookup"
+      ? "继续"
+      : "查询"
     : null;
   const isRemoteProjectPending = isRemoteProjectLookingUp || isRemoteProjectCloning;
   const canSubmitRemoteProjectFlow =
@@ -1986,8 +1986,8 @@ function OpenCommandPaletteDialog(props: {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Unable to run command",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+          title: "无法执行命令",
+          description: error instanceof Error ? error.message : "执行命令时发生错误。",
         }),
       );
     });
@@ -2061,7 +2061,7 @@ function OpenCommandPaletteDialog(props: {
               size="xs"
               tabIndex={-1}
               className="absolute inset-e-2.5 top-1/2 gap-1.5 pe-1 ps-2 -translate-y-1/2"
-              aria-label={`${remoteProjectButtonLabel ?? "Continue"} (Enter)`}
+              aria-label={`${remoteProjectButtonLabel ?? "继续"}（回车）`}
               disabled={!canSubmitRemoteProjectFlow}
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -2072,12 +2072,12 @@ function OpenCommandPaletteDialog(props: {
             />
           }
         >
-          <span>{isRemoteProjectPending ? "Working" : remoteProjectButtonLabel}</span>
+          <span>{isRemoteProjectPending ? "处理中" : remoteProjectButtonLabel}</span>
           <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1">
             <Kbd>Enter</Kbd>
           </KbdGroup>
         </TooltipTrigger>
-        <TooltipPopup side="top">{remoteProjectButtonLabel ?? "Continue"} (Enter)</TooltipPopup>
+        <TooltipPopup side="top">{remoteProjectButtonLabel ?? "继续"}（回车）</TooltipPopup>
       </Tooltip>
     ) : isBrowsing ? (
       <Tooltip>
@@ -2114,7 +2114,7 @@ function OpenCommandPaletteDialog(props: {
           }
         >
           <span>
-            {isCloneDestinationStep && isRemoteProjectPending ? "Cloning" : submitActionLabel}
+            {isCloneDestinationStep && isRemoteProjectPending ? "正在克隆" : submitActionLabel}
           </span>
           <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1">
             <Kbd>{hasHighlightedBrowseItem ? `${submitModifierLabel} Enter` : "Enter"}</Kbd>
@@ -2128,9 +2128,9 @@ function OpenCommandPaletteDialog(props: {
 
   const footerActionLabel =
     addProjectCloneFlow?.step === "repository"
-      ? (remoteProjectButtonLabel ?? "Continue")
+      ? (remoteProjectButtonLabel ?? "继续")
       : !canSubmitBrowsePath || hasHighlightedBrowseItem
-        ? "Select"
+        ? "选择"
         : undefined;
 
   const footerTrailing = canOpenProjectFromFileManager ? (
@@ -2143,7 +2143,7 @@ function OpenCommandPaletteDialog(props: {
         void handleOpenProjectFromFileManager(browseEnvironmentId);
       }}
     >
-      {`Open in ${fileManagerName}`}
+      {`在 ${fileManagerName} 中打开`}
     </Button>
   ) : null;
 
@@ -2219,16 +2219,16 @@ function OpenCommandPaletteDialog(props: {
           ? {
               emptyStateMessage:
                 addProjectCloneFlow.source === "url"
-                  ? "Enter a Git clone URL and press Enter to continue."
-                  : "Enter a repository path and press Enter to look it up.",
+                  ? "输入 Git 克隆地址，然后按 Enter 继续。"
+                  : "输入仓库路径，然后按 Enter 查找。",
             }
           : addProjectCloneFlow?.step === "confirm"
-            ? { emptyStateMessage: "Choose a destination path and press Enter to clone." }
+            ? { emptyStateMessage: "选择目标目录，然后按 Enter 开始克隆。" }
             : relativePathNeedsActiveProject
-              ? { emptyStateMessage: "Relative paths require an active project." }
+              ? { emptyStateMessage: "相对路径需要先选择工作空间。" }
               : willCreateProjectPath
                 ? {
-                    emptyStateMessage: "Press Enter to create this folder and add it as a project.",
+                    emptyStateMessage: "按 Enter 创建此文件夹并添加为工作空间。",
                   }
                 : threadSearch.isPending
                   ? { emptyStateMessage: "正在搜索任务消息…" }

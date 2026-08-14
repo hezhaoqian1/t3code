@@ -7,9 +7,21 @@ import {
   formatDiagnosticsDescription,
   hasChangedBackgroundActivitySettings,
   isProjectGroupingEnabled,
+  localizeRelativeTimeLabel,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
 } from "./SettingsPanels.logic";
+
+describe("localized relative time", () => {
+  it("translates the relative labels used by settled tasks", () => {
+    expect(localizeRelativeTimeLabel("just now")).toBe("刚刚");
+    expect(localizeRelativeTimeLabel("3m ago")).toBe("3分钟前");
+    expect(localizeRelativeTimeLabel("2h ago")).toBe("2小时前");
+    expect(localizeRelativeTimeLabel("4d ago")).toBe("4天前");
+    expect(localizeRelativeTimeLabel("1w ago")).toBe("1周前");
+    expect(localizeRelativeTimeLabel("unknown")).toBe("unknown");
+  });
+});
 
 describe("background activity settings restore", () => {
   it("detects legacy interval values even when the structured setting is at its default", () => {

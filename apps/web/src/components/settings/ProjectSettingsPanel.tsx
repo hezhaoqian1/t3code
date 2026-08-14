@@ -17,7 +17,6 @@ import type {
   T3ProjectFileScript,
   ThreadEnvMode,
 } from "@t3tools/contracts";
-import { resolveEnvModeLabel } from "../BranchToolbar.logic";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import * as Cause from "effect/Cause";
 import { CopyIcon, FolderIcon, PlusIcon, SettingsIcon, Trash2Icon } from "lucide-react";
@@ -77,10 +76,14 @@ import {
 } from "./settingsLayout";
 
 export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
-  repository: "Group by repository",
-  repository_path: "Group by repository path",
-  separate: "Keep separate",
+  repository: "按代码仓库分组",
+  repository_path: "按仓库路径分组",
+  separate: "保持独立",
 };
+
+function localizedEnvModeLabel(mode: ThreadEnvMode): string {
+  return mode === "worktree" ? "新建工作树" : "当前检出目录";
+}
 
 /** Logical project groups for the settings page, sorted by display name. */
 export function useSettingsProjectGroups(): SidebarProjectSnapshot[] {
@@ -188,7 +191,7 @@ export function ProjectSettingsPanel({
   return (
     <div className="flex min-h-0 flex-1">
       <nav
-        aria-label="Projects"
+        aria-label="工作空间"
         className="w-60 shrink-0 space-y-0.5 overflow-y-auto border-e border-border/40 p-3 pt-10 max-sm:hidden sm:pt-12"
       >
         {groups.map((group) => {
@@ -219,7 +222,7 @@ export function ProjectSettingsPanel({
           );
         })}
         {groups.length === 0 ? (
-          <p className="px-2 py-4 text-sm text-muted-foreground">No projects yet.</p>
+          <p className="px-2 py-4 text-sm text-muted-foreground">暂时没有工作空间。</p>
         ) : null}
       </nav>
       {selected ? (
@@ -231,7 +234,7 @@ export function ProjectSettingsPanel({
         />
       ) : (
         <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-          {groups.length === 0 ? "Add a project from the sidebar to configure it here." : null}
+          {groups.length === 0 ? "请先从侧栏导入工作空间，再在这里进行配置。" : null}
         </div>
       )}
     </div>
@@ -263,14 +266,14 @@ function ProjectDetail({
   });
   const { copyToClipboard: copyPathToClipboard } = useCopyToClipboard<{ path: string }>({
     onCopy: ({ path }) => {
-      toastManager.add({ type: "success", title: "Path copied", description: path });
+      toastManager.add({ type: "success", title: "路径已复制", description: path });
     },
     onError: (error) => {
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Failed to copy path",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          title: "复制路径失败",
+          description: error instanceof Error ? error.message : "复制路径时发生错误。",
         }),
       );
     },
@@ -301,7 +304,7 @@ function ProjectDetail({
       stackedThreadToast({
         type: "error",
         title,
-        description: error instanceof Error ? error.message : "An error occurred.",
+        description: error instanceof Error ? error.message : "操作时发生错误。",
       }),
     );
   }, []);
@@ -338,10 +341,7 @@ function ProjectDetail({
   const storedEnvMode = representative.defaultThreadEnvMode ?? null;
   const setDefaultThreadEnvMode = useCallback(
     (mode: ThreadEnvMode | null) =>
-      void updateAllMembers(
-        { defaultThreadEnvMode: mode },
-        "Failed to update new-thread workspace",
-      ),
+      void updateAllMembers({ defaultThreadEnvMode: mode }, "更新新任务工作空间失败"),
     [updateAllMembers],
   );
 
@@ -377,9 +377,7 @@ function ProjectDetail({
       keybindingCommand: ReturnType<typeof commandForProjectScript>,
     ): Promise<AtomCommandResult<void, unknown>> => {
       if (savingScriptsRef.current) {
-        return AsyncResult.failure(
-          Cause.fail(new Error("Another script change is still saving. Try again.")),
-        );
+        return AsyncResult.failure(Cause.fail(new Error("另一个脚本改动仍在保存，请稍后重试。")));
       }
       savingScriptsRef.current = true;
       setIsSavingScripts(true);
@@ -387,10 +385,7 @@ function ProjectDetail({
         // Captured before the write so a cleared or deleted binding can be
         // removed from the keybindings config afterwards.
         const previousKeybinding = keybindingValueForCommand(keybindings, keybindingCommand);
-        const updateResult = await updateAllMembers(
-          { scripts: nextScripts },
-          "Failed to save scripts",
-        );
+        const updateResult = await updateAllMembers({ scripts: nextScripts }, "保存脚本失败");
         if (updateResult._tag === "Failure") return updateResult;
 
         const keybindingRule = decodeProjectScriptKeybindingRule({
@@ -416,7 +411,7 @@ function ProjectDetail({
             () => undefined,
           );
           if (result._tag === "Failure") {
-            reportFailure("Failed to save keybinding", result);
+            reportFailure("保存快捷键失败", result);
             return result;
           }
         } else if (previousTarget) {
@@ -428,7 +423,7 @@ function ProjectDetail({
             () => undefined,
           );
           if (result._tag === "Failure") {
-            reportFailure("Failed to remove keybinding", result);
+            reportFailure("移除快捷键失败", result);
             return result;
           }
         }
@@ -508,7 +503,7 @@ function ProjectDetail({
         setEditorRequest({
           scriptId: null,
           initial: payload,
-          error: error instanceof Error ? error.message : "Failed to import action.",
+          error: error instanceof Error ? error.message : "导入操作失败。",
         });
       }
     },
@@ -520,7 +515,7 @@ function ProjectDetail({
     async (member: SidebarProjectGroupMember, nextTitle: string) => {
       const title = nextTitle.trim();
       if (!title) {
-        toastManager.add({ type: "warning", title: "Project title cannot be empty" });
+        toastManager.add({ type: "warning", title: "工作空间名称不能为空" });
         return;
       }
       if (title === member.title) return;
@@ -531,7 +526,7 @@ function ProjectDetail({
         }),
         () => undefined,
       );
-      reportFailure("Failed to rename project", result);
+      reportFailure("重命名工作空间失败", result);
     },
     [reportFailure, updateProject],
   );
@@ -566,18 +561,16 @@ function ProjectDetail({
         api.dialogs.confirm(
           [
             projectThreads.length > 0
-              ? `Remove project "${targetLabel}" and delete its ${projectThreads.length} thread${projectThreads.length === 1 ? "" : "s"}?`
-              : `Remove project "${targetLabel}"?`,
+              ? `移除工作空间“${targetLabel}”并删除其中的 ${projectThreads.length} 个任务？`
+              : `移除工作空间“${targetLabel}”？`,
             ...(singleMember
-              ? [`Path: ${singleMember.workspaceRoot}`]
-              : [`This removes ${members.length} grouped project entries.`]),
-            ...(projectThreads.length > 0
-              ? ["This permanently clears conversation history for those threads."]
-              : []),
+              ? [`路径：${singleMember.workspaceRoot}`]
+              : [`这将移除 ${members.length} 个已分组的工作空间条目。`]),
+            ...(projectThreads.length > 0 ? ["相关任务的对话历史将被永久清除。"] : []),
             isWholeGroup
-              ? "This removes only the project entries, not the files on disk."
-              : "Other entries in this grouped project are unaffected.",
-            "This action cannot be undone.",
+              ? "这里只移除工作空间记录，不会删除磁盘上的文件。"
+              : "同一分组中的其他工作空间不会受到影响。",
+            "此操作无法撤销。",
           ].join("\n"),
         ),
       );
@@ -600,7 +593,7 @@ function ProjectDetail({
           () => undefined,
         );
         if (result._tag === "Failure") {
-          reportFailure(`Failed to remove "${member.title}"`, result);
+          reportFailure(`移除“${member.title}”失败`, result);
           return;
         }
         const projectRef = scopeProjectRef(member.environmentId, member.id);
@@ -628,7 +621,7 @@ function ProjectDetail({
   const repositoryLine =
     representative.repositoryIdentity?.displayName ??
     representative.repositoryIdentity?.canonicalKey ??
-    "No git remote detected";
+    "未检测到 Git 远程仓库";
   return (
     <SettingsPageContainer className="gap-10">
       <div className="flex items-center gap-3 px-3 sm:px-4">
@@ -645,14 +638,14 @@ function ProjectDetail({
             {repositoryLine}
             {" · "}
             {group.memberProjects.length === 1
-              ? "1 checkout"
-              : `${group.memberProjects.length} checkouts`}
+              ? "1 个检出目录"
+              : `${group.memberProjects.length} 个检出目录`}
             {" · "}
-            {groupThreadCount === 1 ? "1 thread" : `${groupThreadCount} threads`}
+            {groupThreadCount === 1 ? "1 个任务" : `${groupThreadCount} 个任务`}
           </p>
         </div>
         <Select value={group.projectKey} onValueChange={(value) => onSelectProject(String(value))}>
-          <SelectTrigger className="sm:hidden" aria-label="Switch project">
+          <SelectTrigger className="sm:hidden" aria-label="切换工作空间">
             <SelectValue>{group.displayName}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -665,11 +658,11 @@ function ProjectDetail({
         </Select>
       </div>
 
-      <SettingsSection title="New threads">
+      <SettingsSection title="新任务">
         <SettingsRow
           id="project-new-thread-workspace"
-          title="Workspace"
-          description="Where new threads in this project start. Overrides t3.json and the global default; applies to every checkout in this group."
+          title="工作空间"
+          description="新任务在此工作空间中开始。它会覆盖 t3.json 和全局默认设置，并应用于此分组中的所有检出目录。"
           resetAction={
             storedEnvMode !== null ? (
               <SettingResetButton
@@ -689,20 +682,20 @@ function ProjectDetail({
                 }
               }}
             >
-              <SelectTrigger aria-label="New-thread workspace">
+              <SelectTrigger aria-label="新任务工作空间">
                 <SelectValue>
                   {storedEnvMode === null
-                    ? `Default (${resolveEnvModeLabel(inheritedEnvMode).toLowerCase()})`
-                    : resolveEnvModeLabel(storedEnvMode)}
+                    ? `默认（${localizedEnvModeLabel(inheritedEnvMode)}）`
+                    : localizedEnvModeLabel(storedEnvMode)}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem value="inherit">
-                  Default ({inheritedEnvModeSource}:{" "}
-                  {resolveEnvModeLabel(inheritedEnvMode).toLowerCase()})
+                  默认（{inheritedEnvModeSource === "global" ? "全局设置" : inheritedEnvModeSource}
+                  ：{localizedEnvModeLabel(inheritedEnvMode)}）
                 </SelectItem>
-                <SelectItem value="worktree">{resolveEnvModeLabel("worktree")}</SelectItem>
-                <SelectItem value="local">{resolveEnvModeLabel("local")}</SelectItem>
+                <SelectItem value="worktree">{localizedEnvModeLabel("worktree")}</SelectItem>
+                <SelectItem value="local">{localizedEnvModeLabel("local")}</SelectItem>
               </SelectPopup>
             </Select>
           }
@@ -711,7 +704,7 @@ function ProjectDetail({
 
       <SettingsSection
         id="project-scripts"
-        title="Scripts"
+        title="脚本"
         headerAction={
           <Button
             size="xs"
@@ -722,14 +715,13 @@ function ProjectDetail({
             }
           >
             <PlusIcon className="size-3.5" />
-            Add action
+            添加操作
           </Button>
         }
       >
         {scripts.length === 0 ? (
           <p className="px-3 py-2 text-sm text-muted-foreground sm:px-4">
-            No scripts yet. Scripts run in a project terminal from the thread top bar; one script
-            can run automatically when a worktree is created.
+            暂无脚本。脚本会从任务顶部栏在工作空间终端中运行，也可以设置一个脚本在创建工作树时自动执行。
           </p>
         ) : (
           <div className="space-y-0.5">
@@ -752,12 +744,12 @@ function ProjectDetail({
                   </span>
                   {script.runOnWorktreeCreate ? (
                     <span className="shrink-0 rounded-sm border border-border/60 px-1.5 py-px text-[11px] text-muted-foreground">
-                      setup
+                      初始化
                     </span>
                   ) : null}
                   {script.previewUrl ? (
                     <span className="shrink-0 rounded-sm border border-border/60 px-1.5 py-px text-[11px] text-muted-foreground max-sm:hidden">
-                      preview · desktop only
+                      预览 · 仅桌面端
                     </span>
                   ) : null}
                   <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground/80">
@@ -770,7 +762,7 @@ function ProjectDetail({
                     size="icon-xs"
                     variant="ghost"
                     className="shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-                    aria-label={`Edit ${script.name}`}
+                    aria-label={`编辑 ${script.name}`}
                     disabled={isSavingScripts}
                     onClick={() => setEditorRequest(editorRequestForScript(script, keybindings))}
                   >
@@ -783,15 +775,15 @@ function ProjectDetail({
         )}
         {t3File.status === "invalid" ? (
           <SettingsRow
-            title="t3.json is invalid"
-            description="A t3.json exists at the workspace root but fails to parse, so every script and icon it declares is ignored. Check the JSON syntax and icon values."
+            title="t3.json 无效"
+            description="工作空间根目录存在 t3.json，但文件解析失败，其中声明的脚本和图标都会被忽略。请检查 JSON 语法和图标值。"
             className="text-warning"
           />
         ) : null}
         {importableScripts.length > 0 ? (
           <SettingsRow
-            title="Import from t3.json"
-            description={`${importableScripts.length} script${importableScripts.length === 1 ? "" : "s"} declared in this repo's t3.json ${importableScripts.length === 1 ? "is" : "are"} not set up yet.`}
+            title="从 t3.json 导入"
+            description={`此仓库的 t3.json 中还有 ${importableScripts.length} 个脚本尚未导入。`}
             control={
               <div className="flex flex-wrap justify-end gap-1.5">
                 {importableScripts.map((fileScript) => (
@@ -812,7 +804,7 @@ function ProjectDetail({
         ) : null}
       </SettingsSection>
 
-      <SettingsSection id="project-checkouts" title="Checkouts">
+      <SettingsSection id="project-checkouts" title="检出目录">
         <div className="space-y-2 px-3 sm:px-4">
           {group.memberProjects.map((member) => {
             const threadCount = threadCountByMember.get(memberKey(member)) ?? 0;
@@ -830,14 +822,14 @@ function ProjectDetail({
                     {member.title}
                   </span>
                   <span className="ms-auto shrink-0 text-xs text-muted-foreground">
-                    {threadCount === 1 ? "1 thread" : `${threadCount} threads`}
+                    {threadCount === 1 ? "1 个任务" : `${threadCount} 个任务`}
                   </span>
                   {group.memberProjects.length > 1 ? (
                     <Button
                       size="icon-xs"
                       variant="ghost"
                       className="shrink-0 text-muted-foreground hover:text-destructive-foreground"
-                      aria-label={`Remove checkout ${member.workspaceRoot}`}
+                      aria-label={`移除检出目录 ${member.workspaceRoot}`}
                       onClick={() => void removeMembers([member])}
                     >
                       <Trash2Icon className="size-3.5" />
@@ -853,7 +845,7 @@ function ProjectDetail({
                     size="icon-xs"
                     variant="ghost"
                     className="size-4 shrink-0 rounded-sm"
-                    aria-label="Copy project path"
+                    aria-label="复制工作空间路径"
                     onClick={() =>
                       copyPathToClipboard(member.workspaceRoot, { path: member.workspaceRoot })
                     }
@@ -863,10 +855,10 @@ function ProjectDetail({
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid min-w-0 gap-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Name</span>
+                    <span className="text-xs font-medium text-muted-foreground">名称</span>
                     <Input
                       key={`${member.physicalProjectKey}:${member.title}`}
-                      aria-label={`Project name for ${member.workspaceRoot}`}
+                      aria-label={`工作空间名称：${member.workspaceRoot}`}
                       defaultValue={member.title}
                       onBlur={(event) => {
                         void renameMember(member, event.currentTarget.value);
@@ -877,7 +869,7 @@ function ProjectDetail({
                     />
                   </label>
                   <label className="grid min-w-0 gap-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Grouping rule</span>
+                    <span className="text-xs font-medium text-muted-foreground">分组规则</span>
                     <Select
                       value={groupingOverride}
                       onValueChange={(value) => {
@@ -893,17 +885,17 @@ function ProjectDetail({
                     >
                       <SelectTrigger
                         className="w-full"
-                        aria-label={`Grouping rule for ${member.workspaceRoot}`}
+                        aria-label={`分组规则：${member.workspaceRoot}`}
                       >
                         <SelectValue>
                           {groupingOverride === "inherit"
-                            ? `Default (${PROJECT_GROUPING_MODE_LABELS[projectGroupingSettings.sidebarProjectGroupingMode]})`
+                            ? `默认（${PROJECT_GROUPING_MODE_LABELS[projectGroupingSettings.sidebarProjectGroupingMode]}）`
                             : PROJECT_GROUPING_MODE_LABELS[groupingOverride]}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectPopup align="start" alignItemWithTrigger={false}>
                         <SelectItem hideIndicator value="inherit">
-                          Use global default
+                          使用全局默认
                         </SelectItem>
                         <SelectItem hideIndicator value="repository">
                           {PROJECT_GROUPING_MODE_LABELS.repository}
@@ -924,13 +916,13 @@ function ProjectDetail({
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Danger">
+      <SettingsSection title="危险操作">
         <SettingsRow
-          title={group.memberProjects.length > 1 ? "Remove grouped project" : "Remove project"}
+          title={group.memberProjects.length > 1 ? "移除分组工作空间" : "移除工作空间"}
           description={
             group.memberProjects.length > 1
-              ? `Deletes all ${group.memberProjects.length} checkout entries and their threads. Files on disk are not touched.`
-              : "Deletes the project entry and its threads. Files on disk are not touched."
+              ? `删除全部 ${group.memberProjects.length} 个检出目录及其任务，不会删除磁盘上的文件。`
+              : "删除工作空间及其任务，不会删除磁盘上的文件。"
           }
           control={
             <Button
@@ -938,7 +930,7 @@ function ProjectDetail({
               onClick={() => void removeMembers(group.memberProjects)}
             >
               <Trash2Icon />
-              {group.memberProjects.length > 1 ? "Remove all entries" : "Remove project"}
+              {group.memberProjects.length > 1 ? "移除全部条目" : "移除工作空间"}
             </Button>
           }
         />

@@ -10,6 +10,7 @@ import type {
   ScopedThreadRef,
   ServerProvider,
   ServerProviderSkill,
+  ScopedProjectRef,
   ThreadId,
 } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
@@ -109,6 +110,7 @@ import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { isFeishuConnectorConnected, useFeishuConnectorState } from "../../state/feishuConnector";
+import { WorkspacePicker } from "./WorkspacePicker";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -494,6 +496,8 @@ export interface ChatComposerProps {
   activeThreadId: ThreadId | null;
   activeThreadEnvironmentId: EnvironmentId | undefined;
   activeThread: Thread | undefined;
+  activeProjectRef: ScopedProjectRef | null;
+  activeProjectTitle: string | null;
   isServerThread: boolean;
   isLocalDraftThread: boolean;
   officeMode: boolean;
@@ -604,6 +608,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activeThreadId,
     activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
+    activeProjectRef,
+    activeProjectTitle,
     isServerThread: _isServerThread,
     isLocalDraftThread: _isLocalDraftThread,
     officeMode,
@@ -3045,6 +3051,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   skills={businessCapabilitySkills}
                   providerCatalogState={providerSkillCatalogState}
                   openRequest={fdSkillPickerOpenRequest}
+                />
+
+                <WorkspacePicker
+                  activeProjectRef={activeProjectRef}
+                  activeProjectTitle={activeProjectTitle}
                 />
 
                 {officeMode ? null : isComposerFooterCompact ? (

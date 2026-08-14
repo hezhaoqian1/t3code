@@ -273,7 +273,7 @@ export const ChatHeader = memo(function ChatHeader({
                   aria-label={`${activeThreadTitle} 的任务操作`}
                   aria-haspopup="menu"
                   onClick={openMenuFromTitle}
-                  className="group/thread-title inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                  className="group/thread-title inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                 />
               }
             >

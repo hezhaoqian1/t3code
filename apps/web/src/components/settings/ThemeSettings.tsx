@@ -115,7 +115,7 @@ function ThemeLibraryCard({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <button
-                    aria-label={`Use ${theme.label} theme${isActive ? ", currently active" : ""}`}
+                    aria-label={`使用 ${theme.label} 主题${isActive ? "，当前已启用" : ""}`}
                     aria-pressed={isActive}
                     className="min-w-0 cursor-pointer truncate rounded-sm text-left text-sm font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
                     type="button"
@@ -135,7 +135,7 @@ function ThemeLibraryCard({
                       <TooltipTrigger
                         render={
                           <Button
-                            aria-label={`Duplicate ${theme.label}`}
+                            aria-label={`复制 ${theme.label}`}
                             size="icon-xs"
                             variant="ghost"
                             onClick={(event) => {
@@ -147,7 +147,7 @@ function ThemeLibraryCard({
                           </Button>
                         }
                       />
-                      <TooltipPopup>Duplicate theme</TooltipPopup>
+                      <TooltipPopup>复制主题</TooltipPopup>
                     </Tooltip>
                   ) : null}
                   {onEdit ? (
@@ -155,7 +155,7 @@ function ThemeLibraryCard({
                       <TooltipTrigger
                         render={
                           <Button
-                            aria-label={`Edit ${theme.label}`}
+                            aria-label={`编辑 ${theme.label}`}
                             size="icon-xs"
                             variant="ghost"
                             onClick={(event) => {
@@ -167,7 +167,7 @@ function ThemeLibraryCard({
                           </Button>
                         }
                       />
-                      <TooltipPopup>Edit theme</TooltipPopup>
+                      <TooltipPopup>编辑主题</TooltipPopup>
                     </Tooltip>
                   ) : null}
                   {onDownload ? (
@@ -175,7 +175,7 @@ function ThemeLibraryCard({
                       <TooltipTrigger
                         render={
                           <Button
-                            aria-label={`Export ${theme.label}`}
+                            aria-label={`导出 ${theme.label}`}
                             size="icon-xs"
                             variant="ghost"
                             onClick={(event) => {
@@ -187,7 +187,7 @@ function ThemeLibraryCard({
                           </Button>
                         }
                       />
-                      <TooltipPopup>Export theme file</TooltipPopup>
+                      <TooltipPopup>导出主题文件</TooltipPopup>
                     </Tooltip>
                   ) : null}
                   {onRemove ? (
@@ -195,7 +195,7 @@ function ThemeLibraryCard({
                       <TooltipTrigger
                         render={
                           <Button
-                            aria-label={`Remove ${theme.label}`}
+                            aria-label={`移除 ${theme.label}`}
                             size="icon-xs"
                             variant="ghost"
                             className="text-muted-foreground hover:text-destructive"
@@ -208,7 +208,7 @@ function ThemeLibraryCard({
                           </Button>
                         }
                       />
-                      <TooltipPopup>Remove theme</TooltipPopup>
+                      <TooltipPopup>移除主题</TooltipPopup>
                     </Tooltip>
                   ) : null}
                 </div>
@@ -218,7 +218,9 @@ function ThemeLibraryCard({
         }
       />
       <TooltipPopup>
-        {cardModes.length > 1 ? "Use for both light and dark" : `Use for ${cardModes[0]} mode only`}
+        {cardModes.length > 1
+          ? "同时用于浅色和深色模式"
+          : `仅用于${cardModes[0] === "light" ? "浅色" : "深色"}模式`}
       </TooltipPopup>
     </Tooltip>
   );
@@ -263,8 +265,8 @@ export function ThemeLibrary({
     toastManager.add(
       stackedThreadToast({
         type: "error",
-        title: "Couldn’t save theme selection",
-        description: "Try again.",
+        title: "保存主题选择失败",
+        description: "请重试。",
       }),
     );
   }, []);
@@ -273,8 +275,8 @@ export function ThemeLibrary({
     toastManager.add(
       stackedThreadToast({
         type: "error",
-        title: "Couldn’t remove theme",
-        description: "Try again.",
+        title: "移除主题失败",
+        description: "请重试。",
       }),
     );
   }, []);
@@ -424,7 +426,7 @@ export function ThemeLibrary({
 
   const renderModeTiles = () => (
     <div
-      aria-label="Appearance mode"
+      aria-label="外观模式"
       className="mx-auto grid w-full max-w-[56rem] grid-cols-3 gap-3 px-3 sm:px-4"
       role="group"
     >
@@ -432,7 +434,13 @@ export function ThemeLibrary({
         const isActive = appearanceMode === mode;
         return (
           <button
-            aria-label={mode === "system" ? "Follow the system appearance" : `Use ${mode} mode`}
+            aria-label={
+              mode === "system"
+                ? "跟随系统外观"
+                : mode === "light"
+                  ? "使用浅色模式"
+                  : "使用深色模式"
+            }
             aria-pressed={isActive}
             className={cn(
               "flex cursor-pointer flex-col items-stretch gap-1.5 rounded-xl border p-2 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
@@ -452,7 +460,7 @@ export function ThemeLibrary({
                 isActive ? "text-foreground" : "text-muted-foreground",
               )}
             >
-              {mode === "system" ? "System" : mode === "light" ? "Light" : "Dark"}
+              {mode === "system" ? "跟随系统" : mode === "light" ? "浅色" : "深色"}
             </span>
           </button>
         );
@@ -491,7 +499,7 @@ export function ThemeLibrary({
                 openThemeEditor({
                   editingThemeId: null,
                   seedThemeId: maintainerTheme.id,
-                  seedName: `${maintainerTheme.label} copy`,
+                  seedName: `${maintainerTheme.label} 副本`,
                   initialAppearance,
                 })
               }
@@ -512,7 +520,7 @@ export function ThemeLibrary({
                 openThemeEditor({
                   editingThemeId: null,
                   seedThemeId: customTheme.id,
-                  seedName: `${customTheme.label} copy`,
+                  seedName: `${customTheme.label} 副本`,
                   initialAppearance,
                 })
               }
@@ -545,14 +553,14 @@ export function ThemeLibrary({
   return (
     <div className="space-y-3">
       <p className="px-3 text-[13px] leading-[1.45] text-muted-foreground/80 sm:px-4">
-        Choose how 方德 AI looks. Use a built-in theme or make your own.
+        选择方德 AI 的界面外观，可使用内置主题或创建自定义主题。
       </p>
       <h3 className="px-3 text-sm font-medium tracking-[-0.005em] text-foreground sm:px-4">
-        Color scheme
+        配色方案
       </h3>
       {renderModeTiles()}
       <div className="flex min-h-8 flex-wrap items-center justify-between gap-3 px-3 pt-2 sm:px-4">
-        <h3 className="text-sm font-medium tracking-[-0.005em] text-foreground">Themes</h3>
+        <h3 className="text-sm font-medium tracking-[-0.005em] text-foreground">主题</h3>
         <div className="flex flex-wrap items-center justify-end gap-3">
           <Button
             className="h-7 rounded-md border border-border/70 bg-muted/30 px-2 text-xs font-medium text-foreground shadow-none hover:bg-accent/40"
@@ -568,11 +576,11 @@ export function ThemeLibrary({
             }
           >
             <PlusIcon />
-            Create theme
+            创建主题
           </Button>
           <Button size="xs" variant="ghost" onClick={() => onImportOpenChange(true)}>
             <UploadIcon />
-            Import theme
+            导入主题
           </Button>
         </div>
       </div>
@@ -592,15 +600,15 @@ export function ThemeLibrary({
           ) {
             refreshTheme();
           }
-          const verb = updated ? "updated" : "added";
+          const verb = updated ? "已更新" : "已添加";
           toastManager.add(
             stackedThreadToast({
               type: "success",
               title:
                 importedThemes.length === 1
-                  ? `${importedThemes[0]!.label} ${verb}`
-                  : `${importedThemes.length} themes ${verb}`,
-              description: importedThemes.map((imported) => imported.label).join(", "),
+                  ? `${importedThemes[0]!.label}${verb}`
+                  : `${importedThemes.length} 个主题${verb}`,
+              description: importedThemes.map((imported) => imported.label).join("、"),
             }),
           );
         }}
@@ -613,8 +621,8 @@ export function ThemeLibrary({
             toastManager.add(
               stackedThreadToast({
                 type: "success",
-                title: `${importedTheme.label} added`,
-                description: `It’s now your ${modes[0]!} theme.`,
+                title: `${importedTheme.label} 已添加`,
+                description: `已设为${modes[0] === "light" ? "浅色" : "深色"}主题。`,
               }),
             );
             return true;
@@ -623,8 +631,8 @@ export function ThemeLibrary({
           toastManager.add(
             stackedThreadToast({
               type: "success",
-              title: `${importedTheme.label} added`,
-              description: "It’s now active.",
+              title: `${importedTheme.label} 已添加`,
+              description: "主题已启用。",
             }),
           );
           return true;
@@ -640,15 +648,15 @@ export function ThemeLibrary({
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove “{removeDialogTheme?.label}”?</AlertDialogTitle>
+            <AlertDialogTitle>移除“{removeDialogTheme?.label}”？</AlertDialogTitle>
             <AlertDialogDescription>
-              You can bring it back anytime by importing its JSON file.
+              以后仍可通过导入对应的 JSON 文件恢复此主题。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>取消</AlertDialogClose>
             <Button variant="destructive" onClick={handleConfirmRemoveTheme}>
-              Remove theme
+              移除主题
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

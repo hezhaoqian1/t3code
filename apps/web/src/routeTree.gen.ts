@@ -15,6 +15,7 @@ import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsSourceControlRouteImport } from './routes/settings.source-control'
+import { Route as SettingsSettledRouteImport } from './routes/settings.settled'
 import { Route as SettingsProjectsRouteImport } from './routes/settings.projects'
 import { Route as SettingsKeybindingsRouteImport } from './routes/settings.keybindings'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
@@ -53,6 +54,11 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
 const SettingsSourceControlRoute = SettingsSourceControlRouteImport.update({
   id: '/source-control',
   path: '/source-control',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSettledRoute = SettingsSettledRouteImport.update({
+  id: '/settled',
+  path: '/settled',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsProjectsRoute = SettingsProjectsRouteImport.update({
@@ -120,6 +126,7 @@ export interface FileRoutesByFullPath {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/projects': typeof SettingsProjectsRoute
+  '/settings/settled': typeof SettingsSettledRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
   '/settings/projects/$projectKey': typeof SettingsProjectsProjectKeyRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/projects': typeof SettingsProjectsRoute
+  '/settings/settled': typeof SettingsSettledRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/': typeof ChatIndexRoute
   '/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/keybindings': typeof SettingsKeybindingsRoute
   '/settings/projects': typeof SettingsProjectsRoute
+  '/settings/settled': typeof SettingsSettledRoute
   '/settings/source-control': typeof SettingsSourceControlRoute
   '/_chat/': typeof ChatIndexRoute
   '/_chat/draft/$draftId': typeof ChatDraftDraftIdRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/keybindings'
     | '/settings/projects'
+    | '/settings/settled'
     | '/settings/source-control'
     | '/draft/$draftId'
     | '/settings/projects/$projectKey'
@@ -191,6 +201,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/keybindings'
     | '/settings/projects'
+    | '/settings/settled'
     | '/settings/source-control'
     | '/'
     | '/draft/$draftId'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/settings/general'
     | '/settings/keybindings'
     | '/settings/projects'
+    | '/settings/settled'
     | '/settings/source-control'
     | '/_chat/'
     | '/_chat/draft/$draftId'
@@ -264,6 +276,13 @@ declare module '@tanstack/react-router' {
       path: '/source-control'
       fullPath: '/settings/source-control'
       preLoaderRoute: typeof SettingsSourceControlRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/settled': {
+      id: '/settings/settled'
+      path: '/settled'
+      fullPath: '/settings/settled'
+      preLoaderRoute: typeof SettingsSettledRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/projects': {
@@ -361,6 +380,7 @@ interface SettingsRouteChildren {
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsKeybindingsRoute: typeof SettingsKeybindingsRoute
   SettingsProjectsRoute: typeof SettingsProjectsRoute
+  SettingsSettledRoute: typeof SettingsSettledRoute
   SettingsSourceControlRoute: typeof SettingsSourceControlRoute
   SettingsProjectsProjectKeyRoute: typeof SettingsProjectsProjectKeyRoute
 }
@@ -373,6 +393,7 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsKeybindingsRoute: SettingsKeybindingsRoute,
   SettingsProjectsRoute: SettingsProjectsRoute,
+  SettingsSettledRoute: SettingsSettledRoute,
   SettingsSourceControlRoute: SettingsSourceControlRoute,
   SettingsProjectsProjectKeyRoute: SettingsProjectsProjectKeyRoute,
 }
