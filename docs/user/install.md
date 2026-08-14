@@ -10,7 +10,8 @@
 - Windows x64
 - macOS Apple Silicon
 
-正式安装包必须经过平台签名。不要使用聊天文件、个人网盘或其他来源的安装包。
+当前公司内部版本不做平台签名，首次安装时 macOS Gatekeeper 或 Windows SmartScreen 可能会
+显示安全提示。只从方德 AI 下载页获取安装包，不要使用聊天文件、个人网盘或其他来源的安装包。
 
 ## 首次使用
 

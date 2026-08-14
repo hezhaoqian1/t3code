@@ -1,13 +1,9 @@
-# Organizing threads
+# 整理任务
 
-Pin a thread from its context menu to keep it in the pinned section above your active work.
-Pinned threads are shown independently of their project, including when you connect to more than
-one environment.
+主侧栏只显示当前仍需处理的任务。任务完成后可以在任务菜单中选择**归纳**，归纳任务不会继续占用主任务列表。
 
-On web and desktop, drag a pinned thread to change its position. On mobile, open the thread's menu
-and choose **Move up** or **Move down**. The order is stored by the server and appears on your
-other connected devices.
+在**设置 > 已归纳任务**中可以查看所有归纳任务。选择**恢复任务**后，该任务会重新回到主任务列表。归纳只是整理显示位置，不会删除任务、会话历史或工作空间文件。
 
-If reordering is unavailable for one environment, update the T3 Code server running in that
-environment. Older servers can still pin and unpin threads, but do not understand synced ordering;
-their pinned threads keep the default newest-first order below the ones you have arranged.
+置顶任务和已设置稍后提醒的任务不会进入归纳列表。启用自动归纳后，超过设定天数没有活动的任务会自动归纳；关联的变更请求已经合并或关闭时也会自动归纳。自动归纳天数和归纳确认可在通用设置中调整。
+
+需要长期保留在主列表顶部的任务可以在任务菜单中选择**置顶**。置顶顺序会由服务端保存，并在同一账号的其他客户端中同步。

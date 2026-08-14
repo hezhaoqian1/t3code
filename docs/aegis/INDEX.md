@@ -36,3 +36,4 @@ records, not authoritative runtime decisions.
 | 2026-08-11 | artifact | docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-10-final-quality-gate.json         | 2026-08-09-fd-ai-desktop evidence task-10-final-quality-gate         |
 | 2026-08-11 | artifact | docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-11a-codex-compatibility-local.json | 2026-08-09-fd-ai-desktop evidence task-11a-codex-compatibility-local |
 | 2026-08-11 | adr      | docs/aegis/adr/ADR-0001-first-send-task-projects.md                                                    | ADR-0001 - Use first-send typed projects for no-workspace tasks      |
+| 2026-08-14 | plan     | docs/aegis/plans/2026-08-14-fd-desktop-0.2.7.md                                                        | FD AI Desktop 0.2.7 usability release                                |
