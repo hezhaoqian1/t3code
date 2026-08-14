@@ -9,12 +9,14 @@ export interface NewApiResponse {
 export class NewApiHttpError extends Error {
   readonly kind: "unauthorized" | "unavailable";
   readonly code: string | undefined;
+  readonly status: number | undefined;
 
-  constructor(kind: "unauthorized" | "unavailable", code?: string) {
+  constructor(kind: "unauthorized" | "unavailable", code?: string, status?: number) {
     super("New API request failed");
     this.name = "NewApiHttpError";
     this.kind = kind;
     this.code = code;
+    this.status = status;
   }
 }
 
@@ -62,6 +64,7 @@ export class NewApiHttpClient {
         throw new NewApiHttpError(
           response.status === 401 || response.status === 403 ? "unauthorized" : "unavailable",
           body.code,
+          response.status,
         );
       }
       return { body, setCookies: responseCookies(response.headers) };

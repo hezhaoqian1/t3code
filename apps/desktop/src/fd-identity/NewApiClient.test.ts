@@ -176,14 +176,52 @@ describe("NewApiClient", () => {
   });
 
   it.each([
-    ["invalid credentials", jsonResponse({ success: false }), "invalid_credentials"],
-    ["offline", new Response(JSON.stringify(apiSuccess()), { status: 503 }), "service_unavailable"],
-  ])("maps %s to a typed login failure", async (_name, response, code) => {
+    [
+      "invalid credentials",
+      jsonResponse({ success: false }),
+      "invalid_credentials",
+      "用户名或密码不正确",
+    ],
+    [
+      "active-session limit",
+      jsonResponse(
+        { success: false, code: "AUTH_SESSION_LIMIT", message: "Too many sessions" },
+        { status: 409 },
+      ),
+      "account_unavailable",
+      "当前账号活跃登录会话过多，请先撤销旧设备的登录会话后重试",
+    ],
+    [
+      "login-attempt limit",
+      jsonResponse(
+        { success: false, code: "AUTH_SESSION_ISSUANCE_LIMIT", message: "Too many attempts" },
+        { status: 429 },
+      ),
+      "account_unavailable",
+      "登录尝试次数过多，请稍后重试",
+    ],
+    [
+      "offline",
+      new Response(JSON.stringify(apiSuccess()), { status: 503 }),
+      "service_unavailable",
+      "企业 AI 服务暂时不可用",
+    ],
+    [
+      "unrelated conflict",
+      jsonResponse(
+        { success: false, code: "AUTH_SESSION_MISMATCH", message: "Conflict" },
+        { status: 409 },
+      ),
+      "service_unavailable",
+      "企业 AI 服务暂时不可用",
+    ],
+  ])("maps %s to a typed login failure", async (_name, response, code, message) => {
     const fetch = responseQueue([response]);
     const client = new NewApiClient({ baseUrl: "http://127.0.0.1:3001", fetch });
 
     await expect(client.authenticate("employee", "password-secret")).rejects.toMatchObject({
       code,
+      message,
     });
     expect(request(fetch, 0).path).toBe("/api/user/login");
   });
@@ -265,6 +303,23 @@ describe("NewApiClient", () => {
       client.refreshPendingRevocation({ ...revocation(), accessExpiresAt: 1 }),
     ).resolves.toMatchObject({ accessToken: "access-secret", userId: 31 });
     expect(request(fetch, 0)).toMatchObject({ path: "/api/user/auth/refresh", method: "POST" });
+  });
+
+  it("maps session issuance limits during pending revocation refresh without outage copy", async () => {
+    const fetch = responseQueue([
+      jsonResponse(
+        { success: false, code: "AUTH_SESSION_ISSUANCE_LIMIT", message: "Too many attempts" },
+        { status: 429 },
+      ),
+    ]);
+    const client = new NewApiClient({ baseUrl: "http://127.0.0.1:3001", fetch });
+
+    await expect(
+      client.refreshPendingRevocation({ ...revocation(), accessExpiresAt: 1 }),
+    ).rejects.toMatchObject({
+      code: "account_unavailable",
+      message: "登录尝试次数过多，请稍后重试",
+    });
   });
 
   it("recovers an expired pending session mismatch without the stale SID", async () => {

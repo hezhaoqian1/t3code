@@ -400,6 +400,8 @@ export class NewApiClient {
       if (error instanceof NewApiHttpError && error.kind === "unauthorized") {
         throw new NewApiClientError("account_unavailable", "登录已失效，请重新登录");
       }
+      const loginSessionLimit = mapLoginSessionLimitError(error);
+      if (loginSessionLimit) throw loginSessionLimit;
       throw new NewApiClientError("service_unavailable", "企业 AI 服务暂时不可用");
     }
   }
@@ -579,6 +581,8 @@ function mapLogoutError(error: unknown): NewApiClientError {
   if (error instanceof NewApiHttpError && error.kind === "unauthorized") {
     return new NewApiClientError("account_unavailable", "远程登录会话退出失败");
   }
+  const loginSessionLimit = mapLoginSessionLimitError(error);
+  if (loginSessionLimit) return loginSessionLimit;
   return new NewApiClientError("service_unavailable", "企业 AI 服务暂时不可用");
 }
 
@@ -587,7 +591,30 @@ function mapSessionRefreshError(error: unknown): NewApiClientError {
   if (error instanceof NewApiHttpError && error.kind === "unauthorized") {
     return new NewApiClientError("account_unavailable", "登录已失效，请重新登录");
   }
+  const loginSessionLimit = mapLoginSessionLimitError(error);
+  if (loginSessionLimit) return loginSessionLimit;
   return new NewApiClientError("service_unavailable", "企业 AI 服务暂时不可用");
+}
+
+function mapLoginSessionLimitError(error: unknown): NewApiClientError | null {
+  if (
+    error instanceof NewApiHttpError &&
+    error.status === 409 &&
+    error.code === "AUTH_SESSION_LIMIT"
+  ) {
+    return new NewApiClientError(
+      "account_unavailable",
+      "当前账号活跃登录会话过多，请先撤销旧设备的登录会话后重试",
+    );
+  }
+  if (
+    error instanceof NewApiHttpError &&
+    error.status === 429 &&
+    error.code === "AUTH_SESSION_ISSUANCE_LIMIT"
+  ) {
+    return new NewApiClientError("account_unavailable", "登录尝试次数过多，请稍后重试");
+  }
+  return null;
 }
 
 function throwRevocationIncomplete(deleteError: unknown): never {
