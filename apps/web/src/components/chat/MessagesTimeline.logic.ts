@@ -183,6 +183,8 @@ export type MessagesTimelineRow =
       turnId: TurnId;
       label: string;
       expanded: boolean;
+      active: boolean;
+      startedAt: string | null;
     }
   | {
       kind: "message";
@@ -286,6 +288,8 @@ interface TurnFold {
   createdAt: string;
   hiddenEntryIds: ReadonlySet<string>;
   label: string;
+  active: boolean;
+  startedAt: string | null;
 }
 
 /**
@@ -311,15 +315,16 @@ function deriveUnsettledTurnId(
 }
 
 /**
- * Settled turns fold their commentary and tool activity behind a
- * "Worked for ..." row anchored at the turn's first foldable entry; the
- * terminal assistant message stays visible below the fold.
+ * Turns fold their commentary and tool activity behind one employee-friendly
+ * progress row. Settled turns keep the terminal answer visible; the active
+ * turn stays expandable without placing operational narration in the main flow.
  */
 function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   terminalAssistantMessageIds: ReadonlySet<string>;
   latestTurn: TimelineLatestTurn | null;
   unsettledTurnId: TurnId | null;
+  activeTurnStartedAt: string | null;
 }): ReadonlyMap<string, TurnFold> {
   interface TurnGroup {
     entries: Array<TimelineEntry>;
@@ -377,15 +382,19 @@ function deriveTurnFolds(input: {
 
   const foldsByAnchorEntryId = new Map<string, TurnFold>();
   for (const [turnId, group] of groupsByTurnId) {
-    if (turnId === input.unsettledTurnId) {
-      continue;
-    }
-    if (group.hasStreamingMessage) {
+    const active = turnId === input.unsettledTurnId;
+    if (!active && group.hasStreamingMessage) {
       continue;
     }
     const hiddenEntryIds = new Set<string>();
     for (const entry of group.entries) {
-      if (entry.id === group.terminalEntry?.id) {
+      if (!active && entry.id === group.terminalEntry?.id) {
+        continue;
+      }
+      // Keep the answer visible once the provider starts streaming it. Earlier
+      // non-streaming assistant updates are operational commentary and belong
+      // inside the expandable progress row while the turn is active.
+      if (active && entry.kind === "message" && entry.message.streaming) {
         continue;
       }
       // Agent-spawn CTA rows never fold: workflows outlive their launching
@@ -423,13 +432,15 @@ function deriveTurnFolds(input: {
               lastEntryEnd,
           );
     const duration = elapsedMs !== null ? formatDuration(elapsedMs) : null;
-    const label = isLatestInterruptedTurn
-      ? duration
-        ? `You stopped after ${duration}`
-        : "You stopped this response"
-      : duration
-        ? `Worked for ${duration}`
-        : "Worked";
+    const label = active
+      ? "正在处理"
+      : isLatestInterruptedTurn
+        ? duration
+          ? `已停止 · ${duration}`
+          : "已停止"
+        : duration
+          ? `已处理 ${duration}`
+          : "已处理";
 
     foldsByAnchorEntryId.set(firstEntry.id, {
       turnId,
@@ -437,6 +448,8 @@ function deriveTurnFolds(input: {
       createdAt: firstEntry.createdAt,
       hiddenEntryIds,
       label,
+      active,
+      startedAt: active ? input.activeTurnStartedAt : null,
     });
   }
   return foldsByAnchorEntryId;
@@ -467,6 +480,7 @@ export function deriveMessagesTimelineRows(input: {
     terminalAssistantMessageIds,
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
+    activeTurnStartedAt: input.activeTurnStartedAt,
   });
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
@@ -492,6 +506,8 @@ export function deriveMessagesTimelineRows(input: {
         turnId: turnFold.turnId,
         label: turnFold.label,
         expanded: input.expandedTurnIds?.has(turnFold.turnId) ?? false,
+        active: turnFold.active,
+        startedAt: turnFold.startedAt,
       });
     }
 
@@ -629,7 +645,8 @@ export function deriveMessagesTimelineRows(input: {
     });
   }
 
-  if (input.isWorking) {
+  const hasActiveFold = [...foldsByAnchorEntryId.values()].some((fold) => fold.active);
+  if (input.isWorking && !hasActiveFold) {
     nextRows.push({
       kind: "working",
       id: "working-indicator-row",
@@ -670,7 +687,13 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
 
     case "turn-fold": {
       const bf = b as typeof a;
-      return a.createdAt === bf.createdAt && a.label === bf.label && a.expanded === bf.expanded;
+      return (
+        a.createdAt === bf.createdAt &&
+        a.label === bf.label &&
+        a.expanded === bf.expanded &&
+        a.active === bf.active &&
+        a.startedAt === bf.startedAt
+      );
     }
 
     case "proposed-plan":

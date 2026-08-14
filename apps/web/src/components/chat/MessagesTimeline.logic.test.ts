@@ -324,7 +324,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
   });
 
-  it("marks only the active assistant turn as streaming for copy controls", () => {
+  it("folds non-streaming assistant commentary while the turn is active", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -373,8 +373,16 @@ describe("deriveMessagesTimelineRows", () => {
         row.kind === "message" && row.message.role === "assistant",
     );
 
+    expect(assistantRows).toHaveLength(1);
+    expect(assistantRows[0]?.message.id).toBe("assistant-one");
     expect(assistantRows[0]?.assistantCopyStreaming).toBe(false);
-    expect(assistantRows[1]?.assistantCopyStreaming).toBe(true);
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        kind: "turn-fold",
+        turnId: "turn-2",
+        active: true,
+      }),
+    );
   });
 
   it("projects assistant diff summaries and user revert counts onto the affected rows", () => {
@@ -513,7 +521,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(foldRow?.turnId).toBe("turn-1");
     expect(foldRow?.expanded).toBe(false);
     // User message boundary (00:00:00) → terminal message updatedAt (00:00:22).
-    expect(foldRow?.label).toBe("Worked for 22s");
+    expect(foldRow?.label).toBe("已处理 22s");
     expect(collapsedRows.map((row) => row.id)).toEqual([
       "user-entry",
       "turn-fold:turn-1",
@@ -635,7 +643,7 @@ describe("deriveMessagesTimelineRows", () => {
     );
     // User message (00:00:00) → trailing work entry (00:00:12).
     expect(foldRow?.turnId).toBe("turn-1");
-    expect(foldRow?.label).toBe("Worked for 12s");
+    expect(foldRow?.label).toBe("已处理 12s");
   });
 
   it("uses latest-turn timings and the stopped label for an interrupted latest turn", () => {
@@ -670,8 +678,10 @@ describe("deriveMessagesTimelineRows", () => {
       expect.objectContaining({
         kind: "turn-fold",
         turnId: "turn-1",
-        label: "You stopped after 47s",
+        label: "已停止 · 47s",
         expanded: false,
+        active: false,
+        startedAt: null,
       }),
     ]);
   });
@@ -744,7 +754,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(finalRow?.kind === "message" && finalRow.showAssistantMeta).toBe(true);
   });
 
-  it("does not fold the active in-progress turn", () => {
+  it("folds the active turn into one expandable progress row", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -786,11 +796,15 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    expect(rows.some((row) => row.kind === "turn-fold")).toBe(false);
-    expect(rows.map((row) => row.id)).toEqual([
-      "assistant-thought-entry",
-      "work-entry-1",
-      "working-indicator-row",
+    expect(rows).toEqual([
+      expect.objectContaining({
+        id: "turn-fold:turn-1",
+        kind: "turn-fold",
+        label: "正在处理",
+        active: true,
+        startedAt: "2026-01-01T00:00:00Z",
+        expanded: false,
+      }),
     ]);
   });
 
@@ -851,8 +865,9 @@ describe("deriveMessagesTimelineRows", () => {
 
     expect(rows.filter((row) => row.kind === "turn-fold").map((row) => row.turnId)).toEqual([
       "turn-1",
+      "turn-2",
     ]);
-    expect(rows.map((row) => row.id)).toContain("running-work-entry");
+    expect(rows.map((row) => row.id)).not.toContain("running-work-entry");
   });
 
   it("only shows assistant metadata on the terminal assistant message", () => {
@@ -902,7 +917,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows.map((row) => row.showAssistantMeta)).toEqual([false, true]);
   });
 
-  it("withholds assistant metadata while the active turn is still in progress", () => {
+  it("keeps active assistant commentary inside the progress fold", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -932,13 +947,60 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    const assistantRow = rows.find(
-      (row): row is Extract<(typeof rows)[number], { kind: "message" }> =>
-        row.kind === "message" && row.message.role === "assistant",
-    );
+    expect(rows).toEqual([
+      expect.objectContaining({
+        kind: "turn-fold",
+        turnId: "turn-1",
+        active: true,
+      }),
+    ]);
+  });
 
-    expect(assistantRow?.showAssistantMeta).toBe(false);
-    expect(assistantRow?.showAssistantCopyButton).toBe(false);
+  it("keeps a streaming assistant answer visible below the active progress fold", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:05Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:05Z",
+            turnId: "turn-1" as never,
+            label: "Ran command",
+            tone: "tool" as const,
+          },
+        },
+        {
+          id: "assistant-answer-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: "assistant-answer" as never,
+            role: "assistant",
+            text: "Here is the answer",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:10Z",
+            updatedAt: "2026-01-01T00:00:11Z",
+            streaming: true,
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual(["turn-fold:turn-1", "assistant-answer-entry"]);
+    const assistantRow = rows[1];
+    expect(assistantRow?.kind === "message" && assistantRow.assistantCopyStreaming).toBe(true);
   });
 
   it("models work log overflow expansion as inserted list rows", () => {

@@ -5854,11 +5854,7 @@ function ChatViewContent(props: ChatViewProps) {
                             : undefined
                         }
                       >
-                        <DraftHeroHeadline
-                          activeProjectRef={activeProjectRef}
-                          activeProjectTitle={activeProject?.title ?? null}
-                          officeMode={isOfficeMode}
-                        />
+                        <DraftHeroHeadline officeMode={isOfficeMode} />
                       </div>
                       <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                     </div>
@@ -5894,6 +5890,8 @@ function ChatViewContent(props: ChatViewProps) {
                             activeThreadId={activeThreadId}
                             activeThreadEnvironmentId={activeThread?.environmentId}
                             activeThread={activeThread}
+                            activeProjectRef={activeProjectRef}
+                            activeProjectTitle={activeProject?.title ?? null}
                             isServerThread={isServerThread}
                             isLocalDraftThread={isLocalDraftThread}
                             officeMode={isOfficeMode}

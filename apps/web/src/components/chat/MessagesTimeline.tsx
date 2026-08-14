@@ -1076,31 +1076,50 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             variant="ghost"
             disabled={activity.isRevertingCheckpoint || activity.isWorking}
             onClick={() => ctx.onRevertUserMessage(messageId)}
-            aria-label="Revert to this message"
+            aria-label="回退到此消息"
           />
         }
       >
         <Undo2Icon className="size-3" />
       </TooltipTrigger>
-      <TooltipPopup side="top">Revert to this message</TooltipPopup>
+      <TooltipPopup side="top">回退到此消息</TooltipPopup>
     </Tooltip>
   );
 }
 
 function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
   const ctx = use(TimelineRowCtx);
+  const { workingStepLabel } = use(TimelineRowActivityCtx);
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
 
   return (
-    <div className="border-b border-border/60 pb-2 pt-1">
+    <div className={cn(row.active ? "pb-1 pt-0.5" : "border-b border-border/60 pb-2 pt-1")}>
       <button
         type="button"
         aria-expanded={row.expanded}
         data-scroll-anchor-ignore
         onClick={() => ctx.onToggleTurnFold(row.turnId)}
-        className="flex cursor-pointer select-none items-center gap-1 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+        className="flex max-w-full cursor-pointer select-none items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground tabular-nums transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
       >
-        <span>{row.label}</span>
+        {row.active ? (
+          <span className="inline-flex shrink-0 items-center gap-[3px]" aria-hidden>
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse" />
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse [animation-delay:200ms]" />
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse [animation-delay:400ms]" />
+          </span>
+        ) : null}
+        <span className="shrink-0">
+          {row.label}
+          {row.active && row.startedAt ? (
+            <>
+              {" "}
+              <WorkingTimer createdAt={row.startedAt} />
+            </>
+          ) : null}
+        </span>
+        {row.active && workingStepLabel ? (
+          <span className="min-w-0 truncate text-muted-foreground/60">· {workingStepLabel}</span>
+        ) : null}
         <Icon className="size-3.5" />
       </button>
     </div>
@@ -1296,10 +1315,10 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
         <span className="shrink-0">
           {row.createdAt ? (
             <>
-              Working for <WorkingTimer createdAt={row.createdAt} />
+              正在处理 <WorkingTimer createdAt={row.createdAt} />
             </>
           ) : (
-            "Working..."
+            "正在处理…"
           )}
         </span>
         {workingStepLabel ? (
@@ -1315,7 +1334,7 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
 
-/** Live "Working for Xs" label. */
+/** Live elapsed-time label for the compact progress row. */
 function WorkingTimer({ createdAt }: { createdAt: string }) {
   const textRef = useRef<HTMLSpanElement>(null);
   const initialText = formatWorkingTimerNow(createdAt);
@@ -1357,9 +1376,9 @@ const WorkGroupSection = memo(function WorkGroupSection({
   const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry));
   const groupLabel = onlyToolEntries
     ? nonEmptyEntries.length === 1
-      ? "1 tool call"
-      : `${nonEmptyEntries.length} tool calls`
-    : "Work Log";
+      ? "1 项操作"
+      : `${nonEmptyEntries.length} 项操作`
+    : "执行记录";
 
   if (nonEmptyEntries.length === 0) return null;
 
@@ -1387,13 +1406,7 @@ function WorkGroupToggleTimelineRow({
   row: Extract<TimelineRow, { kind: "work-toggle" }>;
 }) {
   const ctx = use(TimelineRowCtx);
-  const labelNoun = row.onlyToolEntries
-    ? row.hiddenCount === 1
-      ? "tool call"
-      : "tool calls"
-    : row.hiddenCount === 1
-      ? "log entry"
-      : "log entries";
+  const labelNoun = row.onlyToolEntries ? "项操作" : "条记录";
 
   return (
     <button
@@ -1412,11 +1425,11 @@ function WorkGroupToggleTimelineRow({
       </span>
       {row.expanded ? (
         <span className="font-medium text-foreground">
-          Show fewer {row.onlyToolEntries ? "tool calls" : "log entries"}
+          收起{row.onlyToolEntries ? "操作" : "记录"}
         </span>
       ) : (
         <span className="font-medium text-foreground">
-          +{row.hiddenCount} previous {labelNoun}
+          还有 {row.hiddenCount} {labelNoun}
         </span>
       )}
     </button>
