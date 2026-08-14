@@ -34,6 +34,7 @@ import * as Stream from "effect/Stream";
 import * as CodexErrors from "effect-codex-app-server/errors";
 
 import { ServerConfig } from "../../config.ts";
+import { createAttachmentId, resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
@@ -235,7 +236,7 @@ const validationLayer = it.layer(
       });
     }),
   ).pipe(
-    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "codex-adapter-session-" })),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
@@ -404,6 +405,49 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
             path: "/tmp/fd-project/.agents/skills/weekly-report/SKILL.md",
           },
         ],
+      });
+    }),
+  );
+
+  it.effect("passes persisted images to Codex as localImage inputs", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const serverConfig = yield* ServerConfig;
+      const threadId = asThreadId("sess-image");
+      const attachmentId = createAttachmentId(threadId);
+      NodeAssert.ok(attachmentId);
+      const attachment = {
+        type: "image" as const,
+        id: attachmentId,
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 4,
+      };
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      NodeAssert.ok(attachmentPath);
+      NodeFS.writeFileSync(attachmentPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* adapter.sendTurn({
+        threadId,
+        input: "这张图里有什么？",
+        attachments: [attachment],
+      });
+
+      NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
+        input: "这张图里有什么？",
+        attachments: [{ type: "localImage", path: attachmentPath }],
       });
     }),
   );

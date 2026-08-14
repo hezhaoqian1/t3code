@@ -1818,20 +1818,27 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         detail: `Invalid attachment id '${attachment.id}'.`,
       });
     }
-    const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+    const attachmentExists = yield* fileSystem.exists(attachmentPath).pipe(
       Effect.mapError(
         (cause) =>
           new ProviderAdapterRequestError({
             provider: PROVIDER,
             method: "turn/start",
-            detail: `Failed to read attachment file: ${cause.message}.`,
+            detail: `Failed to inspect attachment file: ${cause.message}.`,
             cause,
           }),
       ),
     );
+    if (!attachmentExists) {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: `Attachment file '${attachment.id}' is missing.`,
+      });
+    }
     return {
-      type: "image" as const,
-      url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+      type: "localImage" as const,
+      path: attachmentPath,
     };
   });
 

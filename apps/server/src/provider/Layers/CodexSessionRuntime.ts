@@ -153,8 +153,8 @@ export interface CodexSessionRuntimeSendTurnInput {
     readonly path: string;
   }>;
   readonly attachments?: ReadonlyArray<{
-    readonly type: "image";
-    readonly url: string;
+    readonly type: "localImage";
+    readonly path: string;
   }>;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
@@ -419,8 +419,8 @@ export function buildTurnStartParams(input: {
     readonly path: string;
   }>;
   readonly attachments?: ReadonlyArray<{
-    readonly type: "image";
-    readonly url: string;
+    readonly type: "localImage";
+    readonly path: string;
   }>;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier;
