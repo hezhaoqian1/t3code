@@ -45,13 +45,13 @@ function SidebarBrand() {
     <Link
       aria-label="返回任务列表"
       className={cn(
-        "sidebar-brand relative z-10 ml-[var(--workspace-titlebar-content-left)] h-7 w-fit min-w-0 shrink-0 items-center gap-1 overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2",
+        "sidebar-brand relative z-10 ml-[var(--workspace-titlebar-content-left)] h-9 w-fit min-w-0 shrink-0 items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2",
         "text-foreground",
       )}
       to="/"
     >
       <img
-        className="h-4 w-auto max-w-24 object-contain dark:brightness-0 dark:invert"
+        className="h-6 w-auto max-w-32 object-contain dark:brightness-0 dark:invert"
         src={fdsureWordmark}
         alt="方德 AI"
       />
