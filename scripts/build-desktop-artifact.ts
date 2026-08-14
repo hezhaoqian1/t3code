@@ -1277,6 +1277,9 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       target: target === "dmg" ? [target, "zip"] : [target],
       icon: "icon.icns",
       category: "public.app-category.developer-tools",
+      // Internal builds use ad-hoc sealing so Gatekeeper sees one coherent app
+      // bundle without requiring a Developer ID certificate.
+      ...(signed ? {} : { identity: "-" }),
       protocols: [
         {
           name: "Fangde AI",
@@ -1779,6 +1782,27 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     label: "packaged codex --version",
     verbose: options.verbose,
   });
+  if (options.platform === "mac") {
+    const macDirectory = options.arch === "arm64" ? "mac-arm64" : "mac";
+    const packagedAppPath = path.join(
+      stageDistDir,
+      macDirectory,
+      `${resolveDesktopProductName(appVersion)}.app`,
+    );
+    yield* runCommand(
+      ChildProcess.make("codesign", [
+        "--verify",
+        "--deep",
+        "--strict",
+        "--verbose=2",
+        packagedAppPath,
+      ]),
+      {
+        label: "codesign --verify packaged macOS app",
+        verbose: options.verbose,
+      },
+    );
+  }
 
   const stageEntries = yield* fs.readDirectory(stageDistDir);
   yield* fs.makeDirectory(options.outputDir, { recursive: true });

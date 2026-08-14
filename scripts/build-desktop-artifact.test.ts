@@ -317,6 +317,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       ]);
       assert.equal(mac.appId, "com.fdsure.enterprise-ai");
       assert.equal(mac.artifactName, "FD-Enterprise-AI-${version}-${os}-${arch}.${ext}");
+      assert.equal((mac.mac as Record<string, unknown>).identity, "-");
       assert.deepStrictEqual(mac.publish, [
         {
           provider: "generic",
@@ -378,6 +379,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       const mac = config.mac as Record<string, unknown>;
       assert.equal(config.appId, "com.fdsure.enterprise-ai");
       assert.equal(config.forceCodeSigning, true);
+      assert.notProperty(mac, "identity");
       assert.notProperty(mac, "entitlements");
       assert.notProperty(mac, "provisioningProfile");
       assert.deepStrictEqual(mac.protocols, [{ name: "Fangde AI", schemes: ["fdai", "fdai-dev"] }]);
