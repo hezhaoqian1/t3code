@@ -3048,7 +3048,7 @@ export default function Sidebar() {
                 render={
                   <SidebarMenuButton
                     type="button"
-                    className="h-10 w-full justify-start bg-sidebar-accent px-3 font-semibold text-sidebar-accent-foreground shadow-xs hover:bg-sidebar-accent/85"
+                    className="h-9 w-full justify-start bg-sidebar-foreground px-2.5 font-semibold text-sidebar shadow-none hover:bg-sidebar-foreground/90 hover:text-sidebar! [&_svg]:text-sidebar!"
                     onClick={handleNewThreadClick}
                     disabled={isElectron ? !newThreadContext.canStartTask : projects.length === 0}
                     aria-label="新建任务"

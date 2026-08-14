@@ -19,7 +19,7 @@ import {
   useSidebar,
 } from "../ui/sidebar";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
-import fdsureWordmark from "../../assets/fdsure-wordmark.png";
+import fdsureMark from "../../assets/fdsure-mark.png";
 import { useFdAccount } from "../../fd/FdAccountProvider";
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
@@ -32,14 +32,15 @@ export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   return (
     <SidebarHeader
       className={cn(
-        "@container/sidebar-header relative h-[var(--workspace-topbar-height)] shrink-0 flex-row items-center px-3 py-0 md:px-0",
-        isElectron && "drag-region",
+        "@container/sidebar-header relative h-12 shrink-0 flex-row items-center gap-2 px-2 py-2",
+        isElectron &&
+          "drag-region h-[calc(var(--workspace-topbar-height)+2.75rem)] pb-2 pt-[var(--workspace-topbar-height)]",
       )}
     >
       <SidebarTrigger className="relative z-10 md:hidden" />
       <SidebarBrand />
       {endAction ? (
-        <div className="relative z-10 ml-auto mr-2 flex shrink-0 items-center [-webkit-app-region:no-drag]">
+        <div className="relative z-10 ml-auto flex shrink-0 items-center [-webkit-app-region:no-drag]">
           {endAction}
         </div>
       ) : null}
@@ -51,17 +52,11 @@ function SidebarBrand() {
   return (
     <Link
       aria-label="返回任务列表"
-      className={cn(
-        "sidebar-brand relative z-10 ml-[var(--workspace-titlebar-content-left)] inline-flex h-10 w-fit min-w-0 shrink-0 translate-y-px items-center overflow-hidden rounded-md outline-hidden ring-ring focus-visible:ring-2",
-        "text-foreground",
-      )}
+      className="sidebar-brand relative z-10 h-9 min-w-0 items-center gap-2 overflow-hidden rounded-md px-1.5 text-sidebar-foreground outline-hidden ring-ring focus-visible:ring-2"
       to="/"
     >
-      <img
-        className="h-7 w-auto max-w-36 object-contain dark:brightness-0 dark:invert"
-        src={fdsureWordmark}
-        alt="方德 AI"
-      />
+      <img className="size-6 shrink-0 object-contain" src={fdsureMark} alt="" />
+      <span className="truncate text-[15px] font-semibold">方德 AI</span>
     </Link>
   );
 }
