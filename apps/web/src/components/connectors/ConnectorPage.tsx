@@ -148,6 +148,7 @@ function FeishuConnectorControls({
   } = useConnectorActions();
   const busy = state.busy || pendingAction !== null;
   const connected = state.enabled && state.authState === "authenticated";
+  const disconnectBusy = pendingAction === "断开飞书";
 
   return (
     <div
@@ -184,10 +185,11 @@ function FeishuConnectorControls({
       <Button
         size="xs"
         variant="ghost"
-        disabled={!desktopAvailable || busy || !state.enabled}
+        disabled={!desktopAvailable || disconnectBusy || (!state.enabled && !state.busy)}
         onClick={handleDisconnect}
       >
-        断开
+        {disconnectBusy ? <LoaderIcon className="size-3 animate-spin" /> : null}
+        {state.busy ? "取消授权" : "断开"}
       </Button>
     </div>
   );
@@ -222,6 +224,9 @@ function FeishuStatusDetails({ state }: { readonly state: FdConnectorState }) {
         </a>
       ) : null}
       {state.message ? <div>{state.message}</div> : null}
+      {state.lastError ? (
+        <div className="text-destructive">上次操作未完成：{state.lastError}</div>
+      ) : null}
       {!desktopAvailable ? (
         <div className="text-muted-foreground">网页版暂不支持本地连接器，请使用 FD AI 桌面端。</div>
       ) : null}

@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { spawn } from "node:child_process";
-import { access, cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import type { FdConnectorActionResult, FdConnectorState } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -28,6 +28,13 @@ interface CommandResult {
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
+}
+
+interface CliError {
+  readonly type?: string;
+  readonly subtype?: string;
+  readonly message?: string;
+  readonly hint?: string;
 }
 
 export class FeishuConnector extends Context.Service<
@@ -86,7 +93,7 @@ function sanitizeMessage(value: unknown): string {
 
 async function fileExists(path: string): Promise<boolean> {
   try {
-    await access(path);
+    await NodeFSP.access(path);
     return true;
   } catch {
     return false;
@@ -96,7 +103,7 @@ async function fileExists(path: string): Promise<boolean> {
 async function readPersistedState(path: string): Promise<PersistedFeishuConnectorState> {
   try {
     const parsed = JSON.parse(
-      await readFile(path, "utf8"),
+      await NodeFSP.readFile(path, "utf8"),
     ) as Partial<PersistedFeishuConnectorState>;
     return {
       version: STATE_VERSION,
@@ -112,18 +119,29 @@ async function writePersistedState(
   path: string,
   state: PersistedFeishuConnectorState,
 ): Promise<void> {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await writeFile(path, JSON.stringify(state, null, 2), { encoding: "utf8", mode: 0o600 });
+  await NodeFSP.mkdir(NodePath.dirname(path), { recursive: true, mode: 0o700 });
+  await NodeFSP.writeFile(path, JSON.stringify(state, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 }
 
 async function runCommand(
   command: string,
   args: ReadonlyArray<string>,
-  options: { readonly cwd: string; readonly env?: NodeJS.ProcessEnv; readonly timeoutMs: number },
+  options: {
+    readonly cwd: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly timeoutMs: number;
+    readonly signal?: AbortSignal;
+  },
 ): Promise<CommandResult> {
   return await new Promise((resolve, reject) => {
-    const signal = AbortSignal.timeout(options.timeoutMs);
-    const child = spawn(command, [...args], {
+    const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
+    const signal = options.signal
+      ? AbortSignal.any([timeoutSignal, options.signal])
+      : timeoutSignal;
+    const child = NodeChildProcess.spawn(command, [...args], {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -153,12 +171,16 @@ async function runCommandWithOutputTap(
     readonly cwd: string;
     readonly env?: NodeJS.ProcessEnv;
     readonly timeoutMs: number;
+    readonly signal?: AbortSignal;
     readonly onOutput: (chunk: string) => void | Promise<void>;
   },
 ): Promise<CommandResult> {
   return await new Promise((resolve, reject) => {
-    const signal = AbortSignal.timeout(options.timeoutMs);
-    const child = spawn(command, [...args], {
+    const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
+    const signal = options.signal
+      ? AbortSignal.any([timeoutSignal, options.signal])
+      : timeoutSignal;
+    const child = NodeChildProcess.spawn(command, [...args], {
       cwd: options.cwd,
       env: options.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
@@ -202,17 +224,42 @@ function parseJsonObject(output: string): Record<string, unknown> | null {
   }
 }
 
+function parseCliError(result: CommandResult): CliError | null {
+  const parsed = parseJsonObject(result.stdout) ?? parseJsonObject(result.stderr);
+  const error = parsed?.error;
+  if (typeof error !== "object" || error === null || Array.isArray(error)) return null;
+  return error as CliError;
+}
+
+function cliFailureMessage(result: CommandResult, fallback: string): string {
+  const error = parseCliError(result);
+  if (error?.message) return error.message;
+  if (error?.hint) return error.hint;
+  if (result.stderr.trim()) return result.stderr.trim();
+  if (result.stdout.trim()) return result.stdout.trim();
+  return fallback;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "AbortError" || /aborted|cancelled/i.test(error.message))
+  );
+}
+
 function firstHttpUrl(output: string): string | null {
   return output.match(/https?:\/\/[^\s"'<>]+/)?.[0] ?? null;
 }
 
 async function listSkillNames(skillsRoot: string): Promise<ReadonlyArray<string>> {
   try {
-    const entries = await readdir(skillsRoot, { withFileTypes: true });
+    const entries = await NodeFSP.readdir(skillsRoot, { withFileTypes: true });
     const names: string[] = [];
     for (const entry of entries) {
       if (!entry.isDirectory() || !entry.name.startsWith("lark-")) continue;
-      if (await fileExists(join(skillsRoot, entry.name, "SKILL.md"))) names.push(entry.name);
+      if (await fileExists(NodePath.join(skillsRoot, entry.name, "SKILL.md"))) {
+        names.push(entry.name);
+      }
     }
     return names.sort((left, right) => left.localeCompare(right));
   } catch {
@@ -226,9 +273,9 @@ async function syncBundledOfficialSkills(input: {
 }): Promise<void> {
   const names = await listSkillNames(input.sourceRoot);
   if (names.length === 0) throw new Error("安装包缺少飞书官方 Skills，请重新安装 FD AI。");
-  await mkdir(input.skillsRoot, { recursive: true, mode: 0o700 });
+  await NodeFSP.mkdir(input.skillsRoot, { recursive: true, mode: 0o700 });
   for (const name of names) {
-    await cp(join(input.sourceRoot, name), join(input.skillsRoot, name), {
+    await NodeFSP.cp(NodePath.join(input.sourceRoot, name), NodePath.join(input.skillsRoot, name), {
       recursive: true,
       force: true,
       errorOnExist: false,
@@ -240,12 +287,12 @@ async function migrateLegacyConfigIfNeeded(input: {
   readonly homeDirectory: string;
   readonly configDir: string;
 }): Promise<void> {
-  const target = join(input.configDir, "config.json");
+  const target = NodePath.join(input.configDir, "config.json");
   if (await fileExists(target)) return;
-  const source = join(input.homeDirectory, ".lark-cli", "config.json");
+  const source = NodePath.join(input.homeDirectory, ".lark-cli", "config.json");
   if (!(await fileExists(source))) return;
-  await mkdir(input.configDir, { recursive: true, mode: 0o700 });
-  await cp(source, target, { force: false, errorOnExist: false });
+  await NodeFSP.mkdir(input.configDir, { recursive: true, mode: 0o700 });
+  await NodeFSP.cp(source, target, { force: false, errorOnExist: false });
 }
 
 export const make = Effect.fn("feishuConnector.make")(function* () {
@@ -274,6 +321,9 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
   let busy = false;
   let busyMessage: string | null = null;
   let authAction: FdConnectorState["authAction"] = null;
+  let activeCommandController: AbortController | null = null;
+  let activeOperation: Promise<void> | null = null;
+  let cancelRequested = false;
 
   const persisted = () => readPersistedState(statePath);
   const persistPatch = async (patch: Partial<PersistedFeishuConnectorState>) => {
@@ -310,17 +360,27 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
       timeoutMs: 10_000,
     });
     if (config.code !== 0) return "not_configured";
-    const statusResult = await runCommand(cliPath, ["auth", "status", "--json"], {
+    const statusResult = await runCommand(cliPath, ["auth", "status", "--json", "--verify"], {
       cwd: root,
       env: commandEnvironment,
       timeoutMs: 15_000,
     });
-    if (statusResult.code !== 0) return "not_authenticated";
+    if (statusResult.code !== 0) {
+      const error = parseCliError(statusResult);
+      if (
+        error?.subtype === "not_configured" ||
+        /not configured|not authenticated|not logged in/i.test(cliFailureMessage(statusResult, ""))
+      ) {
+        return "not_authenticated";
+      }
+      return "failed";
+    }
     const parsed = parseJsonObject(statusResult.stdout);
     const identities = parsed?.identities;
-    if (typeof identities === "object" && identities !== null) {
-      const user = (identities as { user?: { status?: unknown; available?: unknown } }).user;
-      if (user?.status === "ready" || user?.available === true) return "authenticated";
+    if (typeof identities !== "object" || identities === null) return "not_authenticated";
+    const user = (identities as { user?: { status?: unknown; available?: unknown } }).user;
+    if (user?.status === "ready" || user?.status === "needs_refresh" || user?.available === true) {
+      return "authenticated";
     }
     return "not_authenticated";
   };
@@ -368,19 +428,30 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
     busy = true;
     busyMessage = message;
     authAction = null;
-    await publish();
+    let completeOperation!: () => void;
+    const operationCompletion = new Promise<void>((resolve) => {
+      completeOperation = resolve;
+    });
+    activeOperation = operationCompletion;
+    const operationPromise = operation();
     try {
-      return await operation();
+      await publish();
+      return await operationPromise;
     } finally {
       busy = false;
       busyMessage = null;
-      await publish();
+      try {
+        await publish();
+      } finally {
+        completeOperation();
+        if (activeOperation === operationCompletion) activeOperation = null;
+      }
     }
   };
 
   const ensureInstalled = async (): Promise<string> => {
-    await mkdir(root, { recursive: true, mode: 0o700 });
-    await mkdir(configDir, { recursive: true, mode: 0o700 });
+    await NodeFSP.mkdir(root, { recursive: true, mode: 0o700 });
+    await NodeFSP.mkdir(configDir, { recursive: true, mode: 0o700 });
     await migrateLegacyConfigIfNeeded({
       homeDirectory: environment.homeDirectory,
       configDir,
@@ -396,6 +467,9 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
 
   const connect = async () =>
     withBusy("正在准备飞书 CLI 和官方 Skills…", async () => {
+      const commandController = new AbortController();
+      activeCommandController = commandController;
+      cancelRequested = false;
       try {
         const cliPath = await ensureInstalled();
         await persistPatch({ enabled: true, lastError: null });
@@ -415,6 +489,7 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
               cwd: root,
               env: commandEnvironment,
               timeoutMs: 600_000,
+              signal: commandController.signal,
               onOutput: async (chunk) => {
                 if (openedConfigUrl) return;
                 const url = firstHttpUrl(chunk);
@@ -435,7 +510,12 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
         const login = await runCommand(
           cliPath,
           ["auth", "login", "--recommend", "--no-wait", "--json"],
-          { cwd: root, env: commandEnvironment, timeoutMs: 30_000 },
+          {
+            cwd: root,
+            env: commandEnvironment,
+            timeoutMs: 30_000,
+            signal: commandController.signal,
+          },
         );
         const parsed = parseJsonObject(login.stdout);
         const verificationUrl =
@@ -464,7 +544,8 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
           await publish();
         }
         if (deviceCode) {
-          busyMessage = "请在浏览器完成飞书授权，FD AI 正在等待确认…";
+          busyMessage =
+            "请在浏览器完成飞书授权；若页面提示没有 CLI 使用权限，请切换到已授权的企业账号或联系管理员。";
           await publish();
           const completed = await runCommand(
             cliPath,
@@ -473,12 +554,13 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
               cwd: root,
               env: commandEnvironment,
               timeoutMs: 600_000,
+              signal: commandController.signal,
             },
           );
           if (completed.code !== 0)
-            throw new Error(completed.stderr || completed.stdout || "飞书授权未完成。");
+            throw new Error(cliFailureMessage(completed, "飞书授权未完成。"));
         } else if (login.code !== 0) {
-          throw new Error(login.stderr || login.stdout || "飞书授权启动失败。");
+          throw new Error(cliFailureMessage(login, "飞书授权启动失败。"));
         }
         authAction = null;
         const finalAuthState = await readAuthState(cliPath);
@@ -489,13 +571,32 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
         await restartAgentRuntime();
         return { state: await computeState() };
       } catch (error) {
-        await persistPatch({ lastError: sanitizeMessage(error) });
+        authAction = null;
+        if (cancelRequested || commandController.signal.aborted || isAbortError(error)) {
+          await persistPatch({ enabled: false, lastError: null });
+        } else {
+          await persistPatch({ lastError: sanitizeMessage(error) });
+        }
         throw error;
+      } finally {
+        if (activeCommandController === commandController) activeCommandController = null;
       }
     });
 
-  const disconnect = async () =>
-    withBusy("正在断开飞书连接…", async () => {
+  const disconnect = async () => {
+    if (busy) {
+      cancelRequested = true;
+      activeCommandController?.abort();
+      const operation = activeOperation;
+      if (operation) {
+        try {
+          await operation;
+        } catch {
+          // The cancelled connect operation is intentionally discarded.
+        }
+      }
+    }
+    return withBusy("正在断开飞书连接…", async () => {
       const cliPath = await larkCliPath();
       if (cliPath) {
         const logout = await runCommand(cliPath, ["auth", "logout"], {
@@ -503,13 +604,23 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
           env: commandEnvironment,
           timeoutMs: 30_000,
         });
-        if (logout.code !== 0) throw new Error("飞书账号断开失败，请稍后重试。");
+        if (logout.code !== 0) {
+          const authState = await readAuthState(cliPath);
+          if (
+            authState !== "not_authenticated" &&
+            authState !== "not_configured" &&
+            authState !== "unknown"
+          ) {
+            throw new Error(cliFailureMessage(logout, "飞书账号断开失败，请稍后重试。"));
+          }
+        }
       }
       authAction = null;
       await persistPatch({ enabled: false, lastError: null });
       await restartAgentRuntime();
       return { state: await computeState() };
     });
+  };
 
   return FeishuConnector.of({
     paths: { root, skillsRoot, binDir },
