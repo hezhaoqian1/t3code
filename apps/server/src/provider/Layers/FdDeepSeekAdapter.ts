@@ -78,11 +78,14 @@ interface ActiveTurn {
   settled: boolean;
 }
 
+type FdExecutionProfile = "local" | `enterprise:${number}`;
+
 interface FdSessionContext {
   session: ProviderSession;
-  executionOwner: "unbound" | "local" | "enterprise";
   readonly startInput: ProviderSessionStartInput;
   ordinarySessionStarted: boolean;
+  ordinaryExecutionProfile: FdExecutionProfile | undefined;
+  readonly ordinaryResumeCursors: Map<FdExecutionProfile, unknown>;
   history: ReadonlyArray<FdResponsesInputItem>;
   readonly turns: Array<FdTurnRecord>;
   readonly tools: ReadonlyArray<FdAgentTool>;
@@ -93,6 +96,10 @@ interface FdSessionContext {
   readonly pendingApprovals: Map<string, PendingApproval>;
   activeTurn: ActiveTurn | undefined;
   stopped: boolean;
+}
+
+function executionProfileFor(fdSkillVersionId: number | undefined): FdExecutionProfile {
+  return fdSkillVersionId === undefined ? "local" : `enterprise:${fdSkillVersionId}`;
 }
 
 interface EnterpriseToolGrounding {
@@ -815,9 +822,10 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     };
     sessions.set(input.threadId, {
       session,
-      executionOwner: "unbound",
       startInput: input,
       ordinarySessionStarted: false,
+      ordinaryExecutionProfile: undefined,
+      ordinaryResumeCursors: new Map(),
       history: [],
       turns: [],
       tools,
@@ -876,16 +884,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         detail: "A turn is already active.",
       });
     }
-    const requestedOwner = input.fdSkillVersionId === undefined ? "local" : "enterprise";
-    if (context.executionOwner !== "unbound" && context.executionOwner !== requestedOwner) {
-      return yield* new ProviderAdapterValidationError({
-        provider: FD_DEEPSEEK_DRIVER_KIND,
-        operation: "sendTurn",
-        issue: "Changing Agent runtime requires a new conversation.",
-      });
-    }
-    context.executionOwner = requestedOwner;
-    if (requestedOwner === "enterprise" && attachments.length > 0) {
+    if (input.fdSkillVersionId !== undefined && attachments.length > 0) {
       return yield* new ProviderAdapterValidationError({
         provider: FD_DEEPSEEK_DRIVER_KIND,
         operation: "sendTurn",
@@ -893,11 +892,39 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       });
     }
     if (options.ordinaryAdapter) {
+      const requestedProfile = executionProfileFor(input.fdSkillVersionId);
+      if (context.ordinarySessionStarted && context.ordinaryExecutionProfile !== requestedProfile) {
+        if (
+          context.ordinaryExecutionProfile !== undefined &&
+          context.session.resumeCursor !== undefined
+        ) {
+          context.ordinaryResumeCursors.set(
+            context.ordinaryExecutionProfile,
+            context.session.resumeCursor,
+          );
+        }
+        yield* options.ordinaryAdapter.stopSession(input.threadId).pipe(Effect.ignore);
+        context.ordinarySessionStarted = false;
+        context.ordinaryExecutionProfile = undefined;
+      }
       if (!context.ordinarySessionStarted) {
-        const { provider: _provider, ...ordinaryStartInput } = context.startInput;
+        const {
+          provider: _provider,
+          resumeCursor: initialResumeCursor,
+          ...ordinaryStartInput
+        } = context.startInput;
+        const profileResumeCursor = context.ordinaryResumeCursors.get(requestedProfile);
+        const resumeCursor =
+          profileResumeCursor ?? (requestedProfile === "local" ? initialResumeCursor : undefined);
         const routedStartInput = options.ordinarySessionInput
-          ? yield* options.ordinarySessionInput(ordinaryStartInput)
-          : ordinaryStartInput;
+          ? yield* options.ordinarySessionInput({
+              ...ordinaryStartInput,
+              ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+            })
+          : {
+              ...ordinaryStartInput,
+              ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+            };
         const ordinarySession = yield* options.ordinaryAdapter.startSession({
           ...routedStartInput,
           ...(input.fdSkillVersionId !== undefined
@@ -905,13 +932,22 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
             : {}),
         });
         context.ordinarySessionStarted = true;
+        context.ordinaryExecutionProfile = requestedProfile;
+        if (ordinarySession.resumeCursor !== undefined) {
+          context.ordinaryResumeCursors.set(requestedProfile, ordinarySession.resumeCursor);
+        }
         context.session = {
           ...ordinarySession,
           provider: FD_DEEPSEEK_DRIVER_KIND,
           providerInstanceId: instanceId,
         };
       }
-      return yield* options.ordinaryAdapter.sendTurn(input);
+      const result = yield* options.ordinaryAdapter.sendTurn(input);
+      if (result.resumeCursor !== undefined) {
+        context.ordinaryResumeCursors.set(requestedProfile, result.resumeCursor);
+        context.session = { ...context.session, resumeCursor: result.resumeCursor };
+      }
+      return result;
     }
     const imageParts =
       attachments.length === 0

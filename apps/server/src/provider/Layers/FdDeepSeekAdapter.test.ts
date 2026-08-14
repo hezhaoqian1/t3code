@@ -1169,10 +1169,35 @@ describe("FdDeepSeekAdapter", () => {
     }),
   );
 
-  it.effect("locks a conversation to its first execution owner", () =>
+  it.effect("allows an enterprise turn after an ordinary turn in one conversation", () =>
     Effect.gen(function* () {
+      const enterpriseClient = enterpriseClientWith(async function* () {
+        yield {
+          type: "turn.started",
+          turnId: enterpriseTurnId,
+          conversationId: 7,
+          model: "deepseek-v4-flash",
+        };
+        yield {
+          type: "turn.completed",
+          turnId: enterpriseTurnId,
+          message: {
+            id: 8,
+            conversationId: 7,
+            role: "assistant",
+            text: "Enterprise completed",
+            createdAt: "2026-08-11T00:00:00Z",
+          },
+          toolCalls: 0,
+          usage: { inputTokens: 3, outputTokens: 2 },
+        };
+      });
+      const fdSkillCatalog = new FdSkillCatalog(enterpriseClient);
+      yield* Effect.promise(() => fdSkillCatalog.refresh());
       const adapter = yield* makeFdDeepSeekAdapter({
         kernel: new FdAgentKernel(streamer([completed])),
+        fdSkillCatalog,
+        enterpriseClient,
       });
       const events: ProviderRuntimeEvent[] = [];
       yield* Stream.runForEach(adapter.streamEvents, (event) =>
@@ -1185,17 +1210,19 @@ describe("FdDeepSeekAdapter", () => {
         events.some((event) => event.type === "turn.completed" && event.turnId === first.turnId),
       );
 
-      const exit = yield* Effect.exit(
-        adapter.sendTurn({ threadId, input: "enterprise work", fdSkillVersionId: 10004 }),
+      const second = yield* adapter.sendTurn({
+        threadId,
+        input: "enterprise work",
+        fdSkillVersionId: 10004,
+      });
+      yield* waitFor(() =>
+        events.some((event) => event.type === "turn.completed" && event.turnId === second.turnId),
       );
-      expect(exit._tag).toBe("Failure");
-      if (exit._tag === "Failure") {
-        expect(String(exit.cause)).toContain("requires a new conversation");
-      }
+      expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(2);
     }),
   );
 
-  it.effect("rejects local execution after a conversation is bound to Enterprise Agent", () =>
+  it.effect("allows an ordinary turn after an enterprise turn in one conversation", () =>
     Effect.gen(function* () {
       const localStream = vi.fn(async function* () {
         for (const event of completed) yield event;
@@ -1248,12 +1275,84 @@ describe("FdDeepSeekAdapter", () => {
         events.some((event) => event.type === "turn.completed" && event.turnId === first.turnId),
       );
 
-      const exit = yield* Effect.exit(adapter.sendTurn({ threadId, input: "ordinary work" }));
-      expect(exit._tag).toBe("Failure");
-      if (exit._tag === "Failure") {
-        expect(String(exit.cause)).toContain("requires a new conversation");
-      }
-      expect(localStream).not.toHaveBeenCalled();
+      const second = yield* adapter.sendTurn({ threadId, input: "ordinary work" });
+      yield* waitFor(() =>
+        events.some((event) => event.type === "turn.completed" && event.turnId === second.turnId),
+      );
+      expect(localStream).toHaveBeenCalledOnce();
+    }),
+  );
+
+  it.effect("restarts Codex with isolated runtime profiles when FD Skill selection changes", () =>
+    Effect.gen(function* () {
+      const codexProvider = ProviderDriverKind.make("codex");
+      const startedInputs: Array<Record<string, unknown>> = [];
+      const sentInputs: Array<Record<string, unknown>> = [];
+      const stopSession = vi.fn(() => Effect.void);
+      let sessionIndex = 0;
+      const ordinaryAdapter: ProviderAdapterShape<never> = {
+        provider: codexProvider,
+        capabilities: { sessionModelSwitch: "in-session" },
+        startSession: (input) => {
+          startedInputs.push(input);
+          sessionIndex += 1;
+          return Effect.succeed({
+            provider: codexProvider,
+            providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+            status: "ready" as const,
+            runtimeMode: input.runtimeMode,
+            model: "deepseek-v4-flash",
+            threadId: input.threadId,
+            resumeCursor: { threadId: `codex-profile-${sessionIndex}` },
+            createdAt: "2026-08-11T00:00:00.000Z",
+            updatedAt: "2026-08-11T00:00:00.000Z",
+          });
+        },
+        sendTurn: (input) => {
+          sentInputs.push(input);
+          return Effect.succeed({
+            threadId: input.threadId,
+            turnId: TurnId.make(`codex-turn-${sentInputs.length}`),
+            resumeCursor: { threadId: `codex-profile-${sessionIndex}` },
+          });
+        },
+        interruptTurn: () => Effect.void,
+        respondToRequest: () => Effect.void,
+        respondToUserInput: () => Effect.void,
+        stopSession,
+        listSessions: () => Effect.succeed([]),
+        hasSession: () => Effect.succeed(false),
+        readThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        rollbackThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        stopAll: () => Effect.void,
+        streamEvents: Stream.empty,
+      };
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([])),
+        ordinaryAdapter,
+      });
+
+      yield* adapter.startSession(startInput);
+      yield* adapter.sendTurn({ threadId, input: "ordinary question" });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "enterprise question",
+        fdSkillVersionId: 10004,
+      });
+      yield* adapter.sendTurn({ threadId, input: "web search" });
+
+      expect(startedInputs).toHaveLength(3);
+      expect(startedInputs[0]).not.toHaveProperty("fdSkillVersionId");
+      expect(startedInputs[1]).toMatchObject({ fdSkillVersionId: 10004 });
+      expect(startedInputs[1]).not.toHaveProperty("resumeCursor");
+      expect(startedInputs[2]).toMatchObject({
+        resumeCursor: { threadId: "codex-profile-1" },
+      });
+      expect(startedInputs[2]).not.toHaveProperty("fdSkillVersionId");
+      expect(sentInputs).toHaveLength(3);
+      expect(stopSession).toHaveBeenCalledTimes(2);
     }),
   );
 
