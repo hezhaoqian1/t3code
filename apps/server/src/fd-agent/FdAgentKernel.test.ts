@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "@effect/vitest";
+import { FD_RUNTIME_PRO_MODEL } from "@t3tools/contracts/fd/runtime-credentials";
 
 import {
   FD_AGENT_LIMITS,
@@ -7,7 +8,11 @@ import {
   type FdAgentTool,
   type FdResponsesStreamer,
 } from "./FdAgentKernel.ts";
-import { FdResponsesError, type FdResponsesEvent } from "./FdResponsesProtocol.ts";
+import {
+  FD_RESPONSES_MODEL,
+  FdResponsesError,
+  type FdResponsesEvent,
+} from "./FdResponsesProtocol.ts";
 
 const metadata: FdResponsesEvent = {
   type: "response-metadata",
@@ -18,6 +23,7 @@ const metadata: FdResponsesEvent = {
 async function collect(kernel: FdAgentKernel, signal?: AbortSignal) {
   const events: FdAgentEvent[] = [];
   for await (const event of kernel.run({
+    model: FD_RESPONSES_MODEL,
     input: [{ role: "user", content: "hello" }],
     runtimeMode: "full-access",
     ...(signal ? { signal } : {}),
@@ -69,6 +75,27 @@ describe("FdAgentKernel", () => {
       type: "terminal",
       result: { status: "completed", rounds: 1 },
     });
+  });
+
+  it("passes the selected model through every Responses round", async () => {
+    const requests: Array<{ readonly model: string }> = [];
+    const client: FdResponsesStreamer = {
+      stream: async function* (request) {
+        requests.push(request);
+        yield { ...metadata, model: FD_RUNTIME_PRO_MODEL };
+        yield { type: "completed", finishReason: "stop" };
+      },
+    };
+
+    for await (const _event of new FdAgentKernel(client).run({
+      model: FD_RUNTIME_PRO_MODEL,
+      input: [{ role: "user", content: "use Pro" }],
+      runtimeMode: "full-access",
+    })) {
+      // Drain the typed terminal result.
+    }
+
+    expect(requests).toEqual([expect.objectContaining({ model: FD_RUNTIME_PRO_MODEL })]);
   });
 
   it("accumulates each usage dimension exactly once", async () => {
@@ -126,6 +153,7 @@ describe("FdAgentKernel", () => {
     };
     const events: FdAgentEvent[] = [];
     for await (const event of new FdAgentKernel(client).run({
+      model: FD_RESPONSES_MODEL,
       input: [{ role: "user", content: "edit" }],
       runtimeMode: "full-access",
       tools: [tool],
@@ -167,6 +195,7 @@ describe("FdAgentKernel", () => {
     const events: FdAgentEvent[] = [];
     const run = (async () => {
       for await (const event of new FdAgentKernel(client).run({
+        model: FD_RESPONSES_MODEL,
         input: [{ role: "user", content: "edit" }],
         runtimeMode: "approval-required",
         tools: [tool],
@@ -261,6 +290,7 @@ describe("FdAgentKernel", () => {
         ],
       ]),
     ).run({
+      model: FD_RESPONSES_MODEL,
       input: [{ role: "user", content: "edit" }],
       runtimeMode: "full-access",
       tools: [cancellingTool],
@@ -295,6 +325,7 @@ describe("FdAgentKernel", () => {
     for await (const event of new FdAgentKernel(
       streamer(Array(FD_AGENT_LIMITS.maxRounds).fill(callRound)),
     ).run({
+      model: FD_RESPONSES_MODEL,
       input: [{ role: "user", content: "loop" }],
       runtimeMode: "full-access",
       tools: [tool],
@@ -312,6 +343,7 @@ describe("FdAgentKernel", () => {
     });
     const events: FdAgentEvent[] = [];
     for await (const event of new FdAgentKernel({ stream }).run({
+      model: FD_RESPONSES_MODEL,
       input: [{ role: "user", content: "x".repeat(FD_AGENT_LIMITS.maxContextBytes + 1) }],
       runtimeMode: "full-access",
     }))
@@ -367,6 +399,7 @@ describe("FdAgentKernel", () => {
           [metadata, { type: "completed", finishReason: "stop" }],
         ]),
       ).run({
+        model: FD_RESPONSES_MODEL,
         input: [{ role: "user", content: "matrix" }],
         runtimeMode,
         tools: [matrixTool],
@@ -427,6 +460,7 @@ describe("FdAgentKernel", () => {
           [metadata, { type: "completed", finishReason: "stop" }],
         ]),
       ).run({
+        model: FD_RESPONSES_MODEL,
         input: [{ role: "user", content: "routine" }],
         runtimeMode,
         tools: [routineTool],
@@ -483,6 +517,7 @@ describe("FdAgentKernel", () => {
         [metadata, { type: "completed", finishReason: "stop" }],
       ]),
     ).run({
+      model: FD_RESPONSES_MODEL,
       input: [{ role: "user", content: "explicit" }],
       runtimeMode,
       tools: [explicitTool],
@@ -519,6 +554,7 @@ describe("FdAgentKernel", () => {
         [metadata, { type: "completed", finishReason: "stop" }],
       ]),
     ).run({
+      model: FD_RESPONSES_MODEL,
       input: [{ role: "user", content: "explicit twice" }],
       runtimeMode: "full-access",
       tools: [explicitTool],

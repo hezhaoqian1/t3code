@@ -4,6 +4,7 @@ import * as Result from "effect/Result";
 import { describe, expect, vi } from "vite-plus/test";
 
 import { createModelSelection } from "@t3tools/shared/model";
+import { FD_RUNTIME_PRO_MODEL } from "@t3tools/contracts/fd/runtime-credentials";
 
 import type { FdResponsesStreamer } from "../fd-agent/FdAgentKernel.ts";
 import { FD_DEEPSEEK_INSTANCE_ID } from "../fd-agent/FdModelPolicy.ts";
@@ -86,7 +87,11 @@ describe("FdDeepSeekTextGeneration", () => {
 
       expect(requests).toHaveLength(4);
       for (const request of requests) {
-        expect(request).toMatchObject({ round: 1, reasoningEffort: "none" });
+        expect(request).toMatchObject({
+          model: FD_RESPONSES_MODEL,
+          round: 1,
+          reasoningEffort: "none",
+        });
         expect(request.input).toHaveLength(1);
         expect(request.input[0]).toMatchObject({ role: "user" });
         expect(typeof (request.input[0] as { content?: unknown }).content).toBe("string");
@@ -95,7 +100,24 @@ describe("FdDeepSeekTextGeneration", () => {
     }),
   );
 
-  it.effect("rejects any model other than exact deepseek-v4-flash before transport", () =>
+  it.effect("accepts a Pro task selection while keeping helper generation on Flash", () =>
+    Effect.gen(function* () {
+      const requests: FdResponsesRequest[] = [];
+      const service = makeFdDeepSeekTextGeneration(
+        streamerFor(['{"branch":"pro-task"}'], requests),
+      );
+
+      yield* service.generateBranchName({
+        cwd: "/workspace",
+        message: "Create a branch",
+        modelSelection: createModelSelection(FD_DEEPSEEK_INSTANCE_ID, FD_RUNTIME_PRO_MODEL),
+      });
+
+      expect(requests).toEqual([expect.objectContaining({ model: FD_RESPONSES_MODEL })]);
+    }),
+  );
+
+  it.effect("rejects any model outside the exact managed model list before transport", () =>
     Effect.gen(function* () {
       const stream = vi.fn<FdResponsesStreamer["stream"]>();
       const service = makeFdDeepSeekTextGeneration({ stream });

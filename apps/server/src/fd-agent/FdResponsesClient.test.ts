@@ -1,4 +1,8 @@
-import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
+import {
+  FD_RUNTIME_MODELS,
+  FD_RUNTIME_PRO_MODEL,
+  type FdServerRuntimeCredentialProjection,
+} from "@t3tools/contracts/fd/runtime-credentials";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -14,6 +18,7 @@ import {
   type FdResponsesEvent,
   type FdResponsesInputItem,
   type FdResponsesOutputItem,
+  type FdResponsesRequest,
 } from "./FdResponsesProtocol.ts";
 
 describe("FdResponsesClient", () => {
@@ -38,6 +43,7 @@ describe("FdResponsesClient", () => {
 
     const events = await collect(
       client.stream({
+        model: FD_RESPONSES_MODEL,
         round: 1,
         input: [{ role: "user", content: "private prompt" }],
         instructions: "private instructions",
@@ -74,6 +80,47 @@ describe("FdResponsesClient", () => {
     expect(events.at(-1)).toEqual({ type: "completed", finishReason: "stop" });
   });
 
+  it("sends and validates the exact Pro model when the credential authorizes it", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const dualCredentials: FdServerRuntimeCredentialProjection = {
+      ...credentials(),
+      policy: { ...credentials().policy, models: FD_RUNTIME_MODELS },
+    };
+    const client = new FdResponsesClient(reader(dualCredentials), {
+      fetch: vi.fn(async (_input, init) => {
+        requestBody = JSON.parse(String(init?.body));
+        const events = textEvents("resp-pro", "Pro response");
+        events[0] = created("resp-pro", FD_RUNTIME_PRO_MODEL);
+        return sseResponse(events);
+      }),
+    });
+
+    const events = await collect(
+      client.stream({ model: FD_RUNTIME_PRO_MODEL, round: 1, input: userInput() }),
+    );
+
+    expect(requestBody?.model).toBe(FD_RUNTIME_PRO_MODEL);
+    expect(events).toContainEqual({
+      type: "response-metadata",
+      responseId: "resp-pro",
+      model: FD_RUNTIME_PRO_MODEL,
+    });
+  });
+
+  it("rejects Pro before transport for legacy Flash-only credentials", async () => {
+    const fetch = vi.fn(async () => sseResponse(textEvents("unused", "unused")));
+    const result = await collectFailure(
+      new FdResponsesClient(reader(), { fetch }).stream({
+        model: FD_RUNTIME_PRO_MODEL,
+        round: 1,
+        input: userInput(),
+      }),
+    );
+
+    expect(result.error).toMatchObject({ kind: "policy_invalid" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("preserves bounded text and image input in the exact stateless request", async () => {
     let requestBody: Record<string, unknown> | undefined;
     const client = new FdResponsesClient(reader(), {
@@ -86,6 +133,7 @@ describe("FdResponsesClient", () => {
 
     await collect(
       client.stream({
+        model: FD_RESPONSES_MODEL,
         round: 1,
         input: [
           {
@@ -123,6 +171,7 @@ describe("FdResponsesClient", () => {
     const fetch = vi.fn(async () => sseResponse(textEvents("unused", "unused")));
     const result = await collectFailure(
       new FdResponsesClient(reader(), { fetch }).stream({
+        model: FD_RESPONSES_MODEL,
         round: 1,
         input: [{ role: "user", content: [{ type: "input_image", image_url: imageUrl }] }],
       }),
@@ -134,7 +183,12 @@ describe("FdResponsesClient", () => {
   it("publishes function calls only after SDK JSON and schema validation", async () => {
     const validClient = clientForResponse(sseResponse(functionCallEvents('{"value":7}')));
     const valid = await collect(
-      validClient.stream({ round: 1, input: userInput(), tools: [probeTool()] }),
+      validClient.stream({
+        model: FD_RESPONSES_MODEL,
+        round: 1,
+        input: userInput(),
+        tools: [probeTool()],
+      }),
     );
     expect(valid).toContainEqual({
       type: "function-call",
@@ -151,7 +205,12 @@ describe("FdResponsesClient", () => {
 
     const malformedClient = clientForResponse(sseResponse(functionCallEvents('{"value":')));
     const malformed = await collectFailure(
-      malformedClient.stream({ round: 1, input: userInput(), tools: [probeTool()] }),
+      malformedClient.stream({
+        model: FD_RESPONSES_MODEL,
+        round: 1,
+        input: userInput(),
+        tools: [probeTool()],
+      }),
     );
     expect(validFunctionCalls(malformed.events)).toEqual([]);
     expect(malformed.error).toMatchObject({ kind: "malformed_response" });
@@ -164,6 +223,7 @@ describe("FdResponsesClient", () => {
   ] as const)("rejects %s before publishing a valid function call", async (_case, args, name) => {
     const result = await collectFailure(
       clientForResponse(sseResponse(functionCallEvents(args, name))).stream({
+        model: FD_RESPONSES_MODEL,
         round: 1,
         input: userInput(),
         tools: [probeTool()],
@@ -177,6 +237,7 @@ describe("FdResponsesClient", () => {
   it("rejects a schema-valid function call before publishing it when metadata is missing", async () => {
     const result = await collectFailure(
       clientForResponse(sseResponse(functionCallEvents('{"value":7}').slice(1))).stream({
+        model: FD_RESPONSES_MODEL,
         round: 1,
         input: userInput(),
         tools: [probeTool()],
@@ -218,7 +279,7 @@ describe("FdResponsesClient", () => {
           { type: "response.output_item.done", output_index: 0, item },
           ...completed(),
         ]),
-      ).stream({ round: 1, input: userInput() }),
+      ).stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
     );
 
     expect(result.events.filter((event) => event.type === "output-item")).toEqual([]);
@@ -232,7 +293,7 @@ describe("FdResponsesClient", () => {
           ...textEvents("resp-incomplete", "bounded", false),
           ...incomplete("max_output_tokens"),
         ]),
-      ).stream({ round: 1, input: userInput() }),
+      ).stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
     );
 
     expect(events.at(-1)).toEqual({ type: "completed", finishReason: "length" });
@@ -242,7 +303,7 @@ describe("FdResponsesClient", () => {
     const result = await collectFailure(
       clientForResponse(
         sseResponse([...textEvents("resp-failed", "partial", false), ...failed()]),
-      ).stream({ round: 1, input: userInput() }),
+      ).stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
     );
 
     expect(result.error).toMatchObject({ kind: "upstream_error" });
@@ -276,7 +337,14 @@ describe("FdResponsesClient", () => {
       { callId: "call-1", output: '{"ok":true}' },
     ]);
 
-    await collect(client.stream({ round: 2, input: accumulated, tools: [probeTool()] }));
+    await collect(
+      client.stream({
+        model: FD_RESPONSES_MODEL,
+        round: 2,
+        input: accumulated,
+        tools: [probeTool()],
+      }),
+    );
 
     expect(body?.input).toEqual([
       ...userInput(),
@@ -300,7 +368,9 @@ describe("FdResponsesClient", () => {
         { status, headers: { "content-type": "application/json" } },
       ),
     );
-    const result = await collectFailure(client.stream({ round: 1, input: userInput() }));
+    const result = await collectFailure(
+      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+    );
     expect(result.error).toMatchObject({ kind, status });
     expect(result.error?.message).not.toContain("private upstream detail");
   });
@@ -309,14 +379,26 @@ describe("FdResponsesClient", () => {
     const cancellation = new AbortController();
     const cancelledClient = new FdResponsesClient(reader(), { fetch: abortableFetch() });
     const cancelled = collectFailure(
-      cancelledClient.stream({ round: 1, input: userInput(), signal: cancellation.signal }),
+      cancelledClient.stream({
+        model: FD_RESPONSES_MODEL,
+        round: 1,
+        input: userInput(),
+        signal: cancellation.signal,
+      }),
     );
     queueMicrotask(() => cancellation.abort());
     await expect(cancelled).resolves.toMatchObject({ error: { kind: "cancelled" } });
 
     const timeoutClient = new FdResponsesClient(reader(), { fetch: abortableFetch() });
     await expect(
-      collectFailure(timeoutClient.stream({ round: 1, input: userInput(), timeoutMs: 5 })),
+      collectFailure(
+        timeoutClient.stream({
+          model: FD_RESPONSES_MODEL,
+          round: 1,
+          input: userInput(),
+          timeoutMs: 5,
+        }),
+      ),
     ).resolves.toMatchObject({ error: { kind: "timeout" } });
   });
 
@@ -328,7 +410,9 @@ describe("FdResponsesClient", () => {
       const client = new FdResponsesClient(store.service, {
         fetch: abortableFetch(() => started.resolve()),
       });
-      const pending = collectFailure(client.stream({ round: 1, input: userInput() }));
+      const pending = collectFailure(
+        client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+      );
       await started.promise;
 
       if (change === "clear") {
@@ -363,7 +447,9 @@ describe("FdResponsesClient", () => {
         return response.promise;
       }),
     });
-    const pending = collectFailure(client.stream({ round: 1, input: userInput() }));
+    const pending = collectFailure(
+      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+    );
     await started.promise;
 
     await Effect.runPromise(
@@ -381,6 +467,35 @@ describe("FdResponsesClient", () => {
     expect(result.events.at(-1)).toEqual({ type: "completed", finishReason: "stop" });
   });
 
+  it("invalidates an active request when the authorized model list changes", async () => {
+    const initial: FdServerRuntimeCredentialProjection = {
+      ...credentials(),
+      policy: { ...credentials().policy, models: FD_RUNTIME_MODELS },
+    };
+    const store = await makePopulatedStore(initial);
+    const started = Promise.withResolvers<void>();
+    const onAbort = vi.fn();
+    const client = new FdResponsesClient(store.service, {
+      fetch: abortableFetch(() => started.resolve(), onAbort),
+    });
+    const pending = collectFailure(
+      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+    );
+    await started.promise;
+
+    await Effect.runPromise(
+      store.apply({
+        version: 1,
+        type: "set",
+        credentials: { ...initial, policy: credentials().policy, generation: 2 },
+      }),
+    );
+
+    const result = await pending;
+    expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
+    expect(onAbort).toHaveBeenCalledOnce();
+  });
+
   it("keeps listening after an equivalent refresh and aborts on a later replacement", async () => {
     const store = await makePopulatedStore();
     const started = Promise.withResolvers<void>();
@@ -388,7 +503,9 @@ describe("FdResponsesClient", () => {
     const client = new FdResponsesClient(store.service, {
       fetch: abortableFetch(() => started.resolve(), onAbort),
     });
-    const pending = collectFailure(client.stream({ round: 1, input: userInput() }));
+    const pending = collectFailure(
+      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+    );
     await started.promise;
 
     await Effect.runPromise(
@@ -433,7 +550,9 @@ describe("FdResponsesClient", () => {
       now: () => 1_900 + (performance.now() - startedAt),
       fetch: abortableFetch(() => started.resolve(), onAbort),
     });
-    const pending = collectFailure(client.stream({ round: 1, input: userInput() }));
+    const pending = collectFailure(
+      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+    );
     await started.promise;
 
     await Effect.runPromise(
@@ -464,7 +583,9 @@ describe("FdResponsesClient", () => {
       now: () => 5_000,
       fetch: abortableFetch(() => started.resolve()),
     });
-    const pending = collectFailure(client.stream({ round: 1, input: userInput() }));
+    const pending = collectFailure(
+      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+    );
     await started.promise;
 
     await Effect.runPromise(
@@ -491,7 +612,9 @@ describe("FdResponsesClient", () => {
       { now: () => 1_950 + (performance.now() - startedAt), fetch: abortableFetch() },
     );
 
-    const result = await collectFailure(client.stream({ round: 1, input: userInput() }));
+    const result = await collectFailure(
+      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+    );
     expect(result.events.some((event) => event.type === "completed")).toBe(false);
     expect(result.error).toMatchObject({ kind: "credentials_expired" });
   });
@@ -513,7 +636,7 @@ describe("FdResponsesClient", () => {
       { fetch: vi.fn(async () => sseResponse(textEvents("resp-cleanup", "done"))) },
     );
 
-    await collect(client.stream({ round: 1, input: userInput() }));
+    await collect(client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }));
     expect(activeSubscriptions).toBe(0);
   });
 
@@ -522,7 +645,9 @@ describe("FdResponsesClient", () => {
     const client = new FdResponsesClient(store.service, {
       fetch: vi.fn(async () => sseResponse(textEvents("resp-race", "done"))),
     });
-    const iterator = client.stream({ round: 1, input: userInput() })[Symbol.asyncIterator]();
+    const iterator = client
+      .stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() })
+      [Symbol.asyncIterator]();
     const first = await iterator.next();
     expect(first.value).toEqual({
       type: "response-metadata",
@@ -565,10 +690,12 @@ describe("FdResponsesClient", () => {
     const neverFetch = vi.fn(async () => sseResponse(textEvents("unused", "unused")));
     const client = new FdResponsesClient(reader(), { fetch: neverFetch });
     await expectKind(client, "invalid_request", {
+      model: FD_RESPONSES_MODEL,
       round: FD_RESPONSES_LIMITS.maxRounds + 1,
       input: userInput(),
     });
     await expectKind(client, "invalid_request", {
+      model: FD_RESPONSES_MODEL,
       round: 1,
       input: [
         { role: "user", content: "hi" },
@@ -618,6 +745,7 @@ describe("FdResponsesClient", () => {
 
     const result = await collectFailure(
       client.stream({
+        model: FD_RESPONSES_MODEL,
         round: 1,
         input: userInput(),
         tools: [
@@ -735,7 +863,8 @@ function validFunctionCalls(events: ReadonlyArray<FdResponsesEvent>): FdResponse
 async function expectKind(
   client: FdResponsesClient,
   kind: FdResponsesError["kind"],
-  request: { round: number; input: ReadonlyArray<FdResponsesInputItem> } = {
+  request: Pick<FdResponsesRequest, "model" | "round" | "input"> = {
+    model: FD_RESPONSES_MODEL,
     round: 1,
     input: userInput(),
   },

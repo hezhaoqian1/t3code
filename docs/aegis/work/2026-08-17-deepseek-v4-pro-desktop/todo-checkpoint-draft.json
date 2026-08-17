@@ -1,11 +1,15 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-08-17-deepseek-v4-pro-desktop",
-  "currentTodo": "Finish 0.2.8 publication while establishing the dual-model contract.",
-  "completedTodos": [],
-  "activeSlice": "Task 1: exact two-model credential and protocol contract.",
-  "evidenceRefs": [],
+  "currentTodo": "Add the compact Flash/Pro composer selector.",
+  "completedTodos": [
+    "Feishu account switching",
+    "Task 1 exact two-model credential projection and managed token upgrade",
+    "Task 2 selected-model runtime routing"
+  ],
+  "activeSlice": "Task 3: composer selector and model-selection state.",
+  "evidenceRefs": ["docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/90-evidence.md"],
   "blockedOn": "None.",
-  "nextStep": "Install worktree dependencies, run baseline focused tests, then edit the shared contract.",
+  "nextStep": "Update modelSelection.ts, add FdModelSelector.tsx, wire it immediately left of Send, and run focused Web tests.",
   "updatedAt": "2026-08-17"
 }

@@ -19,6 +19,7 @@ import {
   FD_RESPONSES_LIMITS,
   FD_RESPONSES_MODEL,
   FdResponsesError,
+  isFdResponsesModel,
   type FdResponsesEvent,
   type FdResponsesInputItem,
   type FdResponsesMessageInputItem,
@@ -119,6 +120,9 @@ export class FdResponsesClient {
     const signal = AbortSignal.any(signals);
     try {
       const credentials = credentialLease.credentials;
+      if (!authorizedModels(credentials).includes(request.model)) {
+        throw new FdResponsesError("policy_invalid");
+      }
       const exactFetch = makeExactFetch(this.#fetch, credentials, request);
       const provider = createOpenAI({
         name: "fd-new-api",
@@ -129,7 +133,7 @@ export class FdResponsesClient {
       });
       const sdkTools = makeTools(request, this.#toolValidatorCache);
       const result = streamText({
-        model: provider.responses(FD_RESPONSES_MODEL),
+        model: provider.responses(request.model),
         messages: [{ role: "user", content: "FD protocol request" }],
         tools: sdkTools,
         ...(request.toolChoice
@@ -182,7 +186,7 @@ export class FdResponsesClient {
               pendingFunctionCalls.set(raw.functionCall.callId, raw.functionCall);
             }
             for (const event of raw.events) {
-              if (event.type === "response-metadata" && event.model !== FD_RESPONSES_MODEL) {
+              if (event.type === "response-metadata" && event.model !== request.model) {
                 throw new FdResponsesError("malformed_response");
               }
               if (event.type === "response-metadata") sawExactModelMetadata = true;
@@ -418,8 +422,21 @@ function sameCredentialSafetyIdentity(
     current.runtimeApiKey === next.runtimeApiKey &&
     current.policy.version === next.policy.version &&
     current.policy.capability === next.policy.capability &&
-    current.policy.model === next.policy.model
+    current.policy.model === next.policy.model &&
+    sameModels(current.policy.models, next.policy.models)
   );
+}
+
+function sameModels(
+  current: FdServerRuntimeCredentialProjection["policy"]["models"],
+  next: FdServerRuntimeCredentialProjection["policy"]["models"],
+): boolean {
+  if (current === undefined || next === undefined) return current === next;
+  return current.length === next.length && current.every((model, index) => model === next[index]);
+}
+
+function authorizedModels(credentials: FdServerRuntimeCredentialProjection): ReadonlyArray<string> {
+  return credentials.policy.models ?? [credentials.policy.model];
 }
 
 function validateCredentials(
@@ -441,6 +458,7 @@ function validateCredentials(
 
 function validateRequest(request: FdResponsesRequest): void {
   if (
+    !isFdResponsesModel(request.model) ||
     !Number.isInteger(request.round) ||
     request.round < 1 ||
     request.round > FD_RESPONSES_LIMITS.maxRounds ||
@@ -479,7 +497,7 @@ function validateRequest(request: FdResponsesRequest): void {
   const requestBaseBytes = byteLength(
     jsonStringify(
       {
-        model: FD_RESPONSES_MODEL,
+        model: request.model,
         input: request.input,
         ...(request.instructions ? { instructions: request.instructions } : {}),
         store: false,
@@ -670,7 +688,7 @@ function makeExactFetch(
     }
     const body = JSON.stringify({
       ...sdkBody,
-      model: FD_RESPONSES_MODEL,
+      model: request.model,
       input: request.input,
       ...(request.instructions ? { instructions: request.instructions } : {}),
       store: false,

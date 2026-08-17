@@ -8,6 +8,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
+import { FD_RUNTIME_PRO_MODEL } from "@t3tools/contracts/fd/runtime-credentials";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
@@ -1443,15 +1444,38 @@ describe("FdDeepSeekAdapter", () => {
         ).pipe(Effect.forkChild);
 
         yield* adapter.startSession(startInput);
-        const turn = yield* adapter.sendTurn({ threadId, input: "$local summarize" });
+        const turn = yield* adapter.sendTurn({
+          threadId,
+          input: "$local summarize",
+          modelSelection: {
+            instanceId: FD_DEEPSEEK_INSTANCE_ID,
+            model: FD_RUNTIME_PRO_MODEL,
+          },
+        });
         yield* waitFor(() => events.some((event) => event.eventId === "codex-event"));
+
+        yield* adapter.sendTurn({
+          threadId,
+          input: "$local continue",
+          modelSelection: startInput.modelSelection,
+        });
 
         expect(turn.turnId).toBe(codexTurnId);
         expect(turn.resumeCursor).toEqual({ threadId: "codex-provider-thread" });
+        expect(sentInputs).toEqual([
+          expect.objectContaining({
+            modelSelection: expect.objectContaining({ model: FD_RUNTIME_PRO_MODEL }),
+          }),
+          expect.objectContaining({
+            modelSelection: expect.objectContaining({ model: "deepseek-v4-flash" }),
+          }),
+        ]);
+        expect((yield* adapter.listSessions())[0]?.model).toBe("deepseek-v4-flash");
         expect(startedInputs).toHaveLength(1);
         expect(startedInputs[0]).toMatchObject({ runtimeMode: "approval-required" });
-        expect(sentInputs).toHaveLength(1);
+        expect(sentInputs).toHaveLength(2);
         expect(sentInputs[0]).toMatchObject({ input: "$local summarize" });
+        expect(sentInputs[1]).toMatchObject({ input: "$local continue" });
         expect(events.find((event) => event.eventId === "codex-event")).toMatchObject({
           provider: FD_DEEPSEEK_DRIVER_KIND,
           providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
@@ -1499,7 +1523,7 @@ describe("FdDeepSeekAdapter", () => {
           runtimeMode: "approval-required",
           fdSkillVersionId: 10004,
         });
-        expect(sentInputs[2]).toMatchObject({
+        expect(sentInputs[3]).toMatchObject({
           input: "enterprise query",
           fdSkillVersionId: 10004,
         });

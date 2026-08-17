@@ -7,11 +7,11 @@
     "https://api-docs.deepseek.com/guides/responses_api",
     "https://api-docs.deepseek.com/quick_start/pricing"
   ],
-  "scopeStatus": "not-yet-verified",
-  "compatStatus": "not-yet-verified",
-  "retirementStatus": "not-yet-verified",
+  "scopeStatus": "Tasks 1 and 2 stayed within the approved FD credential and provider owners.",
+  "compatStatus": "Flash remains default, Pro requires exact authorization, and image behavior is unchanged.",
+  "retirementStatus": "No parallel model state owner or silent fallback was added.",
   "newRiskSignals": [
     "Credential allowlist and per-turn runtime selection cross an internal trust boundary; Pro costs and concurrency differ from Flash."
   ],
-  "decision": "needs-baseline-readback"
+  "decision": "continue"
 }

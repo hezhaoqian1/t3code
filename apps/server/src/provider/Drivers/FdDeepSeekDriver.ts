@@ -20,6 +20,7 @@ import { FdResponsesClient } from "../../fd-agent/FdResponsesClient.ts";
 import {
   FD_RESPONSES_LIMITS,
   FD_RESPONSES_MODEL,
+  FD_RESPONSES_MODELS,
   type FdResponsesInputImageContentPart,
 } from "../../fd-agent/FdResponsesProtocol.ts";
 import * as ProcessRunner from "../../processRunner.ts";
@@ -295,16 +296,14 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
           checkedAt,
           skillCatalogState: fdSkillCatalogState,
           ...(!authenticated && enabled ? { message: "Sign in to FD to use DeepSeek." } : {}),
-          models: [
-            {
-              slug: FD_RESPONSES_MODEL,
-              name: "DeepSeek V4 Flash",
-              shortName: "DeepSeek V4 Flash",
-              isCustom: false,
-              isDefault: true,
-              capabilities: { optionDescriptors: [] },
-            },
-          ],
+          models: FD_RESPONSES_MODELS.map((model) => ({
+            slug: model,
+            name: model === FD_RESPONSES_MODEL ? "DeepSeek V4 Flash" : "DeepSeek V4 Pro",
+            shortName: model === FD_RESPONSES_MODEL ? "V4 Flash" : "V4 Pro",
+            isCustom: false,
+            isDefault: model === FD_RESPONSES_MODEL,
+            capabilities: { optionDescriptors: [] },
+          })),
           slashCommands: [],
           skills: [
             ...userSkillCatalog.snapshot.skills.map((skill) => ({

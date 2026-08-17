@@ -9,6 +9,7 @@ import {
   type FdResponsesInputItem,
   type FdResponsesOutputItem,
   type FdResponsesRequest,
+  type FdResponsesModel,
   type FdResponsesToolDefinition,
 } from "./FdResponsesProtocol.ts";
 
@@ -52,6 +53,7 @@ export interface FdResponsesStreamer {
 }
 
 export interface FdAgentRunInput {
+  readonly model: FdResponsesModel;
   readonly input: ReadonlyArray<FdResponsesInputItem>;
   readonly runtimeMode: RuntimeMode;
   readonly instructions?: string;
@@ -230,6 +232,7 @@ export class FdAgentKernel {
         let completed = false;
 
         for await (const event of this.#client.stream({
+          model: input.model,
           round,
           input: continuation,
           ...(input.instructions ? { instructions: input.instructions } : {}),

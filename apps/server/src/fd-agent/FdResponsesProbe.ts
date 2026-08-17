@@ -40,6 +40,7 @@ interface ProbeClient {
 export async function runFdResponsesProbe(client: ProbeClient): Promise<FdResponsesProbeMatrix> {
   const textEvents = await collectEvents(
     client.stream({
+      model: FD_RESPONSES_MODEL,
       round: 1,
       input: [
         {
@@ -84,6 +85,7 @@ export async function runFdResponsesProbe(client: ProbeClient): Promise<FdRespon
   ];
   const firstToolRound = await collectEvents(
     client.stream({
+      model: FD_RESPONSES_MODEL,
       round: 1,
       input: toolInput,
       tools,
@@ -109,6 +111,7 @@ export async function runFdResponsesProbe(client: ProbeClient): Promise<FdRespon
   ]);
   const secondToolRound = await collectEvents(
     client.stream({
+      model: FD_RESPONSES_MODEL,
       round: 2,
       input: secondInput,
       tools,
@@ -126,6 +129,7 @@ export async function runFdResponsesProbe(client: ProbeClient): Promise<FdRespon
   let cancelled = false;
   try {
     for await (const event of client.stream({
+      model: FD_RESPONSES_MODEL,
       round: 1,
       input: [
         {

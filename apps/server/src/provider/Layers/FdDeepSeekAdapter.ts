@@ -29,6 +29,8 @@ import {
 import { FD_DEEPSEEK_DRIVER_KIND, FD_DEEPSEEK_INSTANCE_ID } from "../../fd-agent/FdModelPolicy.ts";
 import {
   FD_RESPONSES_MODEL,
+  isFdResponsesModel,
+  type FdResponsesModel,
   type FdResponsesInputImageContentPart,
   type FdResponsesInputItem,
   type FdResponsesMessageInputItem,
@@ -67,6 +69,7 @@ interface PendingApproval {
 
 interface ActiveTurn {
   readonly id: TurnId;
+  readonly model: FdResponsesModel;
   controller: AbortController;
   readonly assistantItemId: RuntimeItemId;
   readonly userMessage: FdResponsesMessageInputItem;
@@ -419,6 +422,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     const input: ReadonlyArray<FdResponsesInputItem> = [...context.history, turn.userMessage];
     try {
       for await (const event of options.kernel.run({
+        model: turn.model,
         input,
         runtimeMode: context.runtimeMode,
         ...(turn.instructions ? { instructions: turn.instructions } : {}),
@@ -546,7 +550,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
           if (
             sawStarted ||
             serverConversationId !== undefined ||
-            event.model !== FD_RESPONSES_MODEL ||
+            event.model !== turn.model ||
             (replaying ? event.replayed !== true : event.replayed === true)
           ) {
             throw new FdEnterpriseAgentError("invalid_event", 0);
@@ -778,15 +782,15 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         issue: "Provider instance does not match the FD DeepSeek instance.",
       });
     }
+    const selectedModel = input.modelSelection?.model ?? FD_RESPONSES_MODEL;
     if (
-      input.modelSelection &&
-      (input.modelSelection.instanceId !== instanceId ||
-        input.modelSelection.model !== FD_RESPONSES_MODEL)
+      (input.modelSelection && input.modelSelection.instanceId !== instanceId) ||
+      !isFdResponsesModel(selectedModel)
     ) {
       return yield* new ProviderAdapterValidationError({
         provider: FD_DEEPSEEK_DRIVER_KIND,
         operation: "startSession",
-        issue: `Only ${FD_RESPONSES_MODEL} is authorized.`,
+        issue: "Only FD-managed DeepSeek models are authorized.",
       });
     }
     const existing = sessions.get(input.threadId);
@@ -814,7 +818,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       status: "ready",
       runtimeMode: input.runtimeMode,
       ...(input.cwd ? { cwd: input.cwd } : {}),
-      model: FD_RESPONSES_MODEL,
+      model: selectedModel,
       threadId: input.threadId,
       resumeCursor: { schemaVersion: 1, sessionId: input.threadId },
       createdAt,
@@ -857,6 +861,11 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     "sendFdDeepSeekTurn",
   )(function* (input: ProviderSendTurnInput) {
     const context = yield* requireSession(input.threadId);
+    const selectedModel =
+      input.modelSelection?.model ??
+      (context.session.model && isFdResponsesModel(context.session.model)
+        ? context.session.model
+        : FD_RESPONSES_MODEL);
     const inputText = input.input?.trim();
     const attachments = input.attachments ?? [];
     if (!inputText && attachments.length === 0) {
@@ -867,14 +876,13 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       });
     }
     if (
-      input.modelSelection &&
-      (input.modelSelection.instanceId !== instanceId ||
-        input.modelSelection.model !== FD_RESPONSES_MODEL)
+      (input.modelSelection && input.modelSelection.instanceId !== instanceId) ||
+      !isFdResponsesModel(selectedModel)
     ) {
       return yield* new ProviderAdapterValidationError({
         provider: FD_DEEPSEEK_DRIVER_KIND,
         operation: "sendTurn",
-        issue: `Only ${FD_RESPONSES_MODEL} is authorized.`,
+        issue: "Only FD-managed DeepSeek models are authorized.",
       });
     }
     if (context.activeTurn && !context.activeTurn.settled) {
@@ -889,6 +897,17 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         provider: FD_DEEPSEEK_DRIVER_KIND,
         operation: "sendTurn",
         issue: "FD-managed Skills do not accept image attachments.",
+      });
+    }
+    if (
+      input.fdSkillVersionId !== undefined &&
+      !options.ordinaryAdapter &&
+      selectedModel !== FD_RESPONSES_MODEL
+    ) {
+      return yield* new ProviderAdapterValidationError({
+        provider: FD_DEEPSEEK_DRIVER_KIND,
+        operation: "sendTurn",
+        issue: "This FD Skill runtime currently requires V4 Flash.",
       });
     }
     if (options.ordinaryAdapter) {
@@ -943,6 +962,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         };
       }
       const result = yield* options.ordinaryAdapter.sendTurn(input);
+      context.session = { ...context.session, model: selectedModel };
       if (result.resumeCursor !== undefined) {
         context.ordinaryResumeCursors.set(requestedProfile, result.resumeCursor);
         context.session = { ...context.session, resumeCursor: result.resumeCursor };
@@ -995,6 +1015,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     const turnId = TurnId.make(randomId());
     const turn: ActiveTurn = {
       id: turnId,
+      model: selectedModel,
       controller: new AbortController(),
       assistantItemId: RuntimeItemId.make(`${turnId}:assistant`),
       userMessage,
@@ -1012,6 +1033,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     context.activeTurn = turn;
     context.session = {
       ...context.session,
+      model: selectedModel,
       status: "running",
       activeTurnId: turnId,
       updatedAt: timestamp(),
@@ -1020,7 +1042,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       {
         ...eventBase(input.threadId, turnId),
         type: "turn.started",
-        payload: { model: FD_RESPONSES_MODEL },
+        payload: { model: selectedModel },
       },
       {
         ...eventBase(input.threadId, turnId),

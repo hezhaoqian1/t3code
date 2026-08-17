@@ -1,4 +1,14 @@
-export const FD_RESPONSES_MODEL = "deepseek-v4-flash" as const;
+import {
+  FD_RUNTIME_DEFAULT_MODEL,
+  FD_RUNTIME_MODELS,
+  isFdRuntimeModel,
+  type FdRuntimeModel,
+} from "@t3tools/contracts/fd/runtime-credentials";
+
+export const FD_RESPONSES_MODEL = FD_RUNTIME_DEFAULT_MODEL;
+export const FD_RESPONSES_MODELS = FD_RUNTIME_MODELS;
+export type FdResponsesModel = FdRuntimeModel;
+export const isFdResponsesModel = isFdRuntimeModel;
 export const FD_RESPONSES_CAPABILITY = "general_assistant" as const;
 
 export const FD_RESPONSES_LIMITS = {
@@ -90,6 +100,7 @@ export interface FdResponsesToolDefinition {
 }
 
 export interface FdResponsesRequest {
+  readonly model: FdResponsesModel;
   readonly round: number;
   readonly input: ReadonlyArray<FdResponsesInputItem>;
   readonly instructions?: string;

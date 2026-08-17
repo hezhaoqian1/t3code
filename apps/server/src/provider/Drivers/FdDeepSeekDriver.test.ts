@@ -356,8 +356,15 @@ describe("FdDeepSeekDriver", () => {
         expect.objectContaining({
           slug: FD_RESPONSES_MODEL,
           name: "DeepSeek V4 Flash",
-          shortName: "DeepSeek V4 Flash",
+          shortName: "V4 Flash",
           isDefault: true,
+          isCustom: false,
+        }),
+        expect.objectContaining({
+          slug: "deepseek-v4-pro",
+          name: "DeepSeek V4 Pro",
+          shortName: "V4 Pro",
+          isDefault: false,
           isCustom: false,
         }),
       ]);

@@ -5,7 +5,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import type { FdResponsesStreamer } from "../fd-agent/FdAgentKernel.ts";
-import { FD_RESPONSES_MODEL } from "../fd-agent/FdResponsesProtocol.ts";
+import { FD_RESPONSES_MODEL, isFdResponsesModel } from "../fd-agent/FdResponsesProtocol.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
   buildBranchNamePrompt,
@@ -39,12 +39,13 @@ export const makeFdDeepSeekTextGeneration = (client: FdResponsesStreamer) => {
     outputSchema: S,
     modelSelection: { readonly model: string },
   ): Effect.Effect<S["Type"], TextGenerationError, S["DecodingServices"]> => {
-    if (modelSelection.model !== FD_RESPONSES_MODEL) return Effect.fail(requestError(operation));
+    if (!isFdResponsesModel(modelSelection.model)) return Effect.fail(requestError(operation));
     return Effect.tryPromise({
       try: async () => {
         let text = "";
         let completed = false;
         for await (const event of client.stream({
+          model: FD_RESPONSES_MODEL,
           round: 1,
           input: [{ role: "user", content: prompt }],
           reasoningEffort: "none",
