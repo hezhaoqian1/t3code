@@ -1,10 +1,12 @@
 import {
   ChartNoAxesColumnIcon,
+  CircleUserRoundIcon,
   LoaderCircleIcon,
   LogOutIcon,
   PlugZapIcon,
   SettingsIcon,
 } from "lucide-react";
+import type { FdAccountState } from "@t3tools/contracts";
 import { memo, useCallback, type ReactNode } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
@@ -21,6 +23,12 @@ import {
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
 import fdsureMark from "../../assets/fdsure-mark.png";
 import { useFdAccount } from "../../fd/FdAccountProvider";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
+
+export function getFdAccountDisplayName(state: FdAccountState): string {
+  if (state.status !== "authenticated") return "未登录";
+  return state.profile.displayName?.trim() || state.profile.username;
+}
 
 export const SidebarChromeHeader = memo(function SidebarChromeHeader({
   isElectron,
@@ -83,7 +91,11 @@ export const SidebarConnectorButton = memo(function SidebarConnectorButton() {
   );
 });
 
-export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
+export const SidebarChromeFooter = memo(function SidebarChromeFooter({
+  isDesktop = false,
+}: {
+  readonly isDesktop?: boolean;
+}) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (location) => location.pathname });
   const account = useFdAccount();
@@ -101,43 +113,91 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     }
     void navigate({ to: "/usage" });
   }, [isMobile, navigate, setOpenMobile]);
+  const accountDisplayName = getFdAccountDisplayName(account.state);
 
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarUpdatePill />
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuButton isActive={pathname === "/usage"} onClick={handleUsageClick}>
-            <ChartNoAxesColumnIcon />
-            <span>用量统计</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            isActive={pathname === "/settings" || pathname.startsWith("/settings/")}
-            onClick={handleSettingsClick}
-          >
-            <SettingsIcon />
-            <span>设置</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            disabled={account.busy !== null}
-            title={
-              account.state.status === "authenticated" ? account.state.profile.username : undefined
-            }
-            onClick={() => void account.logout()}
-          >
-            {account.busy === "logout" ? (
-              <LoaderCircleIcon className="animate-spin" />
-            ) : (
-              <LogOutIcon />
-            )}
-            <span>退出登录</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      </SidebarMenu>
+      {isDesktop ? (
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <SidebarMenuButton
+                    size="lg"
+                    className="border border-sidebar-border/70 bg-sidebar-control-surface/60 px-2.5 hover:bg-sidebar-row-hover"
+                    aria-label="打开账号菜单"
+                    title={accountDisplayName}
+                  />
+                }
+              >
+                <CircleUserRoundIcon className="size-4 shrink-0" />
+                <span className="min-w-0 truncate">{accountDisplayName}</span>
+              </MenuTrigger>
+              <MenuPopup side="top" align="start" className="min-w-52">
+                <MenuItem onClick={handleUsageClick} closeOnClick>
+                  <ChartNoAxesColumnIcon />
+                  用量统计
+                </MenuItem>
+                <MenuItem onClick={handleSettingsClick} closeOnClick>
+                  <SettingsIcon />
+                  设置
+                </MenuItem>
+                <MenuSeparator />
+                <MenuItem
+                  disabled={account.busy !== null}
+                  onClick={() => void account.logout()}
+                  closeOnClick
+                >
+                  {account.busy === "logout" ? (
+                    <LoaderCircleIcon className="animate-spin" />
+                  ) : (
+                    <LogOutIcon />
+                  )}
+                  退出登录
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      ) : (
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton isActive={pathname === "/usage"} onClick={handleUsageClick}>
+              <ChartNoAxesColumnIcon />
+              <span>用量统计</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={pathname === "/settings" || pathname.startsWith("/settings/")}
+              onClick={handleSettingsClick}
+            >
+              <SettingsIcon />
+              <span>设置</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              disabled={account.busy !== null}
+              title={
+                account.state.status === "authenticated"
+                  ? account.state.profile.username
+                  : undefined
+              }
+              onClick={() => void account.logout()}
+            >
+              {account.busy === "logout" ? (
+                <LoaderCircleIcon className="animate-spin" />
+              ) : (
+                <LogOutIcon />
+              )}
+              <span>退出登录</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      )}
     </SidebarFooter>
   );
 });

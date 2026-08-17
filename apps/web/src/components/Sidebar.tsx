@@ -3396,7 +3396,7 @@ export default function Sidebar() {
           ) : null}
         </SidebarGroup>
       </SidebarContent>
-      <SidebarChromeFooter />
+      <SidebarChromeFooter isDesktop={isElectron} />
     </>
   );
 }
