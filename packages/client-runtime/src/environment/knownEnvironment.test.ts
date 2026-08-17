@@ -25,7 +25,7 @@ describe("known environment bootstrap helpers", () => {
     ).toEqual({
       id: "ws:Remote environment",
       label: "Remote environment",
-      source: "manual",
+      source: "desktop-managed",
       target: {
         httpBaseUrl: "https://remote.example.com",
         wsBaseUrl: "wss://remote.example.com",

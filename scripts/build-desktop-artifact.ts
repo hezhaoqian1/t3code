@@ -1775,7 +1775,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     return yield* new MissingDesktopBuildInputError({
       artifact: "desktop-resources",
       artifactPath: packagedCodexBinaryPath,
-      buildCommand: "electron-builder",
+      buildCommand: "vp run build:desktop",
     });
   }
   yield* runCommand(ChildProcess.make(packagedCodexBinaryPath, ["--version"]), {

@@ -1,10 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import * as path from "node:path";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -280,27 +280,30 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, ["!node_modules/@openai/codex{,/**/*}"]);
   });
 
-  it("pins one native Codex runtime for each desktop artifact", () => {
-    assert.equal(BUNDLED_CODEX_VERSION, "0.147.0");
-    assert.deepStrictEqual(resolveCodexRuntimePackage("mac", "arm64"), {
-      packageSpec: "0.147.0-darwin-arm64",
-      vendorDirectory: "aarch64-apple-darwin",
-      executableName: "codex",
-    });
-    assert.deepStrictEqual(resolveCodexRuntimePackage("win", "x64"), {
-      packageSpec: "0.147.0-win32-x64",
-      vendorDirectory: "x86_64-pc-windows-msvc",
-      executableName: "codex.exe",
-    });
-    assert.equal(
-      resolvePackagedCodexBinaryPath("/stage/dist", "mac", "arm64", path.join),
-      "/stage/dist/mac-arm64/Fangde AI.app/Contents/Resources/codex/bin/codex",
-    );
-    assert.equal(
-      resolvePackagedCodexBinaryPath("/stage/dist", "win", "x64", path.join),
-      "/stage/dist/win-unpacked/resources/codex/bin/codex.exe",
-    );
-  });
+  it.effect("pins one native Codex runtime for each desktop artifact", () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      assert.equal(BUNDLED_CODEX_VERSION, "0.147.0");
+      assert.deepStrictEqual(resolveCodexRuntimePackage("mac", "arm64"), {
+        packageSpec: "0.147.0-darwin-arm64",
+        vendorDirectory: "aarch64-apple-darwin",
+        executableName: "codex",
+      });
+      assert.deepStrictEqual(resolveCodexRuntimePackage("win", "x64"), {
+        packageSpec: "0.147.0-win32-x64",
+        vendorDirectory: "x86_64-pc-windows-msvc",
+        executableName: "codex.exe",
+      });
+      assert.equal(
+        resolvePackagedCodexBinaryPath("/stage/dist", "mac", "arm64", path.join),
+        "/stage/dist/mac-arm64/Fangde AI.app/Contents/Resources/codex/bin/codex",
+      );
+      assert.equal(
+        resolvePackagedCodexBinaryPath("/stage/dist", "win", "x64", path.join),
+        "/stage/dist/win-unpacked/resources/codex/bin/codex.exe",
+      );
+    }),
+  );
 
   it.effect("applies platform-specific packaging to the build config", () =>
     Effect.gen(function* () {
