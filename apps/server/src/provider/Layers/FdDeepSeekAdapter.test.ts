@@ -126,6 +126,85 @@ describe("FdDeepSeekAdapter", () => {
     }),
   );
 
+  it.effect("runs the direct Responses lifecycle with the exact Pro model", () =>
+    Effect.gen(function* () {
+      const requests: unknown[] = [];
+      const client: FdResponsesStreamer = {
+        stream: async function* (request) {
+          requests.push(request);
+          yield { ...metadata, model: FD_RUNTIME_PRO_MODEL };
+          yield { type: "text-delta", text: "Pro done" };
+          yield { type: "completed", finishReason: "stop" };
+        },
+      };
+      const adapter = yield* makeFdDeepSeekAdapter({ kernel: new FdAgentKernel(client) });
+      const events: ProviderRuntimeEvent[] = [];
+      yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => events.push(event)),
+      ).pipe(Effect.forkChild);
+      const proStartInput = {
+        ...startInput,
+        modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_PRO_MODEL },
+      };
+
+      const session = yield* adapter.startSession(proStartInput);
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "Use Pro",
+        modelSelection: proStartInput.modelSelection,
+      });
+      yield* waitFor(() =>
+        events.some((event) => event.type === "turn.completed" && event.turnId === turn.turnId),
+      );
+
+      expect(session.model).toBe(FD_RUNTIME_PRO_MODEL);
+      expect(requests).toEqual([expect.objectContaining({ model: FD_RUNTIME_PRO_MODEL })]);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "turn.started",
+          turnId: turn.turnId,
+          payload: { model: FD_RUNTIME_PRO_MODEL },
+        }),
+      );
+    }),
+  );
+
+  it.effect("rejects arbitrary models and direct Pro FD Skill execution", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([completed])),
+      });
+      const invalidStart = yield* adapter
+        .startSession({
+          ...startInput,
+          modelSelection: { ...startInput.modelSelection, model: "other-model" },
+        })
+        .pipe(Effect.flip);
+      expect(invalidStart).toMatchObject({
+        issue: "Only FD-managed DeepSeek models are authorized.",
+      });
+
+      yield* adapter.startSession({
+        ...startInput,
+        modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_PRO_MODEL },
+      });
+      const invalidSkillTurn = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "Run enterprise skill",
+          fdSkillVersionId: 10004,
+          modelSelection: {
+            instanceId: FD_DEEPSEEK_INSTANCE_ID,
+            model: FD_RUNTIME_PRO_MODEL,
+          },
+        })
+        .pipe(Effect.flip);
+      expect(invalidSkillTurn).toMatchObject({
+        issue: "This FD Skill runtime currently requires V4 Flash.",
+      });
+    }),
+  );
+
   it.effect("routes an authorized FD Skill through Enterprise Agent exactly once", () =>
     Effect.gen(function* () {
       const localStream = vi.fn(async function* () {

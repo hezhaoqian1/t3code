@@ -23,6 +23,13 @@ export function resolveFdModelOptions(
   return models.flatMap((model) => (isFdRuntimeModel(model.slug) ? [model.slug] : []));
 }
 
+export function resolveFdModelChange(
+  nextValue: string | null,
+  options: ReadonlyArray<FdRuntimeModel>,
+): FdRuntimeModel | null {
+  return nextValue && isFdRuntimeModel(nextValue) && options.includes(nextValue) ? nextValue : null;
+}
+
 export function FdModelSelector(props: {
   value: string;
   models: ReadonlyArray<ServerProviderModel>;
@@ -41,9 +48,8 @@ export function FdModelSelector(props: {
       value={value}
       disabled={props.disabled || options.length < 2}
       onValueChange={(nextValue) => {
-        if (nextValue && isFdRuntimeModel(nextValue) && options.includes(nextValue)) {
-          props.onValueChange(nextValue);
-        }
+        const selected = resolveFdModelChange(nextValue, options);
+        if (selected) props.onValueChange(selected);
       }}
     >
       <SelectTrigger

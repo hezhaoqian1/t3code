@@ -5,7 +5,12 @@ import {
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { FdModelSelector, fdModelLabel, resolveFdModelOptions } from "./FdModelSelector";
+import {
+  FdModelSelector,
+  fdModelLabel,
+  resolveFdModelChange,
+  resolveFdModelOptions,
+} from "./FdModelSelector";
 
 const models = [
   {
@@ -39,5 +44,14 @@ describe("FdModelSelector", () => {
     expect(markup).toContain('data-fd-model-selector="true"');
     expect(markup).toContain("V4 Pro");
     expect(fdModelLabel(FD_RUNTIME_DEFAULT_MODEL)).toBe("V4 Flash");
+  });
+
+  it("accepts only advertised managed model changes", () => {
+    const options = resolveFdModelOptions(models);
+
+    expect(resolveFdModelChange(FD_RUNTIME_PRO_MODEL, options)).toBe(FD_RUNTIME_PRO_MODEL);
+    expect(resolveFdModelChange("other-model", options)).toBeNull();
+    expect(resolveFdModelChange(null, options)).toBeNull();
+    expect(resolveFdModelChange(FD_RUNTIME_PRO_MODEL, [FD_RUNTIME_DEFAULT_MODEL])).toBeNull();
   });
 });

@@ -287,6 +287,11 @@ describe("FdDeepSeekDriver", () => {
           model: FD_RESPONSES_MODEL,
         },
       });
+      yield* Effect.promise(() =>
+        vi.waitFor(() =>
+          expect(events.some((event) => event.type === "session.started")).toBe(true),
+        ),
+      );
       const turn = yield* adapter.sendTurn({
         threadId,
         input: "Inspect this image exactly.",

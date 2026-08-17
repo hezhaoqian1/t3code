@@ -65,6 +65,26 @@ describe("NewApiClient", () => {
   });
 
   it.each([
+    ["failed response", { success: false, data: null }],
+    [
+      "different token identity",
+      apiSuccess(runtimeToken({ id: 42, model_limits: "deepseek-v4-flash,deepseek-v4-pro" })),
+    ],
+    ["inexact upgraded policy", apiSuccess(runtimeToken({ model_limits: "deepseek-v4-flash" }))],
+  ])("fails closed when a legacy token upgrade returns %s", async (_caseName, upgradeResponse) => {
+    const fetch = responseQueue([
+      jsonResponse(apiSuccess(apiUser())),
+      jsonResponse(apiSuccess(runtimeToken({ model_limits: "deepseek-v4-flash" }))),
+      jsonResponse(upgradeResponse),
+    ]);
+    const client = new NewApiClient({ baseUrl: "http://127.0.0.1:3001", fetch });
+
+    await expect(client.validate(credentials())).rejects.toMatchObject({
+      code: "account_unavailable",
+    });
+  });
+
+  it.each([
     "deepseek-v4-flash ",
     " deepseek-v4-flash",
     "deepseek-v4-flash,gpt-5",
