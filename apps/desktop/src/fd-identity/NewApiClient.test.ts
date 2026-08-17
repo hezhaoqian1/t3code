@@ -4,7 +4,7 @@ import type { PendingFdRevocation } from "./CredentialVault.ts";
 import { NewApiClient, NewApiClientError } from "./NewApiClient.ts";
 
 describe("NewApiClient", () => {
-  it("retires stale same-device tokens and creates exact deepseek-v4-flash access", async () => {
+  it("retires stale same-device tokens and creates exact Flash and Pro access", async () => {
     const fetch = responseQueue([
       jsonResponse(authResponse(), { cookie: true }),
       jsonResponse(apiSuccess({ total: 1, items: [runtimeToken({ id: 40 })] })),
@@ -25,12 +25,12 @@ describe("NewApiClient", () => {
       name: "FD AI Desktop device123",
       status: 1,
       model_limits_enabled: true,
-      model_limits: "deepseek-v4-flash",
+      model_limits: "deepseek-v4-flash,deepseek-v4-pro",
     });
     expect(JSON.stringify(fetch.mock.calls.slice(1))).not.toContain("password-secret");
   });
 
-  it("validates user identity, token id, status, and exact one-model limit on bootstrap", async () => {
+  it("validates user identity, token id, status, and exact model limit on bootstrap", async () => {
     const fetch = responseQueue([
       jsonResponse(apiSuccess(apiUser())),
       jsonResponse(apiSuccess(runtimeToken({ model_limits: "deepseek-v4-flash,gpt-5" }))),
@@ -40,6 +40,28 @@ describe("NewApiClient", () => {
       code: "account_unavailable",
     } satisfies Partial<NewApiClientError>);
     expect(request(fetch, 1).path).toBe("/api/token/41");
+  });
+
+  it("upgrades a legacy Flash-only token in place without changing its key", async () => {
+    const legacy = runtimeToken({ model_limits: "deepseek-v4-flash" });
+    const upgraded = runtimeToken({ model_limits: "deepseek-v4-flash,deepseek-v4-pro" });
+    const fetch = responseQueue([
+      jsonResponse(apiSuccess(apiUser())),
+      jsonResponse(apiSuccess(legacy)),
+      jsonResponse(apiSuccess(upgraded)),
+    ]);
+    const client = new NewApiClient({ baseUrl: "http://127.0.0.1:3001", fetch });
+
+    await expect(client.validate(credentials())).resolves.toMatchObject({
+      runtimeTokenId: 41,
+      runtimeApiKey: "sk-runtime",
+    });
+    expect(request(fetch, 2)).toMatchObject({ path: "/api/token/", method: "PUT" });
+    expect(JSON.parse(request(fetch, 2).body)).toMatchObject({
+      id: 41,
+      model_limits_enabled: true,
+      model_limits: "deepseek-v4-flash,deepseek-v4-pro",
+    });
   });
 
   it.each([
@@ -468,8 +490,14 @@ function runtimeToken(overrides: Record<string, unknown> = {}) {
     id: 41,
     name: "FD AI Desktop device123",
     status: 1,
+    expired_time: -1,
+    remain_quota: 0,
+    unlimited_quota: true,
     model_limits_enabled: true,
-    model_limits: "deepseek-v4-flash",
+    model_limits: "deepseek-v4-flash,deepseek-v4-pro",
+    allow_ips: "",
+    group: "default",
+    cross_group_retry: false,
     ...overrides,
   };
 }

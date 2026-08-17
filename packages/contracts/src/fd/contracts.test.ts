@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import * as PublicContracts from "../index.ts";
 import { FdAccountLoginResponse, FdAccountState } from "./index.ts";
 import {
+  FD_RUNTIME_MODELS,
   FdRuntimeCredentialCommand,
   FdServerRuntimeCredentialProjection,
 } from "./runtimeCredentials.ts";
@@ -124,10 +125,22 @@ describe("FD runtime credential contracts", () => {
       model: "deepseek-v4-flash",
       expiresAt: 2_000_000_000,
     });
+    expect(
+      decode({
+        ...projection,
+        policy: { ...projection.policy, models: FD_RUNTIME_MODELS },
+      }).policy.models,
+    ).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
     expect(() =>
       decode({
         ...projection,
         policy: { ...projection.policy, model: "deepseek-v4" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decode({
+        ...projection,
+        policy: { ...projection.policy, models: ["deepseek-v4-flash", "gpt-5"] },
       }),
     ).toThrow();
   });

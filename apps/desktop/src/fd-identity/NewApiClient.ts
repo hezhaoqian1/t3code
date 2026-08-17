@@ -1,4 +1,8 @@
 import type { FdAccountUserSummary, FdUsagePeriod, FdUsageSummary } from "@t3tools/contracts";
+import {
+  FD_RUNTIME_DEFAULT_MODEL,
+  FD_RUNTIME_MODELS,
+} from "@t3tools/contracts/fd/runtime-credentials";
 
 import type { StoredFdCredentials } from "./CredentialVault.ts";
 import {
@@ -11,7 +15,8 @@ import {
 const REFRESH_COOKIE_NAME = "new_api_refresh";
 const MAX_RUNTIME_TOKEN_REVOCATION_PASSES = 8;
 const MAX_RUNTIME_TOKEN_REVOCATION_CANDIDATES = 800;
-export const FD_RUNTIME_MODEL = "deepseek-v4-flash";
+export const FD_RUNTIME_MODEL = FD_RUNTIME_DEFAULT_MODEL;
+export const FD_RUNTIME_MODEL_LIMITS = FD_RUNTIME_MODELS.join(",");
 
 export type NewApiErrorCode =
   | "invalid_credentials"
@@ -64,8 +69,14 @@ interface RuntimeToken {
   id: number;
   name: string;
   status: number;
+  expiredTime: number;
+  remainQuota: number;
+  unlimitedQuota: boolean;
   modelLimitsEnabled: boolean;
   modelLimits: string;
+  allowIps: string;
+  group: string;
+  crossGroupRetry: boolean;
 }
 
 export type NewApiClientOptions = NewApiHttpOptions;
@@ -108,7 +119,7 @@ export class NewApiClient {
         status: 1,
         unlimited_quota: true,
         model_limits_enabled: true,
-        model_limits: FD_RUNTIME_MODEL,
+        model_limits: FD_RUNTIME_MODEL_LIMITS,
       }),
     });
     if (!created.body.success) {
@@ -154,15 +165,49 @@ export class NewApiClient {
     if (!response.body.success) {
       throw new NewApiClientError("account_unavailable", "桌面模型权限已失效，请联系管理员");
     }
-    const token = parseRuntimeToken(response.body.data);
+    let token = parseRuntimeToken(response.body.data);
     if (token.id !== validated.runtimeTokenId) {
       throw new NewApiClientError("account_unavailable", "桌面模型权限身份不匹配");
     }
     if (token.name !== validated.runtimeTokenName) {
       throw new NewApiClientError("account_unavailable", "桌面模型权限设备身份不匹配");
     }
+    if (isLegacyManagedRuntimeToken(token)) {
+      token = await this.#upgradeLegacyRuntimeToken(validated.accessToken, token);
+    }
     assertManagedRuntimeToken(token);
     return validated;
+  }
+
+  async #upgradeLegacyRuntimeToken(
+    accessToken: string,
+    token: RuntimeToken,
+  ): Promise<RuntimeToken> {
+    const response = await this.#request("/api/token/", {
+      method: "PUT",
+      headers: bearer(accessToken),
+      body: JSON.stringify({
+        id: token.id,
+        name: token.name,
+        expired_time: token.expiredTime,
+        remain_quota: token.remainQuota,
+        unlimited_quota: token.unlimitedQuota,
+        model_limits_enabled: true,
+        model_limits: FD_RUNTIME_MODEL_LIMITS,
+        allow_ips: token.allowIps,
+        group: token.group,
+        cross_group_retry: token.crossGroupRetry,
+      }),
+    });
+    if (!response.body.success) {
+      throw new NewApiClientError("account_unavailable", "桌面模型权限升级失败，请联系管理员");
+    }
+    const upgraded = parseRuntimeToken(response.body.data);
+    if (upgraded.id !== token.id || upgraded.name !== token.name) {
+      throw new NewApiClientError("account_unavailable", "桌面模型权限升级结果不匹配");
+    }
+    assertManagedRuntimeToken(upgraded);
+    return upgraded;
   }
 
   async getUsageSummary(credentials: StoredFdCredentials): Promise<FdUsageSummary> {
@@ -443,15 +488,29 @@ function parseRuntimeToken(value: unknown): RuntimeToken {
     id: positiveIntField(token, "id"),
     name: stringField(token, "name", 50),
     status: intField(token, "status"),
+    expiredTime: intField(token, "expired_time"),
+    remainQuota: nonNegativeIntField(token, "remain_quota"),
+    unlimitedQuota: booleanField(token, "unlimited_quota"),
     modelLimitsEnabled: booleanField(token, "model_limits_enabled"),
     modelLimits: stringField(token, "model_limits", 1_024),
+    allowIps: optionalStringField(token, "allow_ips", 16_384),
+    group: optionalStringField(token, "group", 128),
+    crossGroupRetry: booleanField(token, "cross_group_retry"),
   };
 }
 
 function assertManagedRuntimeToken(token: RuntimeToken): void {
-  if (token.status !== 1 || !token.modelLimitsEnabled || token.modelLimits !== FD_RUNTIME_MODEL) {
+  if (
+    token.status !== 1 ||
+    !token.modelLimitsEnabled ||
+    token.modelLimits !== FD_RUNTIME_MODEL_LIMITS
+  ) {
     throw new NewApiClientError("account_unavailable", "桌面模型权限配置异常，请联系管理员");
   }
+}
+
+function isLegacyManagedRuntimeToken(token: RuntimeToken): boolean {
+  return token.status === 1 && token.modelLimitsEnabled && token.modelLimits === FD_RUNTIME_MODEL;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -464,6 +523,19 @@ function object(value: unknown): Record<string, unknown> {
 function stringField(value: Record<string, unknown>, key: string, maxLength: number): string {
   const field = value[key];
   if (typeof field !== "string" || field.length < 1 || field.length > maxLength) {
+    throw new Error(`New API ${key} is invalid`);
+  }
+  return field;
+}
+
+function optionalStringField(
+  value: Record<string, unknown>,
+  key: string,
+  maxLength: number,
+): string {
+  const field = value[key];
+  if (field === null || field === undefined) return "";
+  if (typeof field !== "string" || field.length > maxLength) {
     throw new Error(`New API ${key} is invalid`);
   }
   return field;

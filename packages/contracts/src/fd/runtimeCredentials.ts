@@ -6,6 +6,15 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Secret = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(16_384));
 const MAX_FD_RUNTIME_ORIGIN_LENGTH = 2_048;
 
+export const FD_RUNTIME_DEFAULT_MODEL = "deepseek-v4-flash" as const;
+export const FD_RUNTIME_PRO_MODEL = "deepseek-v4-pro" as const;
+export const FD_RUNTIME_MODELS = [FD_RUNTIME_DEFAULT_MODEL, FD_RUNTIME_PRO_MODEL] as const;
+export type FdRuntimeModel = (typeof FD_RUNTIME_MODELS)[number];
+
+export function isFdRuntimeModel(value: string): value is FdRuntimeModel {
+  return FD_RUNTIME_MODELS.some((model) => model === value);
+}
+
 export const FdRuntimeNewApiOrigin = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(MAX_FD_RUNTIME_ORIGIN_LENGTH),
@@ -19,7 +28,10 @@ export type FdRuntimeNewApiOrigin = typeof FdRuntimeNewApiOrigin.Type;
 export const FdServerRuntimePolicyProjection = Schema.Struct({
   version: Schema.Literal(1),
   capability: Schema.Literal("general_assistant"),
-  model: Schema.Literal("deepseek-v4-flash"),
+  model: Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
+  models: Schema.optionalKey(
+    Schema.Tuple([Schema.Literal(FD_RUNTIME_DEFAULT_MODEL), Schema.Literal(FD_RUNTIME_PRO_MODEL)]),
+  ),
   expiresAt: PositiveInt,
 }).annotate(strict);
 export type FdServerRuntimePolicyProjection = typeof FdServerRuntimePolicyProjection.Type;
