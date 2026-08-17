@@ -11,6 +11,7 @@ import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../..
 import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
 
 export const MAX_VISIBLE_WORK_LOG_ENTRIES = 1;
+export const MAX_VISIBLE_ACTIVE_WORK_LOG_ENTRIES = 4;
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
 export const TIMELINE_MINIMAP_MAX_HEIGHT_CSS = "calc(100vh - 18rem)";
@@ -185,6 +186,7 @@ export type MessagesTimelineRow =
       expanded: boolean;
       active: boolean;
       startedAt: string | null;
+      lastWorkEntry?: WorkLogEntry;
     }
   | {
       kind: "message";
@@ -240,6 +242,62 @@ export function normalizeCompactToolLabel(value: string): string {
   return value.replace(/\s+(?:complete|completed)\s*$/i, "").trim();
 }
 
+/**
+ * Translate a low-level tool event into the short action shown in the main
+ * timeline. Raw commands and tool payloads remain available in the expanded
+ * row; this label is deliberately written for people who do not need to read
+ * shell syntax to understand what the agent is doing.
+ */
+export function workEntryEmployeeSummary(
+  entry: Pick<
+    WorkLogEntry,
+    "command" | "label" | "toolTitle" | "itemType" | "requestKind" | "changedFiles" | "taskId"
+  >,
+): string {
+  const command = (entry.command ?? "").toLowerCase();
+  const descriptor = `${entry.label} ${entry.toolTitle ?? ""}`.toLowerCase();
+  if (entry.requestKind === "file-read") return "读取文件";
+  if (entry.requestKind === "file-change") return "修改文件";
+  if (entry.itemType === "file_change" || (entry.changedFiles?.length ?? 0) > 0) {
+    const count = entry.changedFiles?.length ?? 0;
+    return count > 1 ? `修改 ${count} 个文件` : "修改文件";
+  }
+  if (
+    entry.itemType === "web_search" ||
+    /\b(web search|browser|browse|open url|navigate)\b/.test(`${command} ${descriptor}`)
+  ) {
+    return "搜索网页";
+  }
+  if (entry.itemType === "image_view" || /\b(image|screenshot|preview)\b/.test(descriptor)) {
+    return "查看图片";
+  }
+  if (entry.itemType === "mcp_tool_call") return "调用企业工具";
+  if (entry.itemType === "dynamic_tool_call") return "调用工具";
+  if (entry.itemType === "collab_agent_tool_call" || entry.taskId) return "协同处理";
+  if (
+    /\b(rg|grep|ripgrep|find|fd)\b/.test(command) ||
+    /\b(glob|search files|searched files)\b/.test(descriptor)
+  )
+    return "搜索代码";
+  if (/\b(ls|tree|pwd|du|stat)\b/.test(command)) return "查看项目结构";
+  if (
+    /\b(test|tests|vitest|jest|pytest|go test|cargo test|npm run test|pnpm test)\b/.test(command)
+  ) {
+    return "运行测试";
+  }
+  if (/\b(build|compile)\b/.test(command)) return "构建项目";
+  if (/\b(tsc|typecheck|lint|check)\b/.test(command)) return "检查项目";
+  if (/\bgit\s+(diff|status|log|show)\b/.test(command)) return "查看代码变更";
+  if (/\b(edit|write|patch|apply|move|copy|mkdir|touch|delete|remove)\b/.test(command)) {
+    return "处理项目文件";
+  }
+  if (entry.command || entry.itemType === "command_execution") return "运行命令";
+  if (/\b(read|file)\b/.test(descriptor)) return "读取文件";
+  if (/\b(search|query|lookup)\b/.test(descriptor)) return "搜索信息";
+  if (/\b(run|execute|command)\b/.test(descriptor)) return "运行命令";
+  return "处理工作步骤";
+}
+
 export function resolveAssistantMessageCopyState({
   text,
   showCopyButton,
@@ -290,6 +348,7 @@ interface TurnFold {
   label: string;
   active: boolean;
   startedAt: string | null;
+  lastWorkEntry?: WorkLogEntry;
 }
 
 /**
@@ -315,9 +374,10 @@ function deriveUnsettledTurnId(
 }
 
 /**
- * Turns fold their commentary and tool activity behind one employee-friendly
- * progress row. Settled turns keep the terminal answer visible; the active
- * turn stays expandable without placing operational narration in the main flow.
+ * Turns fold operational commentary behind one employee-friendly progress row.
+ * Work entries stay in the main flow so people can follow concise action
+ * summaries without opening the raw command details. Settled turns keep their
+ * full historical tool trace folded as before.
  */
 function deriveTurnFolds(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
@@ -403,9 +463,14 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
         continue;
       }
+      // During an active turn, concise work rows are the useful progress
+      // signal. Keep them visible and fold only redundant assistant narration.
+      if (active && entry.kind === "work") {
+        continue;
+      }
       hiddenEntryIds.add(entry.id);
     }
-    if (hiddenEntryIds.size === 0) {
+    if (hiddenEntryIds.size === 0 && !active) {
       continue;
     }
 
@@ -442,6 +507,9 @@ function deriveTurnFolds(input: {
           ? `已处理 ${duration}`
           : "已处理";
 
+    const lastWorkEntry = group.entries
+      .filter((entry): entry is Extract<TimelineEntry, { kind: "work" }> => entry.kind === "work")
+      .at(-1)?.entry;
     foldsByAnchorEntryId.set(firstEntry.id, {
       turnId,
       anchorEntryId: firstEntry.id,
@@ -450,6 +518,7 @@ function deriveTurnFolds(input: {
       label,
       active,
       startedAt: active ? input.activeTurnStartedAt : null,
+      ...(lastWorkEntry ? { lastWorkEntry } : {}),
     });
   }
   return foldsByAnchorEntryId;
@@ -508,6 +577,7 @@ export function deriveMessagesTimelineRows(input: {
         expanded: input.expandedTurnIds?.has(turnFold.turnId) ?? false,
         active: turnFold.active,
         startedAt: turnFold.startedAt,
+        ...(turnFold.lastWorkEntry ? { lastWorkEntry: turnFold.lastWorkEntry } : {}),
       });
     }
 
@@ -532,10 +602,17 @@ export function deriveMessagesTimelineRows(input: {
         cursor += 1;
       }
       const visibleGroupedEntries = groupedEntries.filter(
-        (entry) => !workEntryIndicatesToolNeutralStatus(entry),
+        (entry) =>
+          (unsettledTurnId !== null && entry.turnId === unsettledTurnId) ||
+          !workEntryIndicatesToolNeutralStatus(entry),
       );
+      const visibleEntryLimit = groupedEntries.some(
+        (entry) => unsettledTurnId !== null && entry.turnId === unsettledTurnId,
+      )
+        ? MAX_VISIBLE_ACTIVE_WORK_LOG_ENTRIES
+        : MAX_VISIBLE_WORK_LOG_ENTRIES;
       if (visibleGroupedEntries.length > 0) {
-        if (visibleGroupedEntries.length <= MAX_VISIBLE_WORK_LOG_ENTRIES) {
+        if (visibleGroupedEntries.length <= visibleEntryLimit) {
           nextRows.push({
             kind: "work",
             id: timelineEntry.id,
@@ -554,7 +631,7 @@ export function deriveMessagesTimelineRows(input: {
           const overflowCandidates = visibleGroupedEntries.filter(
             (entry) => entry.agentSpawn === undefined,
           );
-          const hiddenEntries = overflowCandidates.slice(0, -MAX_VISIBLE_WORK_LOG_ENTRIES);
+          const hiddenEntries = overflowCandidates.slice(0, -visibleEntryLimit);
           const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
           const visibleEntries = visibleGroupedEntries.filter(
             (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
@@ -692,7 +769,8 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.label === bf.label &&
         a.expanded === bf.expanded &&
         a.active === bf.active &&
-        a.startedAt === bf.startedAt
+        a.startedAt === bf.startedAt &&
+        Equal.equals(a.lastWorkEntry, bf.lastWorkEntry)
       );
     }
 

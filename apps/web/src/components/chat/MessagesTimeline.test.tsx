@@ -576,7 +576,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain("t3code/apps/web/src/session-logic.ts");
+    expect(markup).toContain("已修改文件");
+    expect(markup).not.toContain("session-logic.ts");
     expect(markup).not.toContain("C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts");
   });
 
@@ -680,6 +681,43 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("lucide-x");
-    expect(markup).toContain('aria-label="Tool call failed"');
+    expect(markup).toContain('aria-label="操作失败"');
+  });
+
+  it("shows an employee-friendly command summary without exposing the command by default", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        activeTurnInProgress
+        latestTurn={{
+          turnId: TurnId.make("turn-running-test"),
+          state: "running",
+          startedAt: "2026-03-17T19:12:28.000Z",
+          completedAt: null,
+        }}
+        runningTurnId={TurnId.make("turn-running-test")}
+        timelineEntries={[
+          {
+            id: "entry-command",
+            kind: "work",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            entry: {
+              id: "work-command",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              turnId: TurnId.make("turn-running-test"),
+              label: "Ran command",
+              tone: "tool",
+              itemType: "command_execution",
+              command: "pnpm test --filter secret-project",
+              rawCommand: "cd /private/project && pnpm test --filter secret-project",
+              toolLifecycleStatus: "inProgress",
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("正在运行测试");
+    expect(markup).not.toContain("secret-project");
   });
 });

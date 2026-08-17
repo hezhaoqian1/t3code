@@ -87,6 +87,7 @@ import {
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
+  workEntryEmployeeSummary,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -1120,6 +1121,11 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         {row.active && workingStepLabel ? (
           <span className="min-w-0 truncate text-muted-foreground/60">· {workingStepLabel}</span>
         ) : null}
+        {!row.active && row.lastWorkEntry ? (
+          <span className="min-w-0 truncate text-muted-foreground/60">
+            · {workEntryEmployeeSummary(row.lastWorkEntry)}
+          </span>
+        ) : null}
         <Icon className="size-3.5" />
       </button>
     </div>
@@ -1369,9 +1375,17 @@ const WorkGroupSection = memo(function WorkGroupSection({
   groupedEntries: Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"];
 }) {
   const { workspaceRoot } = use(TimelineRowCtx);
+  const activity = use(TimelineRowActivityCtx);
   const nonEmptyEntries = useMemo(
-    () => groupedEntries.filter((entry) => !workEntryIndicatesToolNeutralStatus(entry)),
-    [groupedEntries],
+    () =>
+      groupedEntries.filter(
+        (entry) =>
+          (activity.activeTurnInProgress &&
+            activity.latestTurnId !== null &&
+            entry.turnId === activity.latestTurnId) ||
+          !workEntryIndicatesToolNeutralStatus(entry),
+      ),
+    [activity.activeTurnInProgress, activity.latestTurnId, groupedEntries],
   );
   const onlyToolEntries = nonEmptyEntries.every((entry) => workLogEntryIsToolLike(entry));
   const groupLabel = onlyToolEntries
@@ -2128,6 +2142,26 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
+function workEntryEmployeeHeading(
+  workEntry: TimelineWorkEntry,
+  activeTurnInProgress: boolean,
+): string {
+  if (!workLogEntryIsToolLike(workEntry)) {
+    return toolWorkEntryHeading(workEntry);
+  }
+  const action = workEntryEmployeeSummary(workEntry);
+  if (workEntryIndicatesToolFailure(workEntry)) {
+    return `${action}失败`;
+  }
+  if (
+    activeTurnInProgress &&
+    (workEntry.toolLifecycleStatus === "inProgress" || workEntry.toolLifecycleStatus === undefined)
+  ) {
+    return `正在${action}`;
+  }
+  return `已${action}`;
+}
+
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
 /**
@@ -2246,8 +2280,13 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
   const iconConfig = workToneIcon(workEntry.tone);
   const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
   const entryIconName = showWarningIndicator ? "x" : workEntryIconName(workEntry);
-  const heading = toolWorkEntryHeading(workEntry);
-  const rawPreview = workEntryPreview(workEntry, workspaceRoot);
+  const heading = workEntryEmployeeHeading(
+    workEntry,
+    activity.activeTurnInProgress && workEntry.turnId === activity.latestTurnId,
+  );
+  const rawPreview = workLogEntryIsToolLike(workEntry)
+    ? null
+    : workEntryPreview(workEntry, workspaceRoot);
   const preview =
     rawPreview &&
     normalizeCompactToolLabel(rawPreview).toLowerCase() ===
@@ -2343,13 +2382,13 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
                     render={
                       <span
                         className="flex size-4 items-center justify-center"
-                        aria-label="Tool call failed"
+                        aria-label="操作失败"
                       />
                     }
                   >
                     <XIcon className="block size-3 shrink-0 text-destructive" aria-hidden />
                   </TooltipTrigger>
-                  <TooltipPopup>Failed</TooltipPopup>
+                  <TooltipPopup>失败</TooltipPopup>
                 </Tooltip>
               ) : showSuccessIndicator ? (
                 <Tooltip>
@@ -2364,7 +2403,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
                       />
                     </span>
                   </TooltipTrigger>
-                  <TooltipPopup>Completed</TooltipPopup>
+                  <TooltipPopup>已完成</TooltipPopup>
                 </Tooltip>
               ) : showNeutralIndicator ? (
                 <Tooltip>
@@ -2373,7 +2412,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
                   >
                     <MinusIcon className="block size-3 shrink-0 opacity-70" aria-hidden />
                   </TooltipTrigger>
-                  <TooltipPopup>Empty</TooltipPopup>
+                  <TooltipPopup>无结果</TooltipPopup>
                 </Tooltip>
               ) : null}
             </span>

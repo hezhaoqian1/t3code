@@ -5,6 +5,7 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  workEntryEmployeeSummary,
 } from "./MessagesTimeline.logic";
 
 describe("computeMessageDurationStart", () => {
@@ -203,6 +204,28 @@ describe("normalizeCompactToolLabel", () => {
 
   it("removes trailing completion wording from other labels", () => {
     expect(normalizeCompactToolLabel("Read file completed")).toBe("Read file");
+  });
+});
+
+describe("workEntryEmployeeSummary", () => {
+  it.each([
+    ["rg -n TODO src", "搜索代码"],
+    ["pnpm test", "运行测试"],
+    ["pnpm build", "构建项目"],
+    ["pnpm typecheck", "检查项目"],
+    ["git diff", "查看代码变更"],
+  ])("maps %s to %s", (command, expected) => {
+    expect(workEntryEmployeeSummary({ command, label: "Ran command" })).toBe(expected);
+  });
+
+  it("uses typed tool metadata before command heuristics", () => {
+    expect(
+      workEntryEmployeeSummary({
+        command: "node script.mjs",
+        label: "tool",
+        itemType: "mcp_tool_call",
+      }),
+    ).toBe("调用企业工具");
   });
 });
 
@@ -522,6 +545,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(foldRow?.expanded).toBe(false);
     // User message boundary (00:00:00) → terminal message updatedAt (00:00:22).
     expect(foldRow?.label).toBe("已处理 22s");
+    expect(foldRow?.lastWorkEntry).toMatchObject({ id: "work-1" });
     expect(collapsedRows.map((row) => row.id)).toEqual([
       "user-entry",
       "turn-fold:turn-1",
@@ -754,7 +778,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(finalRow?.kind === "message" && finalRow.showAssistantMeta).toBe(true);
   });
 
-  it("folds the active turn into one expandable progress row", () => {
+  it("keeps the active turn's concise work rows visible below its progress row", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -796,16 +820,52 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    expect(rows).toEqual([
-      expect.objectContaining({
-        id: "turn-fold:turn-1",
-        kind: "turn-fold",
-        label: "正在处理",
-        active: true,
+    expect(rows.map((row) => row.id)).toEqual(["turn-fold:turn-1", "work-entry-1"]);
+    expect(rows[0]).toMatchObject({
+      kind: "turn-fold",
+      label: "正在处理",
+      active: true,
+      lastWorkEntry: expect.objectContaining({ id: "work-1" }),
+    });
+  });
+
+  it("keeps the latest four active work summaries visible", () => {
+    const turnId = "turn-active-list" as never;
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: Array.from({ length: 5 }, (_, index) => ({
+        id: `work-entry-${index}`,
+        kind: "work" as const,
+        createdAt: `2026-01-01T00:00:0${index}Z`,
+        entry: {
+          id: `work-${index}`,
+          createdAt: `2026-01-01T00:00:0${index}Z`,
+          turnId,
+          label: "Ran command",
+          tone: "tool" as const,
+          command: `echo ${index}`,
+        },
+      })),
+      latestTurn: {
+        turnId,
+        state: "running",
         startedAt: "2026-01-01T00:00:00Z",
-        expanded: false,
-      }),
+        completedAt: null,
+      },
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.filter((row) => row.kind === "work").map((row) => row.id)).toEqual([
+      "work-1",
+      "work-2",
+      "work-3",
+      "work-4",
     ]);
+    expect(rows.find((row) => row.kind === "work-toggle")).toMatchObject({
+      hiddenCount: 1,
+    });
   });
 
   it("does not fold the session's running turn when latestTurn regresses", () => {
@@ -867,7 +927,7 @@ describe("deriveMessagesTimelineRows", () => {
       "turn-1",
       "turn-2",
     ]);
-    expect(rows.map((row) => row.id)).not.toContain("running-work-entry");
+    expect(rows.map((row) => row.id)).toContain("running-work-entry");
   });
 
   it("only shows assistant metadata on the terminal assistant message", () => {
@@ -998,8 +1058,12 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    expect(rows.map((row) => row.id)).toEqual(["turn-fold:turn-1", "assistant-answer-entry"]);
-    const assistantRow = rows[1];
+    expect(rows.map((row) => row.id)).toEqual([
+      "turn-fold:turn-1",
+      "work-entry",
+      "assistant-answer-entry",
+    ]);
+    const assistantRow = rows[2];
     expect(assistantRow?.kind === "message" && assistantRow.assistantCopyStreaming).toBe(true);
   });
 
