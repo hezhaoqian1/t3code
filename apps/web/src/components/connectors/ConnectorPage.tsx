@@ -172,7 +172,7 @@ function FeishuConnectorControls({
         {busy && pendingAction === "连接飞书" ? (
           <LoaderIcon className="size-3 animate-spin" />
         ) : null}
-        {connected ? "重新连接" : "连接"}
+        {connected ? "切换账号" : "连接"}
       </Button>
       <Button
         size="xs"

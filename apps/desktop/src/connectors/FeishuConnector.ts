@@ -411,7 +411,7 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
       skillsRoot: skillNames.length > 0 ? skillsRoot : null,
       skillCount: skillNames.length,
       installedSkillNames: skillNames,
-      lastError: persistedState.lastError,
+      lastError: authState === "authenticated" ? null : persistedState.lastError,
       message: busyMessage,
       authAction,
     };
@@ -465,6 +465,24 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
     return cliPath;
   };
 
+  const logoutUser = async (cliPath: string): Promise<void> => {
+    const logout = await runCommand(cliPath, ["auth", "logout", "--json"], {
+      cwd: root,
+      env: commandEnvironment,
+      timeoutMs: 30_000,
+    });
+    if (logout.code === 0) return;
+
+    const authState = await readAuthState(cliPath);
+    if (
+      authState !== "not_authenticated" &&
+      authState !== "not_configured" &&
+      authState !== "unknown"
+    ) {
+      throw new Error(cliFailureMessage(logout, "飞书账号断开失败，请稍后重试。"));
+    }
+  };
+
   const connect = async () =>
     withBusy("正在准备飞书 CLI 和官方 Skills…", async () => {
       const commandController = new AbortController();
@@ -475,8 +493,9 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
         await persistPatch({ enabled: true, lastError: null });
         const initialAuthState = await readAuthState(cliPath);
         if (initialAuthState === "authenticated") {
-          await restartAgentRuntime();
-          return { state: await computeState() };
+          busyMessage = "正在退出当前飞书账号…";
+          await publish();
+          await logoutUser(cliPath);
         }
         if (initialAuthState === "not_configured") {
           busyMessage = "正在打开飞书应用配置页面…";
@@ -567,6 +586,7 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
         if (finalAuthState !== "authenticated") {
           throw new Error("飞书授权尚未完成，请在浏览器完成授权后重试。");
         }
+        busyMessage = "飞书账号已连接。";
         await persistPatch({ enabled: true, lastError: null });
         await restartAgentRuntime();
         return { state: await computeState() };
@@ -599,21 +619,7 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
     return withBusy("正在断开飞书连接…", async () => {
       const cliPath = await larkCliPath();
       if (cliPath) {
-        const logout = await runCommand(cliPath, ["auth", "logout"], {
-          cwd: root,
-          env: commandEnvironment,
-          timeoutMs: 30_000,
-        });
-        if (logout.code !== 0) {
-          const authState = await readAuthState(cliPath);
-          if (
-            authState !== "not_authenticated" &&
-            authState !== "not_configured" &&
-            authState !== "unknown"
-          ) {
-            throw new Error(cliFailureMessage(logout, "飞书账号断开失败，请稍后重试。"));
-          }
-        }
+        await logoutUser(cliPath);
       }
       authAction = null;
       await persistPatch({ enabled: false, lastError: null });
