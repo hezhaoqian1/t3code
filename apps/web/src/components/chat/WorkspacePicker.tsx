@@ -89,7 +89,11 @@ export function WorkspacePicker({
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
   const activeProjectDisplayName = activeProjectGroup?.displayName ?? activeProjectTitle;
-  const label = activeProjectDisplayName ?? "选择工作空间";
+  const isDefaultWorkspace =
+    isElectron &&
+    activeProjectRef?.environmentId === primaryServerWelcome?.environment.environmentId &&
+    activeProjectRef?.projectId === primaryServerWelcome?.bootstrapProjectId;
+  const label = isDefaultWorkspace ? "默认工作空间" : (activeProjectDisplayName ?? "选择工作空间");
 
   return (
     <Menu>
@@ -100,8 +104,8 @@ export function WorkspacePicker({
             size="sm"
             variant="outline"
             className="h-8 max-w-56 shrink-0 gap-1.5 rounded-lg border-border/80 bg-background/65 px-2.5 text-xs font-medium shadow-xs hover:bg-accent"
-            aria-label={activeProjectDisplayName ? "切换工作空间" : "选择工作空间"}
-            title={activeProjectDisplayName ?? undefined}
+            aria-label={label === "选择工作空间" ? "选择工作空间" : "切换工作空间"}
+            title={label}
           />
         }
       >
@@ -126,9 +130,11 @@ export function WorkspacePicker({
           >
             {projectPickerEntries.map(({ group }) => (
               <MenuRadioItem key={group.projectKey} value={group.projectKey} closeOnClick>
-                <FolderIcon />
-                <span className="block min-w-0 truncate" title={group.displayName}>
-                  {group.displayName}
+                <span className="flex min-w-0 items-center gap-2">
+                  <FolderIcon className="shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 truncate" title={group.displayName}>
+                    {group.displayName}
+                  </span>
                 </span>
               </MenuRadioItem>
             ))}
