@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-08-17-deepseek-v4-pro-desktop",
+  "taskIntentRef": "docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/task-intent-draft.json",
+  "baselineRefs": [
+    "docs/aegis/plans/2026-08-17-deepseek-v4-pro-desktop.md",
+    "https://api-docs.deepseek.com/guides/responses_api",
+    "https://api-docs.deepseek.com/quick_start/pricing"
+  ],
+  "scopeStatus": "not-yet-verified",
+  "compatStatus": "not-yet-verified",
+  "retirementStatus": "not-yet-verified",
+  "newRiskSignals": [
+    "Credential allowlist and per-turn runtime selection cross an internal trust boundary; Pro costs and concurrency differ from Flash."
+  ],
+  "decision": "needs-baseline-readback"
+}

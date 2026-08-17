@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "candidateDocs": [
+    "docs/aegis/plans/2026-08-17-deepseek-v4-pro-desktop.md",
+    "https://api-docs.deepseek.com/guides/responses_api",
+    "https://api-docs.deepseek.com/quick_start/pricing"
+  ],
+  "whyRelevant": "These refs define the approved behavior, protocol support, limitations, and exact model names.",
+  "missingAuthority": []
+}

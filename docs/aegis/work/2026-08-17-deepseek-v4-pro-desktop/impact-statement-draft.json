@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "affectedLayers": [
+    "desktop identity, contracts, server provider, Codex runtime, web composer, release"
+  ],
+  "owners": ["fd-deepseek provider and managed credential projection"],
+  "invariants": [
+    "Only exact Flash and Pro may be selected; Flash remains default; no silent model fallback."
+  ],
+  "compatBoundary": "Old projections remain Flash-only; Web enterprise runtime and image behavior are unchanged.",
+  "nonGoals": [
+    "Add OCR, image understanding, new providers, API key UI, or restore the generic T3 model picker."
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-08-17-deepseek-v4-pro-desktop",
+  "requiredBaselineRefs": [
+    "docs/aegis/plans/2026-08-17-deepseek-v4-pro-desktop.md",
+    "https://api-docs.deepseek.com/guides/responses_api",
+    "https://api-docs.deepseek.com/quick_start/pricing"
+  ],
+  "deliveredContextRefs": [],
+  "acknowledgedBeforePlanRefs": [],
+  "citedInPlanRefs": [],
+  "missingRefs": [
+    "docs/aegis/plans/2026-08-17-deepseek-v4-pro-desktop.md",
+    "https://api-docs.deepseek.com/guides/responses_api",
+    "https://api-docs.deepseek.com/quick_start/pricing"
+  ],
+  "decision": "needs-baseline-readback"
+}

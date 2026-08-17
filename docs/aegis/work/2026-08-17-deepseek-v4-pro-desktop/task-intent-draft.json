@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "requestedOutcome": "Add a Flash-default, Pro-selectable model control immediately left of send and route the exact selected model through the managed FD Codex runtime.",
+  "goal": "Add a Flash-default, Pro-selectable model control immediately left of send and route the exact selected model through the managed FD Codex runtime.",
+  "successEvidence": [
+    "Focused tests, typechecks, build, live Flash and Pro Responses smokes, desktop visual QA, merged release and public manifests."
+  ],
+  "stopCondition": "Done when all evidence passes; otherwise stop as blocked, needs-verification, or scope-exceeded without silent fallback.",
+  "nonGoals": [
+    "Add OCR, image understanding, new providers, API key UI, or restore the generic T3 model picker."
+  ],
+  "scope": "Desktop FD provider model authorization, runtime routing, composer selector, tests, docs and release.",
+  "changeKinds": ["feature"],
+  "riskHints": [
+    "Credential allowlist and per-turn runtime selection cross an internal trust boundary; Pro costs and concurrency differ from Flash."
+  ]
+}

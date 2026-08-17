@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "aegis.schema.v0",
+  "taskId": "2026-08-17-deepseek-v4-pro-desktop",
+  "currentTodo": "Finish 0.2.8 publication while establishing the dual-model contract.",
+  "completedTodos": [],
+  "activeSlice": "Task 1: exact two-model credential and protocol contract.",
+  "evidenceRefs": [],
+  "blockedOn": "None.",
+  "nextStep": "Install worktree dependencies, run baseline focused tests, then edit the shared contract.",
+  "updatedAt": "2026-08-17"
+}

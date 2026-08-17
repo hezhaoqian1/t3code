@@ -37,3 +37,14 @@ records, not authoritative runtime decisions.
 | 2026-08-11 | artifact | docs/aegis/work/2026-08-09-fd-ai-desktop/evidence-bundle-draft-task-11a-codex-compatibility-local.json | 2026-08-09-fd-ai-desktop evidence task-11a-codex-compatibility-local |
 | 2026-08-11 | adr      | docs/aegis/adr/ADR-0001-first-send-task-projects.md                                                    | ADR-0001 - Use first-send typed projects for no-workspace tasks      |
 | 2026-08-14 | plan     | docs/aegis/plans/2026-08-14-fd-desktop-0.2.7.md                                                        | FD AI Desktop 0.2.7 usability release                                |
+| 2026-08-17 | work     | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/10-intent.md                                        | DeepSeek V4 Pro Desktop intent                                       |
+| 2026-08-17 | work     | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/20-checkpoint.md                                    | DeepSeek V4 Pro Desktop checkpoint                                   |
+| 2026-08-17 | work     | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/90-evidence.md                                      | DeepSeek V4 Pro Desktop evidence                                     |
+| 2026-08-17 | work     | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/99-reflection.md                                    | DeepSeek V4 Pro Desktop reflection                                   |
+| 2026-08-17 | artifact | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/task-intent-draft.json                              | DeepSeek V4 Pro Desktop task intent draft                            |
+| 2026-08-17 | artifact | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/baseline-read-set-hint.json                         | DeepSeek V4 Pro Desktop baseline read-set hint                       |
+| 2026-08-17 | artifact | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/baseline-usage-draft.json                           | DeepSeek V4 Pro Desktop baseline usage draft                         |
+| 2026-08-17 | artifact | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/impact-statement-draft.json                         | DeepSeek V4 Pro Desktop impact statement draft                       |
+| 2026-08-17 | artifact | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/todo-checkpoint-draft.json                          | DeepSeek V4 Pro Desktop todo checkpoint draft                        |
+| 2026-08-17 | artifact | docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/drift-check-draft.json                              | DeepSeek V4 Pro Desktop drift check draft                            |
+| 2026-08-17 | plan     | docs/aegis/plans/2026-08-17-deepseek-v4-pro-desktop.md                                                 | DeepSeek V4 Pro Desktop Implementation Plan                          |
