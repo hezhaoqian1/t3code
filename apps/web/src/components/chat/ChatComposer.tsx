@@ -111,6 +111,7 @@ import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
 import { isFeishuConnectorConnected, useFeishuConnectorState } from "../../state/feishuConnector";
 import { WorkspacePicker } from "./WorkspacePicker";
+import { FdModelSelector } from "./FdModelSelector";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -685,6 +686,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const nonPersistedComposerImageIds = composerDraft.nonPersistedImageIds;
 
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
   const addComposerDraftImage = useComposerDraftStore((store) => store.addImage);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
   const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
@@ -869,6 +871,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel),
     [selectedInstanceId, selectedModel],
+  );
+  const handleFdModelChange = useCallback(
+    (model: string) => {
+      if (!selectedProviderEntry?.models.some((entry) => entry.slug === model)) return;
+      setComposerDraftModelSelection(
+        composerDraftTarget,
+        createModelSelection(selectedInstanceId, model),
+      );
+    },
+    [
+      composerDraftTarget,
+      selectedInstanceId,
+      selectedProviderEntry?.models,
+      setComposerDraftModelSelection,
+    ],
   );
   // ------------------------------------------------------------------
   // Context window
@@ -3087,6 +3104,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
               >
+                <FdModelSelector
+                  value={selectedModel}
+                  models={selectedProviderEntry?.models ?? []}
+                  disabled={noProviderAvailable || phase === "running" || isSendBusy}
+                  onValueChange={handleFdModelChange}
+                />
                 <ComposerFooterPrimaryActions
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}

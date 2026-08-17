@@ -4,19 +4,32 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import {
+  FD_RUNTIME_DEFAULT_MODEL,
+  isFdRuntimeModel,
+} from "@t3tools/contracts/fd/runtime-credentials";
 
-const FD_MODEL = "deepseek-v4-flash";
+const FD_PROVIDER_INSTANCE_ID = "fd-deepseek";
 
 export function resolveAppModelSelection(
   _provider: ProviderDriverKind,
   _settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-  _selectedModel: string | null | undefined,
+  selectedModel: string | null | undefined,
 ): string {
+  const models =
+    providers.find((provider) => provider.instanceId === FD_PROVIDER_INSTANCE_ID)?.models ?? [];
+  if (
+    selectedModel &&
+    isFdRuntimeModel(selectedModel) &&
+    models.some((model) => model.slug === selectedModel)
+  ) {
+    return selectedModel;
+  }
   return (
-    providers
-      .find((provider) => provider.instanceId === "fd-deepseek")
-      ?.models.find((model) => model.slug === FD_MODEL)?.slug ?? FD_MODEL
+    models.find((model) => model.isDefault && model.slug === FD_RUNTIME_DEFAULT_MODEL)?.slug ??
+    models.find((model) => model.slug === FD_RUNTIME_DEFAULT_MODEL)?.slug ??
+    FD_RUNTIME_DEFAULT_MODEL
   );
 }
 
@@ -24,13 +37,13 @@ export function resolveAppModelSelectionForInstance(
   instanceId: ProviderInstanceId,
   _settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-  _selectedModel: string | null | undefined,
+  selectedModel: string | null | undefined,
 ): string | null {
-  if (instanceId !== "fd-deepseek") return null;
+  if (instanceId !== FD_PROVIDER_INSTANCE_ID) return null;
   return resolveAppModelSelection(
     providers[0]?.driver ?? ("fd-deepseek" as ProviderDriverKind),
     _settings,
     providers,
-    FD_MODEL,
+    selectedModel,
   );
 }

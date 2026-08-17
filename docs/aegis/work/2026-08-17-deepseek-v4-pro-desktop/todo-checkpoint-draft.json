@@ -1,15 +1,16 @@
 {
   "schemaVersion": "aegis.schema.v0",
   "taskId": "2026-08-17-deepseek-v4-pro-desktop",
-  "currentTodo": "Add the compact Flash/Pro composer selector.",
+  "currentTodo": "Run cross-package verification and Desktop visual QA.",
   "completedTodos": [
     "Feishu account switching",
     "Task 1 exact two-model credential projection and managed token upgrade",
-    "Task 2 selected-model runtime routing"
+    "Task 2 selected-model runtime routing",
+    "Task 3 compact composer selector"
   ],
-  "activeSlice": "Task 3: composer selector and model-selection state.",
+  "activeSlice": "Task 4: integrated verification, documentation, release, and deployment.",
   "evidenceRefs": ["docs/aegis/work/2026-08-17-deepseek-v4-pro-desktop/90-evidence.md"],
   "blockedOn": "None.",
-  "nextStep": "Update modelSelection.ts, add FdModelSelector.tsx, wire it immediately left of Send, and run focused Web tests.",
+  "nextStep": "Run cross-package typechecks and production build, then launch Desktop for visual and same-task switching QA.",
   "updatedAt": "2026-08-17"
 }
