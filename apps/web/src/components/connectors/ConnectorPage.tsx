@@ -153,7 +153,7 @@ function FeishuConnectorControls({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-2",
+        "flex shrink-0 flex-nowrap items-center gap-2",
         compact ? "justify-end" : "justify-start sm:justify-end",
       )}
     >

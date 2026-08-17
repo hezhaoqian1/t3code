@@ -594,9 +594,10 @@ export const make = Effect.fn("feishuConnector.make")(function* () {
         authAction = null;
         if (cancelRequested || commandController.signal.aborted || isAbortError(error)) {
           await persistPatch({ enabled: false, lastError: null });
-        } else {
-          await persistPatch({ lastError: sanitizeMessage(error) });
+          return { state: await computeState() };
         }
+
+        await persistPatch({ lastError: sanitizeMessage(error) });
         throw error;
       } finally {
         if (activeCommandController === commandController) activeCommandController = null;

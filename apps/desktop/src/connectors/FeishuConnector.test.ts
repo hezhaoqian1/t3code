@@ -154,7 +154,12 @@ it.layer(NodeServices.layer)("FeishuConnector", (it) => {
       const disconnected = yield* connector.disconnect;
       assert.equal(disconnected.state.enabled, false);
       assert.equal(disconnected.state.authState, "not_authenticated");
-      assert.equal((yield* Fiber.join(pendingConnect))._tag, "Failure");
+      const cancelledConnect = yield* Fiber.join(pendingConnect);
+      assert.equal(cancelledConnect._tag, "Success");
+      if (cancelledConnect._tag === "Success") {
+        assert.equal(cancelledConnect.value.state.enabled, false);
+        assert.equal(cancelledConnect.value.state.lastError, null);
+      }
 
       const disabled = yield* connector.setEnabled(false);
       assert.equal(disabled.state.enabled, false);
