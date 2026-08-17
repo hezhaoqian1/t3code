@@ -1,7 +1,7 @@
 # Fangde AI Desktop Release
 
-当前版本的功能范围和人工验收清单见
-[`releases/0.2.9.md`](./releases/0.2.9.md)。通用构建、发布和回滚流程以本文为准。
+当前发布候选的功能范围和人工验收清单见
+[`releases/0.2.10.md`](./releases/0.2.10.md)。通用构建、发布和回滚流程以本文为准。
 
 `.github/workflows/fd-desktop-release.yml` builds one immutable internal release bundle for:
 
@@ -38,6 +38,32 @@ FD_DESKTOP_RELEASE_MODE=internal-unsigned scripts/publish-desktop-release.sh pub
 The Gateway publisher verifies manifests, byte sizes, hashes, app identifiers, architectures,
 manifest byte sizes and hashes before atomically switching the public
 `latest` link. It creates `latest.json` and stable legacy aliases used by the official download page.
+
+## Upstream API Verification
+
+Before changing the connector lifecycle, verify the implementation against the upstream contracts
+instead of inferring API behavior from existing code:
+
+- React context providers and Effect cleanup:
+  [`createContext`](https://react.dev/reference/react/createContext) and
+  [`useEffect`](https://react.dev/reference/react/useEffect)
+- Electron renderer IPC listener wrapping and removal:
+  [`ipcRenderer`](https://www.electronjs.org/docs/latest/api/ipc-renderer)
+- Feishu CLI commands and flags: the pinned `@larksuite/cli` README plus the exact binary help
+
+Run the bundled CLI help from the repository version used by the release:
+
+```bash
+apps/desktop/node_modules/@larksuite/cli/bin/lark-cli --version
+apps/desktop/node_modules/@larksuite/cli/bin/lark-cli config show --help
+apps/desktop/node_modules/@larksuite/cli/bin/lark-cli auth status --help
+apps/desktop/node_modules/@larksuite/cli/bin/lark-cli auth login --help
+apps/desktop/node_modules/@larksuite/cli/bin/lark-cli auth logout --help
+```
+
+For `0.2.10`, the pinned binary is `1.0.86`. Its official help confirms `config show`,
+`auth status --json --verify`, `auth login --recommend --no-wait --json`,
+`auth login --device-code`, and `auth logout --json`.
 
 ## Acceptance
 
