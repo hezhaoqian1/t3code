@@ -126,14 +126,14 @@ describe("FdDeepSeekAdapter", () => {
     }),
   );
 
-  it.effect("runs the direct Responses lifecycle with the exact Pro model", () =>
+  it.effect("switches the direct Responses lifecycle from Pro back to Flash", () =>
     Effect.gen(function* () {
       const requests: unknown[] = [];
       const client: FdResponsesStreamer = {
         stream: async function* (request) {
           requests.push(request);
-          yield { ...metadata, model: FD_RUNTIME_PRO_MODEL };
-          yield { type: "text-delta", text: "Pro done" };
+          yield { ...metadata, model: request.model };
+          yield { type: "text-delta", text: `${request.model} done` };
           yield { type: "completed", finishReason: "stop" };
         },
       };
@@ -157,13 +157,35 @@ describe("FdDeepSeekAdapter", () => {
         events.some((event) => event.type === "turn.completed" && event.turnId === turn.turnId),
       );
 
+      const flashTurn = yield* adapter.sendTurn({
+        threadId,
+        input: "Continue with Flash",
+        modelSelection: startInput.modelSelection,
+      });
+      yield* waitFor(() =>
+        events.some(
+          (event) => event.type === "turn.completed" && event.turnId === flashTurn.turnId,
+        ),
+      );
+
       expect(session.model).toBe(FD_RUNTIME_PRO_MODEL);
-      expect(requests).toEqual([expect.objectContaining({ model: FD_RUNTIME_PRO_MODEL })]);
+      expect(requests).toEqual([
+        expect.objectContaining({ model: FD_RUNTIME_PRO_MODEL }),
+        expect.objectContaining({ model: "deepseek-v4-flash" }),
+      ]);
+      expect((yield* adapter.listSessions())[0]?.model).toBe("deepseek-v4-flash");
       expect(events).toContainEqual(
         expect.objectContaining({
           type: "turn.started",
           turnId: turn.turnId,
           payload: { model: FD_RUNTIME_PRO_MODEL },
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "turn.started",
+          turnId: flashTurn.turnId,
+          payload: { model: "deepseek-v4-flash" },
         }),
       );
     }),

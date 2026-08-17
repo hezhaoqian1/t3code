@@ -44,6 +44,9 @@ it.layer(NodeServices.layer)("FeishuConnector", (it) => {
       const commandLog = path.join(root, "commands.log");
       const readyMarker = path.join(root, "account-ready");
       const blockLoginMarker = path.join(root, "block-device-login");
+      const logoutFailureMarker = path.join(root, "logout-reports-failure");
+      const notConfiguredMarker = path.join(root, "not-configured");
+      const blockConfigMarker = path.join(root, "block-config-init");
       const connectorStatePath = path.join(
         stateDir,
         "connectors",
@@ -63,7 +66,7 @@ it.layer(NodeServices.layer)("FeishuConnector", (it) => {
       yield* Effect.all([
         fileSystem.writeFileString(
           cliPath,
-          `#!/bin/sh\nprintf '%s|%s\\n' "$LARKSUITE_CLI_CONFIG_DIR" "$*" >> '${commandLog}'\nif [ "$1" = "--version" ]; then echo 'lark-cli version 1.0.86'; exit 0; fi\nif [ "$1 $2" = "config show" ]; then exit 0; fi\nif [ "$1 $2" = "auth logout" ]; then rm -f '${readyMarker}'; touch '${commandLog}.logout'; exit 0; fi\nif [ "$1 $2 $3" = "auth status --json" ] && [ -f '${readyMarker}' ]; then echo '{"identities":{"user":{"status":"ready"}}}'; exit 0; fi\nif [ "$1 $2 $3" = "auth status --json" ] && [ -f '${commandLog}.logout' ]; then echo '{"ok":false,"error":{"type":"auth","subtype":"not_authenticated","message":"not authenticated"}}'; exit 3; fi\nif [ "$1 $2 $3" = "auth status --json" ]; then echo '{"identities":{"user":{"status":"ready"}}}'; exit 0; fi\nif [ "$1 $2 $3 $4" = "auth login --recommend --no-wait" ]; then echo '{"verification_url":"https://open.feishu.cn/device","device_code":"device-code"}'; exit 0; fi\nif [ "$1 $2 $3" = "auth login --device-code" ]; then if [ -f '${blockLoginMarker}' ]; then exec sleep 30; fi; touch '${readyMarker}'; exit 0; fi\nexit 9\n`,
+          `#!/bin/sh\nprintf '%s|%s\\n' "$LARKSUITE_CLI_CONFIG_DIR" "$*" >> '${commandLog}'\nif [ "$1" = "--version" ]; then echo 'lark-cli version 1.0.86'; exit 0; fi\nif [ "$1 $2" = "config show" ] && [ -f '${notConfiguredMarker}' ]; then exit 3; fi\nif [ "$1 $2" = "config show" ]; then exit 0; fi\nif [ "$1 $2" = "config init" ]; then echo 'https://open.feishu.cn/configure'; if [ -f '${blockConfigMarker}' ]; then exec sleep 30; fi; exit 0; fi\nif [ "$1 $2" = "auth logout" ]; then rm -f '${readyMarker}'; touch '${commandLog}.logout'; if [ -f '${logoutFailureMarker}' ]; then exit 7; fi; exit 0; fi\nif [ "$1 $2 $3" = "auth status --json" ] && [ -f '${readyMarker}' ]; then echo '{"identities":{"user":{"status":"ready"}}}'; exit 0; fi\nif [ "$1 $2 $3" = "auth status --json" ] && [ -f '${commandLog}.logout' ]; then echo '{"ok":false,"error":{"type":"auth","subtype":"not_authenticated","message":"not authenticated"}}'; exit 3; fi\nif [ "$1 $2 $3" = "auth status --json" ]; then echo '{"identities":{"user":{"status":"ready"}}}'; exit 0; fi\nif [ "$1 $2 $3 $4" = "auth login --recommend --no-wait" ]; then echo '{"verification_url":"https://open.feishu.cn/device","device_code":"device-code"}'; exit 0; fi\nif [ "$1 $2 $3" = "auth login --device-code" ]; then if [ -f '${blockLoginMarker}' ]; then exec sleep 30; fi; touch '${readyMarker}'; exit 0; fi\nexit 9\n`,
         ),
         fileSystem.writeFileString(path.join(skillRoot, "SKILL.md"), "---\nname: lark-test\n---\n"),
         fileSystem.writeFileString(
@@ -141,6 +144,7 @@ it.layer(NodeServices.layer)("FeishuConnector", (it) => {
         '{"app_id":"legacy-app"}',
       );
 
+      yield* fileSystem.writeFileString(logoutFailureMarker, "fail after logout");
       yield* fileSystem.writeFileString(blockLoginMarker, "block");
       const authStarted = yield* Deferred.make<void>();
       yield* connector.subscribe((state) =>
@@ -161,9 +165,40 @@ it.layer(NodeServices.layer)("FeishuConnector", (it) => {
         assert.equal(cancelledConnect.value.state.lastError, null);
       }
 
+      yield* fileSystem.writeFileString(notConfiguredMarker, "not configured");
+      yield* fileSystem.writeFileString(blockConfigMarker, "block");
+      const configStarted = yield* Deferred.make<void>();
+      yield* connector.subscribe((state) =>
+        state.authAction?.verificationUrl === "https://open.feishu.cn/configure"
+          ? Deferred.succeed(configStarted, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      const pendingConfig = yield* connector.connect.pipe(Effect.exit, Effect.forkScoped);
+      yield* Deferred.await(configStarted);
+
+      const configCancelled = yield* connector.disconnect;
+      assert.equal(configCancelled.state.enabled, false);
+      assert.equal(configCancelled.state.authState, "not_configured");
+      const cancelledConfig = yield* Fiber.join(pendingConfig);
+      assert.equal(cancelledConfig._tag, "Success");
+      if (cancelledConfig._tag === "Success") {
+        assert.equal(cancelledConfig.value.state.enabled, false);
+        assert.equal(cancelledConfig.value.state.lastError, null);
+      }
+      assert.include(yield* fileSystem.readFileString(commandLog), "config init --new --lang zh");
+
       const disabled = yield* connector.setEnabled(false);
       assert.equal(disabled.state.enabled, false);
-      assert.deepEqual(backendActions, ["stop", "start", "stop", "start", "stop", "start"]);
+      assert.deepEqual(backendActions, [
+        "stop",
+        "start",
+        "stop",
+        "start",
+        "stop",
+        "start",
+        "stop",
+        "start",
+      ]);
     }).pipe(Effect.scoped),
   );
 });
