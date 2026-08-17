@@ -1,5 +1,6 @@
 import {
   ChartNoAxesColumnIcon,
+  ChevronUpIcon,
   CircleUserRoundIcon,
   LoaderCircleIcon,
   LogOutIcon,
@@ -125,8 +126,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter({
               <MenuTrigger
                 render={
                   <SidebarMenuButton
-                    size="lg"
-                    className="border border-sidebar-border/70 bg-sidebar-control-surface/60 px-2.5 hover:bg-sidebar-row-hover"
+                    className="px-[var(--sidebar-row-content-inset)] text-sidebar-foreground"
                     aria-label="打开账号菜单"
                     title={accountDisplayName}
                   />
@@ -134,6 +134,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter({
               >
                 <CircleUserRoundIcon className="size-4 shrink-0" />
                 <span className="min-w-0 truncate">{accountDisplayName}</span>
+                <ChevronUpIcon className="ml-auto size-3.5 shrink-0 text-sidebar-muted-foreground/70" />
               </MenuTrigger>
               <MenuPopup side="top" align="start" className="min-w-52">
                 <MenuItem onClick={handleUsageClick} closeOnClick>

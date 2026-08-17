@@ -42,6 +42,8 @@ describe("FdModelSelector", () => {
     );
 
     expect(markup).toContain('data-fd-model-selector="true"');
+    expect(markup).toContain("w-24");
+    expect(markup).toContain("min-w-24");
     expect(markup).toContain("V4 Pro");
     expect(fdModelLabel(FD_RUNTIME_DEFAULT_MODEL)).toBe("V4 Flash");
   });

@@ -56,7 +56,7 @@ export function FdModelSelector(props: {
         size="sm"
         aria-label="选择模型"
         data-fd-model-selector="true"
-        className="h-8 min-w-[6.75rem] shrink-0 border-border/70 bg-background/60 px-2.5 text-xs font-medium shadow-none"
+        className="h-8 w-24 min-w-24 shrink-0 border-border/70 bg-background/60 px-2 text-xs font-medium shadow-none"
       >
         <SelectValue>{fdModelLabel(value)}</SelectValue>
       </SelectTrigger>
