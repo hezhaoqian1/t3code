@@ -11,5 +11,9 @@ cancellation/logout races. The remaining Feishu enterprise-account restriction i
 application authorization, not by a Desktop identity cache, so the client documents and surfaces
 that prerequisite instead of embedding an App Secret or bypassing tenant policy.
 
-Source verification is complete. Release completion still requires merged `main`, two-platform
-0.2.9 artifacts, public manifest activation, and post-activation download/update checks.
+The release is complete. `main` was merged and pushed, GitHub Actions run `31996596289` produced
+the exact two-platform 0.2.9 bundle, and the FD Gateway publisher verified and atomically activated
+it. Public manifests, versioned assets, stable website aliases, byte-range downloads, and updater
+discovery all returned 0.2.9. A fresh macOS DMG launch also confirmed the local Agent Server,
+Flash/Pro selector, Pro selection, and bundled Feishu CLI/Skills. Windows packaging and updater
+metadata are verified; final Windows shortcut/restart acceptance still requires a Windows machine.

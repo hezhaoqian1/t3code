@@ -40,4 +40,9 @@
 - Full repository typecheck passed. The existing non-blocking Effect suggestion in `apps/server/src/fd-codex/FdCodexAdapter.ts` remains unchanged.
 - Production build, Electron smoke, release smoke, repository format check, and `git diff --check` passed.
 - Full-repository lint still reports existing baseline violations across FD Codex, test-runtime, Sidebar, and bundled Feishu Skill files. No newly introduced production behavior failed typecheck or build; lint debt is not being mixed into this release.
-- Remaining external verification: a real Fangde tenant administrator must authorize the Feishu CLI application before an enterprise account can be selected; Windows x64 install/update acceptance requires a Windows machine after packaging.
+- GitHub Actions run `31996596289` completed successfully from merged `main` and produced the exact seven-file `fd-desktop-release-0.2.9` bundle for macOS arm64 and Windows x64.
+- The FD Gateway internal-unsigned publisher verified both packages, updater manifests, architectures, application metadata, and SHA-256 sums before atomically activating 0.2.9. The retained rollback target is 0.2.7.
+- Public `latest.json`, `latest-mac.yml`, `latest.yml`, `SHA256SUMS`, all four versioned assets, and the two stable website aliases accepted byte-range requests. Both updater manifests advertise version `0.2.9`.
+- A fresh macOS DMG launch reported bundle version `0.2.9`, started the local Agent Server, created the main window, rendered both `V4 Flash` and `V4 Pro`, and accepted a switch to Pro.
+- The packaged Feishu connector refreshed to `CLI 1.0.86 · 27 个官方 Skills` with the recoverable `需要授权飞书账号` state and no red error notification.
+- Remaining external verification: a real Fangde tenant administrator must authorize the Feishu CLI application before an enterprise account can be selected; final Windows shortcut/restart acceptance still requires a Windows machine.
