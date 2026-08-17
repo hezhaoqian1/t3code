@@ -14,9 +14,9 @@ the 27 official `lark-*` Skills are bundled from the repository resources. Emplo
 not need Node.js, npm, or WorkBuddy.
 
 The company-internal channel is intentionally unsigned. Employees may see macOS Gatekeeper or
-Windows SmartScreen prompts on first install. Windows supports the in-app update handoff; macOS does
-not advertise in-app installation because Electron's macOS updater requires a signed application.
-Mac employees download the new DMG from the company website and replace the existing application.
+Windows SmartScreen prompts on first install. Windows supports the in-app download and install
+handoff; macOS employees download the new DMG from the company website and replace the existing
+application because this unsigned channel does not provide a reliable in-app macOS install path.
 
 Each artifact bundles the pinned native Codex App Server runtime for its platform. Employee machines
 do not need a global Codex installation or a PATH entry. The build verifies the staged runtime and
