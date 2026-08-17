@@ -109,7 +109,10 @@ import { buildExpandedImagePreview, type ExpandedImagePreview } from "./Expanded
 import { basenameOfPath } from "../../pierre-icons";
 import { cn, randomUUID } from "~/lib/utils";
 import { Separator } from "../ui/separator";
-import { isFeishuConnectorConnected, useFeishuConnectorState } from "../../state/feishuConnector";
+import {
+  resolveFeishuConnectorConnectionStatus,
+  useFeishuConnectorState,
+} from "../../state/feishuConnector";
 import { WorkspacePicker } from "./WorkspacePicker";
 import { FdModelSelector } from "./FdModelSelector";
 
@@ -3037,7 +3040,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   fdSkillsDisabled={!activeThreadId}
                   connectorState={{
                     available: Boolean(window.desktopBridge?.getFeishuConnectorState),
-                    connected: isFeishuConnectorConnected(feishuConnectorState),
+                    status: resolveFeishuConnectorConnectionStatus(feishuConnectorState),
                   }}
                   onAddImages={() => composerImageInputRef.current?.click()}
                   onOpenFiles={() => openComposerTrigger("@")}

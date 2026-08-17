@@ -10,7 +10,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
 import type { FdConnectorState } from "@t3tools/contracts";
 
-import { useFeishuConnectorState } from "../../state/feishuConnector";
+import { isFeishuConnectorConnected, useFeishuConnectorState } from "../../state/feishuConnector";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -20,13 +20,9 @@ import { stackedThreadToast, toastManager } from "../ui/toast";
 
 export type ConnectorSurface = "page" | "settings";
 
-function connectorConnected(state: FdConnectorState): boolean {
-  return state.enabled && state.authState === "authenticated" && state.skillCount > 0;
-}
-
 function authLabel(state: FdConnectorState): string {
-  if (!state.enabled) return "未启用";
   if (state.busy) return state.message ?? "处理中…";
+  if (!state.enabled) return "未启用";
   if (state.authState === "authenticated") return "已连接";
   if (state.authState === "not_configured") return "需要创建/绑定飞书应用";
   if (state.authState === "not_authenticated") return "需要授权飞书账号";
@@ -44,7 +40,7 @@ function installLabel(state: FdConnectorState): string {
 }
 
 function ConnectorBadge({ state }: { readonly state: FdConnectorState }) {
-  const connected = connectorConnected(state);
+  const connected = isFeishuConnectorConnected(state);
   return (
     <span
       className={cn(
@@ -236,7 +232,7 @@ function FeishuStatusDetails({ state }: { readonly state: FdConnectorState }) {
 
 export function FeishuConnectorCard({ surface }: { readonly surface: ConnectorSurface }) {
   const state = useFeishuConnectorState();
-  const connected = connectorConnected(state);
+  const connected = isFeishuConnectorConnected(state);
 
   if (surface === "settings") {
     return (
@@ -353,7 +349,7 @@ export function ConnectorsPage() {
 
 export function ConnectorsSidebarNav() {
   const state = useFeishuConnectorState();
-  const connected = connectorConnected(state);
+  const connected = isFeishuConnectorConnected(state);
 
   return (
     <>

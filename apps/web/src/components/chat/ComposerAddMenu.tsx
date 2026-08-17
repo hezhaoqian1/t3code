@@ -14,7 +14,7 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/men
 
 export type ComposerConnectorState = {
   readonly available: boolean;
-  readonly connected: boolean;
+  readonly status: "checking" | "connected" | "disconnected";
 };
 
 export const ComposerAddMenu = memo(function ComposerAddMenu(props: {
@@ -30,9 +30,11 @@ export const ComposerAddMenu = memo(function ComposerAddMenu(props: {
   readonly onOpenConnectors: () => void;
 }) {
   const connectorDescription = props.connectorState.available
-    ? props.connectorState.connected
+    ? props.connectorState.status === "connected"
       ? "飞书已连接，Agent 自动可用"
-      : "飞书未连接，点击前往连接"
+      : props.connectorState.status === "checking"
+        ? "正在同步飞书连接状态…"
+        : "飞书未连接，点击前往连接"
     : "连接器仅在桌面端可用";
 
   return (
@@ -109,7 +111,7 @@ export const ComposerAddMenu = memo(function ComposerAddMenu(props: {
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-2">
               <span>连接器</span>
-              {props.connectorState.connected ? (
+              {props.connectorState.status === "connected" ? (
                 <span className="rounded-full bg-emerald-500/12 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">
                   已连接
                 </span>

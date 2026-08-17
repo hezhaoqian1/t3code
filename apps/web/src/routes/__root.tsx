@@ -51,6 +51,7 @@ import {
 } from "../components/KeybindingsUpdateToast.logic";
 import { FdAccountProvider } from "../fd/FdAccountProvider";
 import { FdLoginGate } from "../fd/FdLoginGate";
+import { FeishuConnectorProvider } from "../state/feishuConnector";
 
 export const Route = createRootRoute({
   beforeLoad: async () => {
@@ -70,7 +71,9 @@ function RootRouteView() {
   return (
     <FdAccountProvider>
       <FdLoginGate>
-        <AuthenticatedRootRouteView />
+        <FeishuConnectorProvider>
+          <AuthenticatedRootRouteView />
+        </FeishuConnectorProvider>
       </FdLoginGate>
     </FdAccountProvider>
   );
