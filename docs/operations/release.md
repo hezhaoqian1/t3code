@@ -1,7 +1,7 @@
 # Fangde AI Desktop Release
 
 当前版本的功能范围和人工验收清单见
-[`releases/0.2.8.md`](./releases/0.2.8.md)。通用构建、发布和回滚流程以本文为准。
+[`releases/0.2.9.md`](./releases/0.2.9.md)。通用构建、发布和回滚流程以本文为准。
 
 `.github/workflows/fd-desktop-release.yml` builds one immutable internal release bundle for:
 
