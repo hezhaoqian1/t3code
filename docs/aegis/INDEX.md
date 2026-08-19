@@ -5,6 +5,7 @@ records, not authoritative runtime decisions.
 
 | Date       | Kind     | Path                                                                                                   | Title                                                                |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| 2026-08-19 | plan     | docs/aegis/plans/2026-08-19-desktop-file-analysis-v1.md                                                | Desktop One-Off File Analysis V1 Implementation Plan                 |
 | 2026-08-09 | baseline | docs/aegis/baseline/2026-08-09-initial-baseline.md                                                     | FD AI Desktop initial baseline                                       |
 | 2026-08-09 | spec     | docs/aegis/specs/2026-08-09-fd-ai-local-desktop-design.md                                              | FD AI local desktop design                                           |
 | 2026-08-09 | plan     | docs/aegis/plans/2026-08-09-fd-ai-desktop-implementation.md                                            | FD AI Desktop implementation plan                                    |
