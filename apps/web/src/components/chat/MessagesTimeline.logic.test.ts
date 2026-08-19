@@ -4,9 +4,59 @@ import {
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
+  reconcileTurnDisclosureState,
   resolveAssistantMessageCopyState,
+  resolveUnsettledTurnId,
   workEntryEmployeeSummary,
 } from "./MessagesTimeline.logic";
+
+describe("turn disclosure lifecycle", () => {
+  const turnId = "turn-1" as never;
+  const runningTurn = {
+    turnId,
+    state: "running" as const,
+    startedAt: "2026-01-01T00:00:00Z",
+    completedAt: null,
+  };
+
+  it("uses the running turn as the active disclosure owner", () => {
+    expect(resolveUnsettledTurnId(runningTurn, null)).toBe(turnId);
+    expect(
+      resolveUnsettledTurnId(
+        { ...runningTurn, completedAt: "2026-01-01T00:00:01Z", state: "completed" },
+        null,
+      ),
+    ).toBeNull();
+  });
+
+  it("folds a turn when it changes from running to completed", () => {
+    const result = reconcileTurnDisclosureState({
+      previousLatestTurn: runningTurn,
+      latestTurn: { ...runningTurn, state: "completed", completedAt: "2026-01-01T00:00:10Z" },
+      previousUnsettledTurnId: turnId,
+      unsettledTurnId: null,
+      expandedTurnIds: new Set([turnId]),
+      collapsedTurnIds: new Set(),
+    });
+
+    expect(result.expandedTurnIds).toEqual(new Set());
+    expect(result.collapsedTurnIds).toEqual(new Set());
+  });
+
+  it("keeps an interrupted turn expanded for error inspection", () => {
+    const result = reconcileTurnDisclosureState({
+      previousLatestTurn: runningTurn,
+      latestTurn: { ...runningTurn, state: "interrupted", completedAt: "2026-01-01T00:00:05Z" },
+      previousUnsettledTurnId: turnId,
+      unsettledTurnId: null,
+      expandedTurnIds: new Set(),
+      collapsedTurnIds: new Set([turnId]),
+    });
+
+    expect(result.expandedTurnIds).toEqual(new Set([turnId]));
+    expect(result.collapsedTurnIds).toEqual(new Set());
+  });
+});
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {
@@ -347,7 +397,7 @@ describe("deriveMessagesTimelineRows", () => {
     expect(assistantRows[1]?.showAssistantCopyButton).toBe(true);
   });
 
-  it("folds non-streaming assistant commentary while the turn is active", () => {
+  it("expands the active turn so its non-streaming commentary is visible", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -396,9 +446,18 @@ describe("deriveMessagesTimelineRows", () => {
         row.kind === "message" && row.message.role === "assistant",
     );
 
-    expect(assistantRows).toHaveLength(1);
+    expect(assistantRows).toHaveLength(2);
     expect(assistantRows[0]?.message.id).toBe("assistant-one");
     expect(assistantRows[0]?.assistantCopyStreaming).toBe(false);
+    expect(assistantRows[1]?.message.id).toBe("assistant-two");
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        kind: "turn-fold",
+        turnId: "turn-2",
+        active: true,
+        expanded: true,
+      }),
+    );
     expect(rows).toContainEqual(
       expect.objectContaining({
         kind: "turn-fold",
@@ -820,7 +879,11 @@ describe("deriveMessagesTimelineRows", () => {
       revertTurnCountByUserMessageId: new Map(),
     });
 
-    expect(rows.map((row) => row.id)).toEqual(["turn-fold:turn-1", "work-entry-1"]);
+    expect(rows.map((row) => row.id)).toEqual([
+      "turn-fold:turn-1",
+      "assistant-thought-entry",
+      "work-entry-1",
+    ]);
     expect(rows[0]).toMatchObject({
       kind: "turn-fold",
       label: "正在处理",
@@ -1012,6 +1075,64 @@ describe("deriveMessagesTimelineRows", () => {
         kind: "turn-fold",
         turnId: "turn-1",
         active: true,
+        expanded: true,
+      }),
+      expect.objectContaining({
+        kind: "message",
+        message: expect.objectContaining({ id: "assistant-thought" }),
+      }),
+    ]);
+  });
+
+  it("honors an explicit collapse while the turn is active", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: [
+        {
+          id: "assistant-thought-entry",
+          kind: "message",
+          createdAt: "2026-01-01T00:00:10Z",
+          message: {
+            id: "assistant-thought" as never,
+            role: "assistant",
+            text: "Working on it.",
+            turnId: "turn-1" as never,
+            createdAt: "2026-01-01T00:00:10Z",
+            updatedAt: "2026-01-01T00:00:11Z",
+            streaming: false,
+          },
+        },
+        {
+          id: "work-entry",
+          kind: "work",
+          createdAt: "2026-01-01T00:00:12Z",
+          entry: {
+            id: "work-1",
+            createdAt: "2026-01-01T00:00:12Z",
+            turnId: "turn-1" as never,
+            label: "Searched the web",
+            tone: "tool",
+          },
+        },
+      ],
+      latestTurn: {
+        turnId: "turn-1" as never,
+        state: "running",
+        startedAt: "2026-01-01T00:00:00Z",
+        completedAt: null,
+      },
+      collapsedTurnIds: new Set(["turn-1" as never]),
+      isWorking: true,
+      activeTurnStartedAt: "2026-01-01T00:00:00Z",
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows).toEqual([
+      expect.objectContaining({
+        kind: "turn-fold",
+        turnId: "turn-1",
+        active: true,
+        expanded: false,
       }),
     ]);
   });

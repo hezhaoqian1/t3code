@@ -359,7 +359,7 @@ interface TurnFold {
  * user sends a message, the previous turn is still the "active" one until the
  * server creates the new turn, and folding must not flicker through that window.
  */
-function deriveUnsettledTurnId(
+export function resolveUnsettledTurnId(
   latestTurn: TimelineLatestTurn | null,
   runningTurnId: TurnId | null,
 ): TurnId | null {
@@ -371,6 +371,39 @@ function deriveUnsettledTurnId(
   }
   const isSettled = latestTurn.completedAt !== null && latestTurn.state !== "running";
   return isSettled ? null : latestTurn.turnId;
+}
+
+export function reconcileTurnDisclosureState(input: {
+  previousLatestTurn: TimelineLatestTurn | null;
+  latestTurn: TimelineLatestTurn | null;
+  previousUnsettledTurnId: TurnId | null;
+  unsettledTurnId: TurnId | null;
+  expandedTurnIds: ReadonlySet<TurnId>;
+  collapsedTurnIds: ReadonlySet<TurnId>;
+}): { expandedTurnIds: Set<TurnId>; collapsedTurnIds: Set<TurnId> } {
+  const expandedTurnIds = new Set(input.expandedTurnIds);
+  const collapsedTurnIds = new Set(input.collapsedTurnIds);
+
+  const interrupted =
+    input.latestTurn !== null &&
+    input.previousLatestTurn?.turnId === input.latestTurn.turnId &&
+    input.previousLatestTurn.state === "running" &&
+    input.latestTurn.state === "interrupted";
+  if (interrupted && input.latestTurn !== null) {
+    collapsedTurnIds.delete(input.latestTurn.turnId);
+    expandedTurnIds.add(input.latestTurn.turnId);
+    return { expandedTurnIds, collapsedTurnIds };
+  }
+
+  if (
+    input.previousUnsettledTurnId !== null &&
+    input.previousUnsettledTurnId !== input.unsettledTurnId
+  ) {
+    expandedTurnIds.delete(input.previousUnsettledTurnId);
+    collapsedTurnIds.delete(input.previousUnsettledTurnId);
+  }
+
+  return { expandedTurnIds, collapsedTurnIds };
 }
 
 /**
@@ -529,6 +562,8 @@ export function deriveMessagesTimelineRows(input: {
   latestTurn?: TimelineLatestTurn | null;
   runningTurnId?: TurnId | null;
   expandedTurnIds?: ReadonlySet<TurnId>;
+  /** Turns the user explicitly collapsed, overriding the active-turn default. */
+  collapsedTurnIds?: ReadonlySet<TurnId>;
   expandedWorkGroupIds?: ReadonlySet<string>;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
@@ -540,7 +575,7 @@ export function deriveMessagesTimelineRows(input: {
     input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
   const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
-  const unsettledTurnId = deriveUnsettledTurnId(
+  const unsettledTurnId = resolveUnsettledTurnId(
     input.latestTurn ?? null,
     input.runningTurnId ?? null,
   );
@@ -553,9 +588,26 @@ export function deriveMessagesTimelineRows(input: {
   });
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
-    if (!input.expandedTurnIds?.has(fold.turnId)) {
+    const expanded =
+      !input.collapsedTurnIds?.has(fold.turnId) &&
+      (fold.active || input.expandedTurnIds?.has(fold.turnId) === true);
+    if (!expanded) {
       for (const entryId of fold.hiddenEntryIds) {
         collapsedEntryIds.add(entryId);
+      }
+      // A manually collapsed active turn should reduce to one status row. Its
+      // concise work summaries are useful while expanded, but otherwise would
+      // keep repeating beneath the collapsed "正在处理" row.
+      if (fold.active) {
+        for (const entry of input.timelineEntries) {
+          if (
+            entry.kind === "work" &&
+            entry.entry.turnId === fold.turnId &&
+            entry.entry.agentSpawn === undefined
+          ) {
+            collapsedEntryIds.add(entry.id);
+          }
+        }
       }
     }
   }
@@ -574,7 +626,9 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: turnFold.createdAt,
         turnId: turnFold.turnId,
         label: turnFold.label,
-        expanded: input.expandedTurnIds?.has(turnFold.turnId) ?? false,
+        expanded:
+          !input.collapsedTurnIds?.has(turnFold.turnId) &&
+          (turnFold.active || input.expandedTurnIds?.has(turnFold.turnId) === true),
         active: turnFold.active,
         startedAt: turnFold.startedAt,
         ...(turnFold.lastWorkEntry ? { lastWorkEntry: turnFold.lastWorkEntry } : {}),

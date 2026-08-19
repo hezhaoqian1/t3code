@@ -33,6 +33,18 @@ on loopback and delivers its bootstrap credential to the renderer over trusted I
 - Pass dev-runner flags directly after the root task name, for example:
   `vp run dev --home-dir /tmp/t3code-dev`
 
+### 本地登录验收
+
+进行桌面端登录或 UI 验收时，使用一次性的隔离目录，避免读取或修改真实员工数据：
+
+```bash
+pnpm dev:desktop --home-dir /tmp/fd-ai-dev-login
+```
+
+启动后 Electron 会打开 `Fangde AI (Dev)` 登录页；后端和 Web 默认分别监听
+`http://127.0.0.1:13773/` 与 `http://127.0.0.1:5733/`。测试完成后只需停止当前启动进程；不要把
+`~/.t3/userdata` 用作开发登录目录，也不要删除它来解决登录状态问题。
+
 ### Dev state directories
 
 - Dev commands run from a linked **git worktree** default to that worktree's gitignored `.t3`, even
