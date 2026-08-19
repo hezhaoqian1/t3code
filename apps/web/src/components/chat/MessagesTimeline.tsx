@@ -75,6 +75,8 @@ import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
+  reconcileTurnDisclosureState,
+  resolveUnsettledTurnId,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
@@ -283,6 +285,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   loadEarlier = null,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
+  // Active turns are expanded by default. This set only records the user's
+  // explicit collapse, so streaming updates do not reopen a disclosure the
+  // user chose to close.
+  const [collapsedTurnIds, setCollapsedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
@@ -337,6 +343,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const onToggleTurnFold = useCallback(
     (turnId: TurnId) => {
       suspendEndScrollMaintenanceForDisclosure(`turn-fold:${turnId}`);
+      const activeTurnId = resolveUnsettledTurnId(latestTurn, runningTurnId);
+      if (activeTurnId === turnId) {
+        setCollapsedTurnIds((existing) => {
+          const next = new Set(existing);
+          if (next.has(turnId)) {
+            next.delete(turnId);
+          } else {
+            next.add(turnId);
+          }
+          return next;
+        });
+        return;
+      }
       setExpandedTurnIds((existing) => {
         const next = new Set(existing);
         if (next.has(turnId)) {
@@ -347,7 +366,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         return next;
       });
     },
-    [suspendEndScrollMaintenanceForDisclosure],
+    [latestTurn, runningTurnId, suspendEndScrollMaintenanceForDisclosure],
   );
   const onToggleWorkGroup = useCallback(
     (groupId: string, anchorKey: string) => {
@@ -365,34 +384,41 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [suspendEndScrollMaintenanceForDisclosure],
   );
 
+  // An active turn starts expanded, then folds automatically once it settles.
   // An in-session interrupt leaves its turn expanded so the user keeps their
-  // place; the next turn (or a reload, since this is local state) folds it.
+  // place and can inspect the stop reason. Manual disclosure choices are kept
+  // separate from the default active-turn state so streaming updates do not
+  // reopen a turn the user explicitly collapsed.
+  const unsettledTurnId = resolveUnsettledTurnId(latestTurn, runningTurnId);
+  const previousUnsettledTurnIdRef = useRef(unsettledTurnId);
   const previousLatestTurnRef = useRef(latestTurn);
   useEffect(() => {
     const previous = previousLatestTurnRef.current;
+    const previousUnsettledTurnId = previousUnsettledTurnIdRef.current;
     previousLatestTurnRef.current = latestTurn;
-    if (!latestTurn || previous?.turnId === undefined) {
-      return;
-    }
-    if (latestTurn.turnId === previous.turnId) {
-      if (previous.state === "running" && latestTurn.state === "interrupted") {
-        setExpandedTurnIds((existing) => {
-          const next = new Set(existing);
-          next.add(latestTurn.turnId);
-          return next;
-        });
-      }
-      return;
-    }
-    setExpandedTurnIds((existing) => {
-      if (!existing.has(previous.turnId)) {
-        return existing;
-      }
-      const next = new Set(existing);
-      next.delete(previous.turnId);
-      return next;
+    previousUnsettledTurnIdRef.current = unsettledTurnId;
+    const nextDisclosureState = reconcileTurnDisclosureState({
+      previousLatestTurn: previous,
+      latestTurn,
+      previousUnsettledTurnId,
+      unsettledTurnId,
+      expandedTurnIds,
+      collapsedTurnIds,
     });
-  }, [latestTurn]);
+    const sameTurnIdSet = (a: ReadonlySet<TurnId>, b: ReadonlySet<TurnId>) =>
+      a.size === b.size && [...a].every((turnId) => b.has(turnId));
+
+    setExpandedTurnIds((existing) =>
+      sameTurnIdSet(existing, nextDisclosureState.expandedTurnIds)
+        ? existing
+        : nextDisclosureState.expandedTurnIds,
+    );
+    setCollapsedTurnIds((existing) =>
+      sameTurnIdSet(existing, nextDisclosureState.collapsedTurnIds)
+        ? existing
+        : nextDisclosureState.collapsedTurnIds,
+    );
+  }, [latestTurn, runningTurnId, unsettledTurnId, expandedTurnIds, collapsedTurnIds]);
 
   const rawRows = useMemo(
     () =>
@@ -401,6 +427,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         latestTurn,
         runningTurnId,
         expandedTurnIds,
+        collapsedTurnIds,
         expandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
@@ -412,6 +439,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       latestTurn,
       runningTurnId,
       expandedTurnIds,
+      collapsedTurnIds,
       expandedWorkGroupIds,
       isWorking,
       activeTurnStartedAt,
@@ -1092,6 +1120,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
   const ctx = use(TimelineRowCtx);
   const { workingStepLabel } = use(TimelineRowActivityCtx);
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
+  const progressLabel = row.active && !row.expanded ? "Agent 正在运行" : row.label;
 
   return (
     <div className={cn(row.active ? "pb-1 pt-0.5" : "border-b border-border/60 pb-2 pt-1")}>
@@ -1110,7 +1139,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
           </span>
         ) : null}
         <span className="shrink-0">
-          {row.label}
+          {progressLabel}
           {row.active && row.startedAt ? (
             <>
               {" "}
@@ -1118,7 +1147,7 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
             </>
           ) : null}
         </span>
-        {row.active && workingStepLabel ? (
+        {row.active && row.expanded && workingStepLabel ? (
           <span className="min-w-0 truncate text-muted-foreground/60">· {workingStepLabel}</span>
         ) : null}
         {!row.active && row.lastWorkEntry ? (
