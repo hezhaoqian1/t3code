@@ -54,6 +54,7 @@ minimumReleaseAgeExclude:
   - "@effect/sql-sqlite-bun@4.0.0-beta.103"
   - "@effect/vitest@4.0.0-beta.103"
   - effect@4.0.0-beta.103
+  - officeparser@7.8.0
 
 overrides:
   "@effect/atom-react": "catalog:"

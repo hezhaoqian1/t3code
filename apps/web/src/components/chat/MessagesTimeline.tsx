@@ -52,6 +52,7 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   EyeIcon,
+  FileTextIcon,
   GlobeIcon,
   HammerIcon,
   MessageCircleIcon,
@@ -989,7 +990,9 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
-  const userImages = row.message.attachments ?? [];
+  const attachments = row.message.attachments ?? [];
+  const userImages = attachments.filter((attachment) => attachment.type === "image");
+  const userDocuments = attachments.filter((attachment) => attachment.type === "document");
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;
   const previewAnnotations: ParsedPreviewAnnotation[] = [];
@@ -1014,7 +1017,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       <div className="relative max-w-[80%] rounded-2xl bg-message p-3 text-message-foreground">
         {regularImages.length > 0 && (
           <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-            {regularImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+            {regularImages.map((image) => (
               <div
                 key={image.id}
                 className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
@@ -1052,6 +1055,19 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             image={previewImages[index] ?? null}
           />
         ))}
+        {userDocuments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {userDocuments.map((document) => (
+              <div
+                key={document.id}
+                className="flex max-w-full items-center gap-2 rounded-lg border border-border/70 bg-background/70 px-2.5 py-2 text-xs"
+              >
+                <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 truncate">{document.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {elementContexts.length > 0 ? (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {elementContexts.map((context) => (
@@ -1591,7 +1607,7 @@ const UserMessageElementContextChip = memo(function UserMessageElementContextChi
 
 function UserMessagePreviewAnnotationCard(props: {
   annotation: ParsedPreviewAnnotation;
-  image: NonNullable<TimelineMessage["attachments"]>[number] | null;
+  image: Extract<NonNullable<TimelineMessage["attachments"]>[number], { type: "image" }> | null;
 }) {
   const ctx = use(TimelineRowCtx);
   return (

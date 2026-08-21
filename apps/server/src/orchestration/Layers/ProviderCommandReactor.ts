@@ -44,6 +44,10 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { FD_DEEPSEEK_MODEL_SELECTION } from "../../fd-agent/FdModelPolicy.ts";
 import { FdEnterpriseThreadRuntime } from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
+import { ServerConfig } from "../../config.ts";
+import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { formatDocumentContext } from "../../fileAnalysis/DocumentContext.ts";
+import { parseDocumentAttachment } from "../../fileAnalysis/DocumentParser.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -321,6 +325,7 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const serverConfig = yield* ServerConfig;
   const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
@@ -738,6 +743,49 @@ const make = Effect.gen(function* () {
         new Error(`Thread '${input.threadId}' was not found in read model.`),
       );
     }
+    const normalizedInput = toNonEmptyProviderInput(input.messageText);
+    const normalizedAttachments = input.attachments ?? [];
+    const documentAttachments = normalizedAttachments.filter(
+      (attachment) => attachment.type === "document",
+    );
+    if (input.fdSkillVersionId !== undefined && documentAttachments.length > 0) {
+      return yield* new ProviderAdapterRequestError({
+        provider: ProviderDriverKind.make("fd-deepseek"),
+        method: "thread.turn.start",
+        detail: "FD Skill 暂不支持文档附件，请移除文件后重试。",
+      });
+    }
+    const documentContexts = yield* Effect.forEach(documentAttachments, (attachment) => {
+      const attachmentPath = resolveAttachmentPath({
+        attachmentsDir: serverConfig.attachmentsDir,
+        attachment,
+      });
+      if (!attachmentPath) {
+        return Effect.fail(
+          new ProviderAdapterRequestError({
+            provider: ProviderDriverKind.make("fd-deepseek"),
+            method: "thread.turn.start",
+            detail: `文件 '${attachment.name}' 的本地引用无效。`,
+          }),
+        );
+      }
+      return Effect.tryPromise({
+        try: () => parseDocumentAttachment({ attachment, path: attachmentPath }),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: ProviderDriverKind.make("fd-deepseek"),
+            method: "thread.turn.start",
+            detail: cause instanceof Error ? cause.message : `文件 '${attachment.name}' 解析失败。`,
+            cause,
+          }),
+      });
+    });
+    const documentPrompt = formatDocumentContext(documentContexts);
+    const inputWithDocuments = [normalizedInput, documentPrompt].filter(Boolean).join("\n\n");
+
+    // Validate and parse local files before touching provider session state. A
+    // bad attachment or an enterprise-skill policy rejection must not create a
+    // provider session that the user cannot use.
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
@@ -745,8 +793,10 @@ const make = Effect.gen(function* () {
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
-    const normalizedInput = toNonEmptyProviderInput(input.messageText);
-    const normalizedAttachments = input.attachments ?? [];
+
+    const providerAttachments = normalizedAttachments.filter(
+      (attachment) => attachment.type === "image",
+    );
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
@@ -779,8 +829,8 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       ...(input.fdSkillVersionId !== undefined ? { fdSkillVersionId: input.fdSkillVersionId } : {}),
       ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
-      ...(normalizedInput ? { input: normalizedInput } : {}),
-      ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
+      ...(inputWithDocuments ? { input: inputWithDocuments } : {}),
+      ...(providerAttachments.length > 0 ? { attachments: providerAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
     };

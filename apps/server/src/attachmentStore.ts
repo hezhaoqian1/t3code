@@ -10,7 +10,26 @@ import {
 } from "./attachmentPaths.ts";
 import { inferImageExtension, SAFE_IMAGE_FILE_EXTENSIONS } from "./imageMime.ts";
 
-const ATTACHMENT_FILENAME_EXTENSIONS = [...SAFE_IMAGE_FILE_EXTENSIONS, ".bin"];
+const SAFE_DOCUMENT_FILE_EXTENSIONS = [
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".csv",
+  ".pptx",
+  ".txt",
+  ".md",
+  ".json",
+  ".xml",
+  ".html",
+  ".htm",
+];
+const ALL_ATTACHMENT_FILENAME_EXTENSIONS = [
+  ...SAFE_IMAGE_FILE_EXTENSIONS,
+  ...SAFE_DOCUMENT_FILE_EXTENSIONS,
+  ".bin",
+];
 const ATTACHMENT_ID_THREAD_SEGMENT_MAX_CHARS = 80;
 const ATTACHMENT_ID_THREAD_SEGMENT_PATTERN = "[a-z0-9_]+(?:-[a-z0-9_]+)*";
 const ATTACHMENT_ID_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -63,6 +82,10 @@ export function attachmentRelativePath(attachment: ChatAttachment): string {
       });
       return `${attachment.id}${extension}`;
     }
+    case "document": {
+      const extension = safeDocumentExtension(attachment.name);
+      return `${attachment.id}${extension}`;
+    }
   }
 }
 
@@ -84,7 +107,7 @@ export function resolveAttachmentPathById(input: {
   if (!normalizedId || normalizedId.includes("/") || normalizedId.includes(".")) {
     return null;
   }
-  for (const extension of ATTACHMENT_FILENAME_EXTENSIONS) {
+  for (const extension of ALL_ATTACHMENT_FILENAME_EXTENSIONS) {
     const maybePath = resolveAttachmentRelativePath({
       attachmentsDir: input.attachmentsDir,
       relativePath: `${normalizedId}${extension}`,
@@ -94,6 +117,11 @@ export function resolveAttachmentPathById(input: {
     }
   }
   return null;
+}
+
+function safeDocumentExtension(name: string): string {
+  const extension = name.slice(name.lastIndexOf(".")).toLowerCase();
+  return SAFE_DOCUMENT_FILE_EXTENSIONS.includes(extension) ? extension : ".bin";
 }
 
 export function parseAttachmentIdFromRelativePath(relativePath: string): string | null {

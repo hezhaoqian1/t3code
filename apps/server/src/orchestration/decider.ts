@@ -901,6 +901,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (
+        command.fdSkillVersionId !== undefined &&
+        command.message.attachments.some((attachment) => attachment.type === "document")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "FD Skill 暂不支持文档附件，请移除文件后重试。",
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
