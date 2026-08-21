@@ -1,5 +1,6 @@
 import {
   AtSignIcon,
+  FileTextIcon,
   ImagePlusIcon,
   PlugZapIcon,
   PlusIcon,
@@ -20,9 +21,12 @@ export type ComposerConnectorState = {
 export const ComposerAddMenu = memo(function ComposerAddMenu(props: {
   readonly disabled?: boolean;
   readonly imageDisabled?: boolean;
+  readonly documentAvailable?: boolean;
+  readonly documentDisabled?: boolean;
   readonly fdSkillsDisabled?: boolean;
   readonly connectorState: ComposerConnectorState;
   readonly onAddImages: () => void;
+  readonly onAddDocuments: () => void;
   readonly onOpenFiles: () => void;
   readonly onOpenTerminal: () => void;
   readonly onOpenFdSkills: () => void;
@@ -72,6 +76,17 @@ export const ComposerAddMenu = memo(function ComposerAddMenu(props: {
             <span className="block text-[11px] text-muted-foreground">上传图片作为任务附件</span>
           </span>
         </MenuItem>
+        {props.documentAvailable ? (
+          <MenuItem disabled={props.documentDisabled} onClick={props.onAddDocuments}>
+            <FileTextIcon />
+            <span className="min-w-0 flex-1">
+              <span className="block">添加文件</span>
+              <span className="block text-[11px] text-muted-foreground">
+                分析 PDF、PPTX、DOCX、XLSX 或文本
+              </span>
+            </span>
+          </MenuItem>
+        ) : null}
         <MenuItem onClick={props.onOpenFiles}>
           <AtSignIcon />
           <span className="min-w-0 flex-1">

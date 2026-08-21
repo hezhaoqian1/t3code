@@ -198,6 +198,7 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import type { ComposerDocumentAttachment } from "../types";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -326,6 +327,8 @@ import { useAssetUrls } from "../assets/assetUrls";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
+  "[User attached one or more files without additional text. Analyze the attached files and respond with the most useful summary.]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
@@ -4618,6 +4621,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     const {
       images: sendContextImages,
+      documents: sendContextDocuments,
       terminalContexts: composerTerminalContexts,
       elementContexts: composerElementContexts,
       previewAnnotations: sendContextPreviewAnnotations,
@@ -4654,6 +4658,7 @@ function ChatViewContent(props: ChatViewProps) {
     } = deriveComposerSendState({
       prompt: promptForSend,
       imageCount: composerImages.length,
+      documentCount: sendContextDocuments.length,
       terminalContexts: composerTerminalContexts,
       elementContextCount:
         composerElementContexts.length +
@@ -4720,8 +4725,11 @@ function ChatViewContent(props: ChatViewProps) {
     }
     const threadIdForSend = activeThread.id;
     const fdSkillVersionId = selectedFdSkillVersionId(threadIdForSend);
-    if (fdSkillVersionId !== undefined && composerImages.length > 0) {
-      setThreadError(threadIdForSend, "FD Skill 暂不支持图片附件，请移除图片后再发送。");
+    if (
+      fdSkillVersionId !== undefined &&
+      (composerImages.length > 0 || sendContextDocuments.length > 0)
+    ) {
+      setThreadError(threadIdForSend, "FD Skill 暂不支持本地文件附件，请移除文件后再发送。");
       return;
     }
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
@@ -4758,6 +4766,7 @@ function ChatViewContent(props: ChatViewProps) {
     beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
 
     const composerImagesSnapshot = [...composerImages];
+    const composerDocumentsSnapshot: ComposerDocumentAttachment[] = [...sendContextDocuments];
     const composerTerminalContextsSnapshot = [...sendableComposerTerminalContexts];
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
@@ -4777,17 +4786,27 @@ function ChatViewContent(props: ChatViewProps) {
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt(
-      messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
+      messageTextForSend ||
+        (composerDocumentsSnapshot.length > 0
+          ? ATTACHMENT_ONLY_BOOTSTRAP_PROMPT
+          : IMAGE_ONLY_BOOTSTRAP_PROMPT),
     );
-    const turnAttachmentsPromise = Promise.all(
-      composerImagesSnapshot.map(async (image) => ({
+    const turnAttachmentsPromise = Promise.all([
+      ...composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
         name: image.name,
         mimeType: image.mimeType,
         sizeBytes: image.sizeBytes,
         dataUrl: await readFileAsDataUrl(image.file),
       })),
-    );
+      ...composerDocumentsSnapshot.map(async (document) => ({
+        type: "document" as const,
+        name: document.name,
+        mimeType: document.mimeType,
+        sizeBytes: document.sizeBytes,
+        dataUrl: await readFileAsDataUrl(document.file),
+      })),
+    ]);
     const optimisticAttachments = composerImagesSnapshot.map((image) => ({
       type: "image" as const,
       id: image.id,
@@ -4795,6 +4814,13 @@ function ChatViewContent(props: ChatViewProps) {
       mimeType: image.mimeType,
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
+    }));
+    const optimisticDocumentAttachments = composerDocumentsSnapshot.map((document) => ({
+      type: "document" as const,
+      id: document.id,
+      name: document.name,
+      mimeType: document.mimeType,
+      sizeBytes: document.sizeBytes,
     }));
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
@@ -4817,7 +4843,9 @@ function ChatViewContent(props: ChatViewProps) {
         id: messageIdForSend,
         role: "user",
         text: outgoingMessageText,
-        ...(optimisticAttachments.length > 0 ? { attachments: optimisticAttachments } : {}),
+        ...(optimisticAttachments.length + optimisticDocumentAttachments.length > 0
+          ? { attachments: [...optimisticAttachments, ...optimisticDocumentAttachments] }
+          : {}),
         turnId: null,
         createdAt: messageCreatedAt,
         updatedAt: messageCreatedAt,
@@ -4853,6 +4881,8 @@ function ChatViewContent(props: ChatViewProps) {
     if (!titleSeed) {
       if (firstComposerImageName) {
         titleSeed = `Image: ${firstComposerImageName}`;
+      } else if (composerDocumentsSnapshot.length > 0) {
+        titleSeed = composerDocumentsSnapshot[0]!.name;
       } else if (composerTerminalContextsSnapshot.length > 0) {
         titleSeed = formatTerminalContextLabel(composerTerminalContextsSnapshot[0]!);
       } else if (composerElementContextsSnapshot.length > 0) {
@@ -4970,6 +5000,7 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        composerRef.current?.clearDocuments();
         acknowledgeActiveThreadWoke();
       }
     }

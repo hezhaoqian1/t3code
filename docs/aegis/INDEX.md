@@ -6,6 +6,10 @@ records, not authoritative runtime decisions.
 | Date       | Kind     | Path                                                                                                   | Title                                                                |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
 | 2026-08-19 | plan     | docs/aegis/plans/2026-08-19-desktop-file-analysis-v1.md                                                | Desktop One-Off File Analysis V1 Implementation Plan                 |
+| 2026-08-19 | work     | docs/aegis/work/2026-08-19-desktop-file-analysis-v1/10-intent.md                                       | Desktop File Analysis V1 intent                                      |
+| 2026-08-19 | work     | docs/aegis/work/2026-08-19-desktop-file-analysis-v1/20-checkpoint.md                                   | Desktop File Analysis V1 checkpoint                                  |
+| 2026-08-19 | work     | docs/aegis/work/2026-08-19-desktop-file-analysis-v1/90-evidence.md                                     | Desktop File Analysis V1 evidence                                    |
+| 2026-08-19 | work     | docs/aegis/work/2026-08-19-desktop-file-analysis-v1/99-reflection.md                                   | Desktop File Analysis V1 reflection                                  |
 | 2026-08-09 | baseline | docs/aegis/baseline/2026-08-09-initial-baseline.md                                                     | FD AI Desktop initial baseline                                       |
 | 2026-08-09 | spec     | docs/aegis/specs/2026-08-09-fd-ai-local-desktop-design.md                                              | FD AI local desktop design                                           |
 | 2026-08-09 | plan     | docs/aegis/plans/2026-08-09-fd-ai-desktop-implementation.md                                            | FD AI Desktop implementation plan                                    |

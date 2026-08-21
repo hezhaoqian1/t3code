@@ -18,6 +18,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
@@ -58,6 +59,7 @@ import {
   useComposerThreadDraft,
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
+import type { ComposerDocumentAttachment } from "../../types";
 import {
   MAX_STASH_ENTRIES,
   partitionStashAttachments,
@@ -115,6 +117,13 @@ import {
 } from "../../state/feishuConnector";
 import { WorkspacePicker } from "./WorkspacePicker";
 import { FdModelSelector } from "./FdModelSelector";
+import { isElectron } from "../../env";
+import {
+  DESKTOP_DOCUMENT_ACCEPT,
+  attachmentCapacity,
+  documentMimeType,
+  validateDesktopDocumentFile,
+} from "../../lib/documentAttachments";
 
 type ComposerCommandMenuPosition = {
   bottom: number;
@@ -203,6 +212,7 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  FileTextIcon,
   PencilRulerIcon,
   type LucideIcon,
   LockIcon,
@@ -470,10 +480,13 @@ export interface ChatComposerHandle {
   }) => void;
   /** Insert a terminal context from the terminal drawer. */
   addTerminalContext: (selection: TerminalContextSelection) => void;
+  /** Remove current-turn document files after a successful dispatch. */
+  clearDocuments: () => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
     images: ComposerImageAttachment[];
+    documents: ComposerDocumentAttachment[];
     terminalContexts: TerminalContextDraft[];
     elementContexts: ElementContextDraft[];
     previewAnnotations: PreviewAnnotationPayload[];
@@ -682,6 +695,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerDraft = useComposerThreadDraft(composerDraftTarget);
   const prompt = composerDraft.prompt;
   const composerImages = composerDraft.images;
+  const [composerDocuments, setComposerDocuments] = useState<ComposerDocumentAttachment[]>([]);
   const composerTerminalContexts = composerDraft.terminalContexts;
   const composerElementContexts = composerDraft.elementContexts;
   const composerPreviewAnnotations = composerDraft.previewAnnotations;
@@ -941,6 +955,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
   const composerImageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
   const composerSelectLockRef = useRef(false);
@@ -976,6 +991,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       deriveComposerSendState({
         prompt,
         imageCount: composerImages.length,
+        documentCount: composerDocuments.length,
         terminalContexts: composerTerminalContexts,
         elementContextCount:
           composerElementContexts.length +
@@ -984,6 +1000,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }),
     [
       composerElementContexts.length,
+      composerDocuments.length,
       composerImages.length,
       composerPreviewAnnotations.length,
       composerReviewComments.length,
@@ -1240,6 +1257,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   useEffect(() => {
     composerImagesRef.current = composerImages;
   }, [composerImages, composerImagesRef]);
+
+  useEffect(() => {
+    setComposerDocuments([]);
+  }, [activeThreadId, composerDraftTarget]);
 
   useEffect(() => {
     composerTerminalContextsRef.current = composerTerminalContexts;
@@ -2283,6 +2304,49 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   };
 
+  const addComposerDocuments = (files: File[]) => {
+    if (!isElectron || !activeThreadId || files.length === 0) return;
+    if (pendingUserInputs.length > 0) {
+      toastManager.add({
+        type: "error",
+        title: "请先完成当前问题，再添加文件。",
+      });
+      return;
+    }
+    const capacity = attachmentCapacity(
+      composerImagesRef.current.length + composerDocuments.length,
+    );
+    const nextDocuments: ComposerDocumentAttachment[] = [];
+    let error: string | null = null;
+    for (const file of files) {
+      const validationError = validateDesktopDocumentFile(file);
+      if (validationError) {
+        error = validationError;
+        continue;
+      }
+      if (nextDocuments.length >= capacity) {
+        error = `每条消息最多添加 ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} 个附件。`;
+        break;
+      }
+      nextDocuments.push({
+        type: "document",
+        id: randomUUID(),
+        name: file.name,
+        mimeType: documentMimeType(file),
+        sizeBytes: file.size,
+        file,
+      });
+    }
+    if (nextDocuments.length > 0) {
+      setComposerDocuments((current) => [...current, ...nextDocuments]);
+    }
+    if (error) setThreadError(activeThreadId, error);
+  };
+
+  const removeComposerDocument = (documentId: string) => {
+    setComposerDocuments((current) => current.filter((document) => document.id !== documentId));
+  };
+
   const removeComposerImage = (imageId: string) => {
     removeComposerImageFromDraft(imageId);
   };
@@ -2294,9 +2358,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) return;
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    if (imageFiles.length === 0) return;
+    const documentFiles = isElectron ? files.filter((file) => !file.type.startsWith("image/")) : [];
+    if (imageFiles.length === 0 && documentFiles.length === 0) return;
     event.preventDefault();
     void addComposerImages(imageFiles);
+    addComposerDocuments(documentFiles);
   };
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -2330,7 +2396,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     const files = Array.from(event.dataTransfer.files);
-    void addComposerImages(files);
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    const documentFiles = isElectron ? files.filter((file) => !file.type.startsWith("image/")) : [];
+    void addComposerImages(imageFiles);
+    addComposerDocuments(documentFiles);
     focusComposer();
   };
 
@@ -2520,9 +2589,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           composerEditorRef.current?.focusAt(nextCollapsedCursor);
         });
       },
+      clearDocuments: () => setComposerDocuments([]),
       getSendContext: () => ({
         prompt: promptRef.current,
         images: composerImagesRef.current,
+        documents: composerDocuments,
         terminalContexts: composerTerminalContextsRef.current,
         elementContexts: composerElementContextsRef.current,
         previewAnnotations: composerPreviewAnnotations,
@@ -2541,6 +2612,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       insertComposerDraftTerminalContext,
       promptRef,
       composerImagesRef,
+      composerDocuments,
       composerTerminalContextsRef,
       composerElementContextsRef,
       composerPreviewAnnotations,
@@ -2579,6 +2651,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           const files = Array.from(event.currentTarget.files ?? []);
           event.currentTarget.value = "";
           void addComposerImages(files);
+        }}
+      />
+      <input
+        ref={documentInputRef}
+        type="file"
+        accept={DESKTOP_DOCUMENT_ACCEPT}
+        multiple
+        className="hidden"
+        aria-hidden="true"
+        tabIndex={-1}
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          addComposerDocuments(files);
         }}
       />
       <div
@@ -2938,6 +3024,38 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 </div>
               )}
 
+            {!isComposerCollapsedMobile &&
+              !isComposerApprovalState &&
+              pendingUserInputs.length === 0 &&
+              composerDocuments.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {composerDocuments.map((document) => (
+                    <div
+                      key={document.id}
+                      className="flex max-w-full items-center gap-2 rounded-lg border border-border/80 bg-background px-2.5 py-2 text-xs"
+                    >
+                      <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block max-w-56 truncate font-medium">{document.name}</span>
+                        <span className="block text-[10px] text-muted-foreground">
+                          {(document.sizeBytes / 1024 / 1024).toFixed(1)} MB · 待解析
+                        </span>
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        className="shrink-0"
+                        onClick={() => removeComposerDocument(document.id)}
+                        aria-label={`移除 ${document.name}`}
+                      >
+                        <XIcon />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
             <div className="relative">
               <ComposerPromptEditor
                 editorRef={composerEditorRef}
@@ -3037,12 +3155,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     projectSelectionRequired
                   }
                   imageDisabled={!activeThreadId}
+                  documentAvailable={isElectron}
+                  documentDisabled={!isElectron || !activeThreadId}
                   fdSkillsDisabled={!activeThreadId}
                   connectorState={{
                     available: Boolean(window.desktopBridge?.getFeishuConnectorState),
                     status: resolveFeishuConnectorConnectionStatus(feishuConnectorState),
                   }}
                   onAddImages={() => composerImageInputRef.current?.click()}
+                  onAddDocuments={() => documentInputRef.current?.click()}
                   onOpenFiles={() => openComposerTrigger("@")}
                   onOpenTerminal={onToggleTerminal}
                   onOpenFdSkills={() =>

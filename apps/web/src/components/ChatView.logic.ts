@@ -276,6 +276,7 @@ export function cloneComposerImageForRetry(
 export function deriveComposerSendState(options: {
   prompt: string;
   imageCount: number;
+  documentCount?: number;
   terminalContexts: ReadonlyArray<TerminalContextDraft>;
   /**
    * Optional element-pick attachment count. Element contexts contribute to
@@ -294,6 +295,7 @@ export function deriveComposerSendState(options: {
   const expiredTerminalContextCount =
     options.terminalContexts.length - sendableTerminalContexts.length;
   const elementContextCount = options.elementContextCount ?? 0;
+  const documentCount = options.documentCount ?? 0;
   return {
     trimmedPrompt,
     sendableTerminalContexts,
@@ -301,6 +303,7 @@ export function deriveComposerSendState(options: {
     hasSendableContent:
       trimmedPrompt.length > 0 ||
       options.imageCount > 0 ||
+      documentCount > 0 ||
       sendableTerminalContexts.length > 0 ||
       elementContextCount > 0,
   };

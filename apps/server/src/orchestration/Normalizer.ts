@@ -7,6 +7,7 @@ import {
   type IsoDateTime,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
+  PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 
@@ -109,18 +110,27 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       (attachment) =>
         Effect.gen(function* () {
           const parsed = parseBase64DataUrl(attachment.dataUrl);
-          if (!parsed || !parsed.mimeType.startsWith("image/")) {
+          if (!parsed) {
             return yield* new OrchestrationDispatchCommandError({
-              message: `Invalid image attachment payload for '${attachment.name}'.`,
+              message: `Invalid attachment payload for '${attachment.name}'.`,
+            });
+          }
+
+          const isImage = attachment.type === "image";
+          const maxBytes = isImage
+            ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+            : PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES;
+          if (
+            (isImage && !parsed.mimeType.startsWith("image/")) ||
+            (!isImage && parsed.mimeType !== attachment.mimeType) ||
+            bytesAreEmptyOrTooLarge(attachment.dataUrl, maxBytes)
+          ) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: `${isImage ? "图片" : "文件"}附件 '${attachment.name}' 为空或超过大小限制。`,
             });
           }
 
           const bytes = Buffer.from(parsed.base64, "base64");
-          if (bytes.byteLength === 0 || bytes.byteLength > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
-            return yield* new OrchestrationDispatchCommandError({
-              message: `Image attachment '${attachment.name}' is empty or too large.`,
-            });
-          }
 
           const attachmentId = createAttachmentId(canonicalCommand.threadId);
           if (!attachmentId) {
@@ -130,7 +140,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           }
 
           const persistedAttachment = {
-            type: "image" as const,
+            type: attachment.type,
             id: attachmentId,
             name: attachment.name,
             mimeType: parsed.mimeType.toLowerCase(),
@@ -177,3 +187,14 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       },
     } satisfies OrchestrationCommand;
   });
+
+function bytesAreEmptyOrTooLarge(dataUrl: string, maxBytes: number): boolean {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return true;
+  const base64 = dataUrl.slice(comma + 1).replace(/\s/g, "");
+  if (base64.length === 0) return true;
+  const estimatedBytes =
+    Math.floor((base64.length * 3) / 4) -
+    (base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0);
+  return estimatedBytes <= 0 || estimatedBytes > maxBytes;
+}

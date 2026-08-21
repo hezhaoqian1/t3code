@@ -31,6 +31,8 @@
     "ajv-formats": "3.0.1",
     "effect": "catalog:",
     "node-pty": "^1.1.0",
+    "officeparser": "7.8.0",
+    "xlsx": "0.18.5",
     "yaml": "catalog:",
     "zod": "4.4.3"
   },
