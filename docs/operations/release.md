@@ -1,7 +1,7 @@
 # Fangde AI Desktop Release
 
-当前发布候选的功能范围和人工验收清单见
-[`releases/0.2.10.md`](./releases/0.2.10.md)。通用构建、发布和回滚流程以本文为准。
+当前已激活的内部版本和人工验收清单见
+[`releases/0.2.11.md`](./releases/0.2.11.md)。通用构建、发布和回滚流程以本文为准。
 
 `.github/workflows/fd-desktop-release.yml` builds one immutable internal release bundle for:
 
@@ -61,7 +61,7 @@ apps/desktop/node_modules/@larksuite/cli/bin/lark-cli auth login --help
 apps/desktop/node_modules/@larksuite/cli/bin/lark-cli auth logout --help
 ```
 
-For `0.2.10`, the pinned binary is `1.0.86`. Its official help confirms `config show`,
+For `0.2.11`, the pinned binary is `1.0.86`. Its official help confirms `config show`,
 `auth status --json --verify`, `auth login --recommend --no-wait --json`,
 `auth login --device-code`, and `auth logout --json`.
 

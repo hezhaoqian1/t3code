@@ -17,8 +17,9 @@ connects to Fangde identity, usage policy, and enterprise FD Skills after sign-i
   authorize the CLI application before an employee can select a company account.
 - On the desktop app, click your employee name in the lower-left corner to open the account menu
   for usage, settings, or sign out. The web app keeps these as separate sidebar entries.
-- Download Windows x64 or macOS Apple Silicon installers from
-  the [Fangde AI download page](https://ai-api.fdsure.com/api-access).
+- Download the current Windows x64 or macOS Apple Silicon installer from
+  the [Fangde AI download page](https://ai-api.fdsure.com/api-access). The internal channel
+  currently publishes version `0.2.11`.
 
 ## Architecture
 
