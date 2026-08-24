@@ -1,8 +1,28 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { inferImageExtension, parseBase64DataUrl } from "./imageMime.ts";
+import { imageBytesMatchMimeType, inferImageExtension, parseBase64DataUrl } from "./imageMime.ts";
 
 describe("imageMime", () => {
+  it("requires the binary header to match supported image MIME types", () => {
+    expect(
+      imageBytesMatchMimeType(
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        "image/png",
+      ),
+    ).toBe(true);
+    expect(imageBytesMatchMimeType(new Uint8Array([0xff, 0xd8, 0xff]), "image/jpeg")).toBe(true);
+    expect(imageBytesMatchMimeType(new TextEncoder().encode("GIF89a"), "image/gif")).toBe(true);
+    expect(imageBytesMatchMimeType(new TextEncoder().encode("RIFFxxxxWEBP"), "image/webp")).toBe(
+      true,
+    );
+    expect(imageBytesMatchMimeType(new Uint8Array([1, 2, 3]), "image/png")).toBe(false);
+    expect(
+      imageBytesMatchMimeType(
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        "image/jpeg",
+      ),
+    ).toBe(false);
+  });
   it("parses base64 data URL with mime type", () => {
     expect(parseBase64DataUrl("data:image/png;base64,SGVsbG8=")).toEqual({
       mimeType: "image/png",

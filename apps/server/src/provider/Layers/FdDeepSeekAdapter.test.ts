@@ -8,7 +8,10 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { FD_RUNTIME_PRO_MODEL } from "@t3tools/contracts/fd/runtime-credentials";
+import {
+  FD_RUNTIME_PRO_MODEL,
+  FD_RUNTIME_VISION_MODEL,
+} from "@t3tools/contracts/fd/runtime-credentials";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
@@ -31,6 +34,7 @@ import {
   FD_DEEPSEEK_INSTANCE_ID,
   makeFdDeepSeekAdapter,
 } from "./FdDeepSeekAdapter.ts";
+import { FdVisionService } from "../../fd-vision/FdVisionService.ts";
 
 const metadata: FdResponsesEvent = {
   type: "response-metadata",
@@ -203,6 +207,15 @@ describe("FdDeepSeekAdapter", () => {
         })
         .pipe(Effect.flip);
       expect(invalidStart).toMatchObject({
+        issue: "Only FD-managed DeepSeek models are authorized.",
+      });
+      const visionStart = yield* adapter
+        .startSession({
+          ...startInput,
+          modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_VISION_MODEL },
+        })
+        .pipe(Effect.flip);
+      expect(visionStart).toMatchObject({
         issue: "Only FD-managed DeepSeek models are authorized.",
       });
 
@@ -1629,6 +1642,80 @@ describe("FdDeepSeekAdapter", () => {
           fdSkillVersionId: 10004,
         });
       }),
+  );
+
+  it.effect("preprocesses ordinary images and keeps the Codex runtime profile unchanged", () =>
+    Effect.gen(function* () {
+      const codexProvider = ProviderDriverKind.make("codex");
+      const sentInputs: Array<Record<string, unknown>> = [];
+      const ordinaryAdapter: ProviderAdapterShape<never> = {
+        provider: codexProvider,
+        capabilities: { sessionModelSwitch: "in-session" },
+        startSession: (input) =>
+          Effect.succeed({
+            provider: codexProvider,
+            providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+            status: "ready" as const,
+            runtimeMode: input.runtimeMode,
+            model: "deepseek-v4-flash",
+            threadId: input.threadId,
+            resumeCursor: { threadId: "codex-profile" },
+            createdAt: "2026-08-11T00:00:00.000Z",
+            updatedAt: "2026-08-11T00:00:00.000Z",
+          }),
+        sendTurn: (input) => {
+          sentInputs.push(input);
+          return Effect.succeed({
+            threadId: input.threadId,
+            turnId: TurnId.make("codex-turn"),
+            resumeCursor: { threadId: "codex-profile" },
+          });
+        },
+        interruptTurn: () => Effect.void,
+        respondToRequest: () => Effect.void,
+        respondToUserInput: () => Effect.void,
+        stopSession: () => Effect.void,
+        listSessions: () => Effect.succeed([]),
+        hasSession: () => Effect.succeed(false),
+        readThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        rollbackThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        stopAll: () => Effect.void,
+        streamEvents: Stream.empty,
+      };
+      const visionService = new FdVisionService({
+        stream: async function* () {
+          yield { type: "text-delta", text: "图片里显示 2026 年 7 月销售额为 10。" };
+          yield { type: "completed", finishReason: "stop" };
+        },
+      });
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([])),
+        ordinaryAdapter,
+        visionService,
+        resolveAttachments: () =>
+          Effect.succeed([
+            { type: "input_image" as const, image_url: "data:image/png;base64,aGVsbG8=" },
+          ]),
+      });
+
+      yield* adapter.startSession(startInput);
+      yield* adapter.sendTurn({
+        threadId,
+        input: "请分析这张图片",
+        attachments: [
+          { type: "image", id: "img-1", name: "chart.png", mimeType: "image/png", sizeBytes: 5 },
+        ],
+      });
+
+      expect(sentInputs).toHaveLength(1);
+      expect(sentInputs[0]).toMatchObject({ attachments: [] });
+      expect(sentInputs[0]?.input).toContain(
+        '<fd-image-evidence source="vision-preprocessor" trust="none">',
+      );
+      expect(sentInputs[0]?.input).toContain("2026 年 7 月销售额为 10");
+    }),
   );
 
   it.effect("routes approval through canonical request events without private tool data", () =>

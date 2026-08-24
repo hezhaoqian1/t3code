@@ -8,11 +8,24 @@ const MAX_FD_RUNTIME_ORIGIN_LENGTH = 2_048;
 
 export const FD_RUNTIME_DEFAULT_MODEL = "deepseek-v4-flash" as const;
 export const FD_RUNTIME_PRO_MODEL = "deepseek-v4-pro" as const;
-export const FD_RUNTIME_MODELS = [FD_RUNTIME_DEFAULT_MODEL, FD_RUNTIME_PRO_MODEL] as const;
+export const FD_RUNTIME_VISION_MODEL = "deepseek-v4-flash-vision-exp" as const;
+export const FD_RUNTIME_SELECTABLE_MODELS = [
+  FD_RUNTIME_DEFAULT_MODEL,
+  FD_RUNTIME_PRO_MODEL,
+] as const;
+export const FD_RUNTIME_MODELS = [
+  ...FD_RUNTIME_SELECTABLE_MODELS,
+  FD_RUNTIME_VISION_MODEL,
+] as const;
 export type FdRuntimeModel = (typeof FD_RUNTIME_MODELS)[number];
+export type FdRuntimeSelectableModel = (typeof FD_RUNTIME_SELECTABLE_MODELS)[number];
 
 export function isFdRuntimeModel(value: string): value is FdRuntimeModel {
   return FD_RUNTIME_MODELS.some((model) => model === value);
+}
+
+export function isFdRuntimeSelectableModel(value: string): value is FdRuntimeSelectableModel {
+  return FD_RUNTIME_SELECTABLE_MODELS.some((model) => model === value);
 }
 
 export const FdRuntimeNewApiOrigin = Schema.String.check(
@@ -29,8 +42,20 @@ export const FdServerRuntimePolicyProjection = Schema.Struct({
   version: Schema.Literal(1),
   capability: Schema.Literal("general_assistant"),
   model: Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
+  // Accept the pre-vision two-model policy while allowing newly issued
+  // credentials to authorize the internal Vision preprocessor.
   models: Schema.optionalKey(
-    Schema.Tuple([Schema.Literal(FD_RUNTIME_DEFAULT_MODEL), Schema.Literal(FD_RUNTIME_PRO_MODEL)]),
+    Schema.Union([
+      Schema.Tuple([
+        Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
+        Schema.Literal(FD_RUNTIME_PRO_MODEL),
+      ]),
+      Schema.Tuple([
+        Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
+        Schema.Literal(FD_RUNTIME_PRO_MODEL),
+        Schema.Literal(FD_RUNTIME_VISION_MODEL),
+      ]),
+    ]),
   ),
   expiresAt: PositiveInt,
 }).annotate(strict);

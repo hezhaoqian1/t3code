@@ -2,44 +2,46 @@ import type { ServerProviderModel } from "@t3tools/contracts";
 import {
   FD_RUNTIME_DEFAULT_MODEL,
   FD_RUNTIME_PRO_MODEL,
-  isFdRuntimeModel,
-  type FdRuntimeModel,
+  isFdRuntimeSelectableModel,
+  type FdRuntimeSelectableModel,
 } from "@t3tools/contracts/fd/runtime-credentials";
 
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 
-const MODEL_LABELS: Readonly<Record<FdRuntimeModel, string>> = {
+const MODEL_LABELS: Readonly<Record<FdRuntimeSelectableModel, string>> = {
   [FD_RUNTIME_DEFAULT_MODEL]: "V4 Flash",
   [FD_RUNTIME_PRO_MODEL]: "V4 Pro",
 };
 
-export function fdModelLabel(model: FdRuntimeModel): string {
+export function fdModelLabel(model: FdRuntimeSelectableModel): string {
   return MODEL_LABELS[model];
 }
 
 export function resolveFdModelOptions(
   models: ReadonlyArray<ServerProviderModel>,
-): ReadonlyArray<FdRuntimeModel> {
-  return models.flatMap((model) => (isFdRuntimeModel(model.slug) ? [model.slug] : []));
+): ReadonlyArray<FdRuntimeSelectableModel> {
+  return models.flatMap((model) => (isFdRuntimeSelectableModel(model.slug) ? [model.slug] : []));
 }
 
 export function resolveFdModelChange(
   nextValue: string | null,
-  options: ReadonlyArray<FdRuntimeModel>,
-): FdRuntimeModel | null {
-  return nextValue && isFdRuntimeModel(nextValue) && options.includes(nextValue) ? nextValue : null;
+  options: ReadonlyArray<FdRuntimeSelectableModel>,
+): FdRuntimeSelectableModel | null {
+  return nextValue && isFdRuntimeSelectableModel(nextValue) && options.includes(nextValue)
+    ? nextValue
+    : null;
 }
 
 export function FdModelSelector(props: {
   value: string;
   models: ReadonlyArray<ServerProviderModel>;
   disabled?: boolean;
-  onValueChange: (model: FdRuntimeModel) => void;
+  onValueChange: (model: FdRuntimeSelectableModel) => void;
 }) {
   const options = resolveFdModelOptions(props.models);
   if (options.length === 0) return null;
   const value =
-    isFdRuntimeModel(props.value) && options.includes(props.value)
+    isFdRuntimeSelectableModel(props.value) && options.includes(props.value)
       ? props.value
       : (options[0] ?? FD_RUNTIME_DEFAULT_MODEL);
 

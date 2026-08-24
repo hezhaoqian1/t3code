@@ -1,21 +1,33 @@
 import {
   FD_RUNTIME_DEFAULT_MODEL,
   FD_RUNTIME_MODELS,
+  FD_RUNTIME_SELECTABLE_MODELS,
+  FD_RUNTIME_VISION_MODEL,
   isFdRuntimeModel,
+  isFdRuntimeSelectableModel,
   type FdRuntimeModel,
+  type FdRuntimeSelectableModel,
 } from "@t3tools/contracts/fd/runtime-credentials";
 
 export const FD_RESPONSES_MODEL = FD_RUNTIME_DEFAULT_MODEL;
-export const FD_RESPONSES_MODELS = FD_RUNTIME_MODELS;
+export const FD_RESPONSES_MODELS = FD_RUNTIME_SELECTABLE_MODELS;
+export const FD_RESPONSES_AUTHORIZED_MODELS = FD_RUNTIME_MODELS;
+export const FD_RESPONSES_VISION_MODEL = FD_RUNTIME_VISION_MODEL;
 export type FdResponsesModel = FdRuntimeModel;
+export type FdSelectableResponsesModel = FdRuntimeSelectableModel;
 export const isFdResponsesModel = isFdRuntimeModel;
+export const isFdSelectableResponsesModel = isFdRuntimeSelectableModel;
+export const isFdAuthorizedResponsesModel = isFdRuntimeModel;
 export const FD_RESPONSES_CAPABILITY = "general_assistant" as const;
 
 export const FD_RESPONSES_LIMITS = {
   maxRounds: 8,
   maxInputItems: 256,
-  maxInputBytes: 768 * 1_024,
-  maxRequestBytes: 1 * 1_024 * 1_024,
+  // DeepSeek Vision accepts up to 32 MiB per inline image and 48 MiB per
+  // request. The Desktop contract caps one attachment at 10 MiB; keep the
+  // protocol aligned with that contract and leave room for base64 expansion.
+  maxInputBytes: 40 * 1_024 * 1_024,
+  maxRequestBytes: 48 * 1_024 * 1_024,
   maxResponseBytes: 8 * 1_024 * 1_024,
   maxSseEventBytes: 256 * 1_024,
   maxInstructionsBytes: 128 * 1_024,
@@ -34,8 +46,8 @@ export const FD_RESPONSES_LIMITS = {
   maxTimeoutMs: 300_000,
   maxOutputTokens: 8_192,
   maxInputContentParts: 9,
-  maxImageBytes: 640 * 1_024,
-  maxImageDataUrlBytes: 896 * 1_024,
+  maxImageBytes: 10 * 1_024 * 1_024,
+  maxImageDataUrlBytes: 14_000_000,
 } as const;
 
 export interface FdResponsesInputTextContentPart {

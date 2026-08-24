@@ -130,6 +130,15 @@ describe("FD runtime credential contracts", () => {
         ...projection,
         policy: { ...projection.policy, models: FD_RUNTIME_MODELS },
       }).policy.models,
+    ).toEqual(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"]);
+    expect(
+      decode({
+        ...projection,
+        policy: {
+          ...projection.policy,
+          models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+        },
+      }).policy.models,
     ).toEqual(["deepseek-v4-flash", "deepseek-v4-pro"]);
     expect(() =>
       decode({

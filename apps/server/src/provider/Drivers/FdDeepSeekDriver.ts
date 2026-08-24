@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { imageBytesMatchMimeType } from "../../imageMime.ts";
 import { ServerConfig } from "../../config.ts";
 import { FdRuntimeCredentialStore } from "../../fd/FdRuntimeCredentialStore.ts";
 import { makeFdCodexAdapter } from "../../fd-codex/FdCodexAdapter.ts";
@@ -17,6 +18,7 @@ import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/
 import { FdAgentKernel } from "../../fd-agent/FdAgentKernel.ts";
 import { makeFdLocalTools, type FdLocalToolProfile } from "../../fd-agent/FdLocalTools.ts";
 import { FdResponsesClient } from "../../fd-agent/FdResponsesClient.ts";
+import { FdVisionService } from "../../fd-vision/FdVisionService.ts";
 import {
   FD_RESPONSES_LIMITS,
   FD_RESPONSES_MODEL,
@@ -143,6 +145,13 @@ export const resolveFdDeepSeekAttachments = Effect.fn("resolveFdDeepSeekAttachme
         detail: "FD image attachment failed size validation.",
       });
     }
+    if (!imageBytesMatchMimeType(bytes, attachment.mimeType)) {
+      return yield* new ProviderAdapterRequestError({
+        provider: FD_DEEPSEEK_DRIVER_KIND,
+        method: "turn/start",
+        detail: "FD image attachment failed binary validation.",
+      });
+    }
     parts.push({
       type: "input_image",
       image_url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
@@ -168,6 +177,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       const fileSystem = yield* FileSystem.FileSystem;
       const serverConfig = yield* ServerConfig;
       const client = new FdResponsesClient(credentials);
+      const visionService = new FdVisionService(client);
       const kernel = new FdAgentKernel(client);
       const ordinaryAdapter = yield* makeFdCodexAdapter({ instanceId });
       const enterpriseClient = new FdEnterpriseAgentClient({
@@ -251,6 +261,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
             Effect.provideService(FileSystem.FileSystem, fileSystem),
             Effect.provideService(ServerConfig, serverConfig),
           ),
+        visionService,
         nativeSkillCatalogForSession: async (input) => {
           const catalog = new NativeSkillCatalog(input.cwd ? { projectRoot: input.cwd } : {});
           await catalog.refresh();

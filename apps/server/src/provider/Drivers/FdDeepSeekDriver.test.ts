@@ -171,15 +171,15 @@ describe("FdDeepSeekDriver", () => {
         id: "fd-thread-12345678-1234-1234-1234-123456789abc",
         name: "private.png",
         mimeType: "image/png",
-        sizeBytes: 3,
+        sizeBytes: 8,
       };
       yield* fileSystem.writeFile(
         `${config.attachmentsDir}/${attachment.id}.png`,
-        new Uint8Array([1, 2, 3]),
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       );
 
       expect(yield* resolveFdDeepSeekAttachments([attachment])).toEqual([
-        { type: "input_image", image_url: "data:image/png;base64,AQID" },
+        { type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgo=" },
       ]);
 
       const mismatched = yield* Effect.flip(
@@ -199,7 +199,7 @@ describe("FdDeepSeekDriver", () => {
         id: "fd-thread-12345678-1234-1234-1234-123456789abc",
         name: "private.png",
         mimeType: "image/png",
-        sizeBytes: 3,
+        sizeBytes: 8,
       };
 
       const unsupported = yield* Effect.flip(
@@ -217,7 +217,14 @@ describe("FdDeepSeekDriver", () => {
       const missing = yield* Effect.flip(resolveFdDeepSeekAttachments([base]));
       expect(missing.detail).toBe("FD image attachment is unavailable.");
 
-      const oversized = new Uint8Array(640 * 1_024 + 1);
+      const invalidMagic = new Uint8Array(8);
+      yield* fileSystem.writeFile(`${config.attachmentsDir}/${base.id}.png`, invalidMagic);
+      const invalidBinary = yield* Effect.flip(
+        resolveFdDeepSeekAttachments([{ ...base, sizeBytes: invalidMagic.byteLength }]),
+      );
+      expect(invalidBinary.detail).toBe("FD image attachment failed binary validation.");
+
+      const oversized = new Uint8Array(10 * 1_024 * 1_024 + 1);
       yield* fileSystem.writeFile(`${config.attachmentsDir}/${base.id}.png`, oversized);
       const tooLarge = yield* Effect.flip(
         resolveFdDeepSeekAttachments([{ ...base, sizeBytes: oversized.byteLength }]),
@@ -235,10 +242,13 @@ describe("FdDeepSeekDriver", () => {
         id: "fd-thread-12345678-1234-1234-1234-123456789abc",
         name: "private-screenshot.png",
         mimeType: "image/png",
-        sizeBytes: 3,
+        sizeBytes: 8,
       };
       const attachmentPath = `${config.attachmentsDir}/${attachment.id}.png`;
-      yield* fileSystem.writeFile(attachmentPath, new Uint8Array([1, 2, 3]));
+      yield* fileSystem.writeFile(
+        attachmentPath,
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
 
       const store = yield* makeStore();
       yield* store.apply({ version: 1, type: "set", credentials });
@@ -314,7 +324,7 @@ describe("FdDeepSeekDriver", () => {
           role: "user",
           content: [
             { type: "input_text", text: "Inspect this image exactly." },
-            { type: "input_image", image_url: "data:image/png;base64,AQID" },
+            { type: "input_image", image_url: "data:image/png;base64,iVBORw0KGgo=" },
           ],
         },
       ]);

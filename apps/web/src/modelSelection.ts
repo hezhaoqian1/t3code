@@ -6,7 +6,7 @@ import {
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
   FD_RUNTIME_DEFAULT_MODEL,
-  isFdRuntimeModel,
+  isFdRuntimeSelectableModel,
 } from "@t3tools/contracts/fd/runtime-credentials";
 
 const FD_PROVIDER_INSTANCE_ID = "fd-deepseek";
@@ -21,7 +21,7 @@ export function resolveAppModelSelection(
     providers.find((provider) => provider.instanceId === FD_PROVIDER_INSTANCE_ID)?.models ?? [];
   if (
     selectedModel &&
-    isFdRuntimeModel(selectedModel) &&
+    isFdRuntimeSelectableModel(selectedModel) &&
     models.some((model) => model.slug === selectedModel)
   ) {
     return selectedModel;

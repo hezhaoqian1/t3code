@@ -29,6 +29,37 @@ export const SAFE_IMAGE_FILE_EXTENSIONS = new Set([
   ".webp",
 ]);
 
+/** Reject files whose declared image MIME does not match their binary header. */
+export function imageBytesMatchMimeType(bytes: Uint8Array, mimeType: string): boolean {
+  const mime = mimeType.toLowerCase();
+  if (mime === "image/png") {
+    return startsWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  }
+  if (mime === "image/jpeg" || mime === "image/jpg") {
+    return startsWith(bytes, [0xff, 0xd8, 0xff]);
+  }
+  if (mime === "image/gif") {
+    return startsWithAscii(bytes, "GIF87a") || startsWithAscii(bytes, "GIF89a");
+  }
+  if (mime === "image/webp") {
+    return startsWithAscii(bytes, "RIFF") && startsWithAscii(bytes.subarray(8), "WEBP");
+  }
+  return false;
+}
+
+function startsWith(bytes: Uint8Array, signature: ReadonlyArray<number>): boolean {
+  return (
+    bytes.length >= signature.length && signature.every((value, index) => bytes[index] === value)
+  );
+}
+
+function startsWithAscii(bytes: Uint8Array, value: string): boolean {
+  return startsWith(
+    bytes,
+    Array.from(value, (character) => character.charCodeAt(0)),
+  );
+}
+
 // Whether `code` is a character the base64 payload may contain, aside from
 // the whitespace handled separately below.
 function isBase64Char(code: number): boolean {

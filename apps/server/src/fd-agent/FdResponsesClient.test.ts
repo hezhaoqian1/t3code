@@ -1,6 +1,7 @@
 import {
   FD_RUNTIME_MODELS,
   FD_RUNTIME_PRO_MODEL,
+  FD_RUNTIME_VISION_MODEL,
   type FdServerRuntimeCredentialProjection,
 } from "@t3tools/contracts/fd/runtime-credentials";
 import * as Effect from "effect/Effect";
@@ -119,6 +120,43 @@ describe("FdResponsesClient", () => {
 
     expect(result.error).toMatchObject({ kind: "policy_invalid" });
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("allows the internal Vision preprocessor only with an explicitly authorized policy", async () => {
+    const fetch = vi.fn(async (_input, init) => {
+      const requestBody = JSON.parse(String(init?.body));
+      expect(requestBody.model).toBe(FD_RUNTIME_VISION_MODEL);
+      const events = textEvents("resp-vision", "visual evidence");
+      events[0] = created("resp-vision", FD_RUNTIME_VISION_MODEL);
+      return sseResponse(events);
+    });
+    const client = new FdResponsesClient(
+      reader({ ...credentials(), policy: { ...credentials().policy, models: FD_RUNTIME_MODELS } }),
+      { fetch },
+    );
+
+    await expect(
+      collect(
+        client.stream({
+          model: FD_RUNTIME_VISION_MODEL,
+          round: 1,
+          input: [{ role: "user", content: "inspect image" }],
+        }),
+      ),
+    ).resolves.toContainEqual({ type: "text-delta", text: "visual evidence" });
+    expect(fetch).toHaveBeenCalledOnce();
+
+    const legacyFetch = vi.fn(async () => sseResponse(textEvents("unused", "unused")));
+    const legacyClient = new FdResponsesClient(reader(), { fetch: legacyFetch });
+    const result = await collectFailure(
+      legacyClient.stream({
+        model: FD_RUNTIME_VISION_MODEL,
+        round: 1,
+        input: userInput(),
+      }),
+    );
+    expect(result.error).toMatchObject({ kind: "policy_invalid" });
+    expect(legacyFetch).not.toHaveBeenCalled();
   });
 
   it("preserves bounded text and image input in the exact stateless request", async () => {
