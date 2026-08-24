@@ -1,5 +1,5 @@
 // @effect-diagnostics runEffectInsideEffect:off
-import type { ServerProvider } from "@t3tools/contracts";
+import type { ProviderSessionStartInput, ServerProvider } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -97,6 +97,25 @@ export const resolveFdLocalToolContext = Effect.fn("resolveFdLocalToolContext")(
     ? { cwd: canonicalOfficeWorkspaceRoot.value, profile: "office-read-only" }
     : { cwd: input.cwd, profile: "project" };
 });
+
+export const resolveFdOrdinarySessionInput = Effect.fn("resolveFdOrdinarySessionInput")(
+  function* (input: {
+    readonly session: ProviderSessionStartInput;
+    readonly officeWorkspaceRoot: string;
+    readonly officeModeEnabled: boolean;
+  }) {
+    const context = yield* resolveFdLocalToolContext({
+      cwd: input.session.cwd ?? input.officeWorkspaceRoot,
+      projectWorkspaceRoot: input.session.projectWorkspaceRoot,
+      officeWorkspaceRoot: input.officeWorkspaceRoot,
+      officeModeEnabled: input.officeModeEnabled,
+    });
+
+    // The office profile limits which local tools exist; it must not silently
+    // replace the runtime permission mode selected for the session.
+    return { ...input.session, cwd: context.cwd };
+  },
+);
 
 export const resolveFdDeepSeekAttachments = Effect.fn("resolveFdDeepSeekAttachments")(function* (
   attachments: ReadonlyArray<import("@t3tools/contracts").ChatAttachment>,
@@ -221,24 +240,13 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
         instanceId,
         kernel,
         ordinaryAdapter,
-        ordinarySessionInput: (input) => {
-          const cwd = input.cwd ?? serverConfig.cwd;
-          return resolveFdLocalToolContext({
-            cwd,
-            projectWorkspaceRoot: input.projectWorkspaceRoot,
+        ordinarySessionInput: (input) =>
+          resolveFdOrdinarySessionInput({
+            session: input,
             officeWorkspaceRoot: serverConfig.cwd,
             officeModeEnabled:
               serverConfig.mode === "desktop" && serverConfig.autoBootstrapProjectFromCwd,
-          }).pipe(
-            Effect.map((context) => ({
-              ...input,
-              cwd: context.cwd,
-              runtimeMode:
-                context.profile === "office-read-only" ? "approval-required" : input.runtimeMode,
-            })),
-            Effect.provideService(FileSystem.FileSystem, fileSystem),
-          );
-        },
+          }).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem)),
         toolsForSession: (input) => {
           const cwd = input.cwd ?? serverConfig.cwd;
           return resolveFdLocalToolContext({

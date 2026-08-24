@@ -3199,18 +3199,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeProjectTitle={activeProjectTitle}
                 />
 
-                {officeMode ? null : isComposerFooterCompact ? (
+                {isComposerFooterCompact ? (
                   <CompactComposerControlsMenu
                     interactionMode={interactionMode}
                     runtimeMode={runtimeMode}
-                    showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
+                    showInteractionModeToggle={
+                      !officeMode && composerProviderControls.showInteractionModeToggle
+                    }
                     onToggleInteractionMode={toggleInteractionMode}
                     onRuntimeModeChange={handleRuntimeModeChange}
                   />
                 ) : (
                   <>
                     <ComposerFooterModeControls
-                      showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
+                      showInteractionModeToggle={
+                        !officeMode && composerProviderControls.showInteractionModeToggle
+                      }
                       interactionMode={interactionMode}
                       runtimeMode={runtimeMode}
                       onToggleInteractionMode={toggleInteractionMode}

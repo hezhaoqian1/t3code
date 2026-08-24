@@ -41,6 +41,7 @@ import {
   FdDeepSeekDriver,
   resolveFdDeepSeekAttachments,
   resolveFdLocalToolContext,
+  resolveFdOrdinarySessionInput,
 } from "./FdDeepSeekDriver.ts";
 
 const unused = () => Effect.die("unused test service");
@@ -159,6 +160,40 @@ describe("FdDeepSeekDriver", () => {
           officeModeEnabled: false,
         }),
       ).toEqual({ cwd: projectRoot, profile: "project" });
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("preserves the selected runtime mode for office sessions", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "fd-deepseek-office-runtime-mode-",
+      });
+      const officeRoot = `${root}/office-workspace`;
+      const projectRoot = `${root}/employee-project`;
+      yield* fileSystem.makeDirectory(officeRoot);
+      yield* fileSystem.makeDirectory(projectRoot);
+      const canonicalOfficeRoot = yield* fileSystem.realPath(officeRoot);
+
+      for (const runtimeMode of ["auto-accept-edits", "auto", "full-access"] as const) {
+        const session = yield* resolveFdOrdinarySessionInput({
+          session: {
+            provider: FD_DEEPSEEK_DRIVER_KIND,
+            providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+            threadId: ThreadId.make(`fd-office-runtime-${runtimeMode}`),
+            cwd: projectRoot,
+            projectWorkspaceRoot: officeRoot,
+            runtimeMode,
+          },
+          officeWorkspaceRoot: officeRoot,
+          officeModeEnabled: true,
+        });
+
+        expect(session).toMatchObject({
+          cwd: canonicalOfficeRoot,
+          runtimeMode,
+        });
+      }
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
