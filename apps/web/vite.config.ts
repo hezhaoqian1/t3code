@@ -29,11 +29,11 @@ const bundledDevEnv = process.env.T3CODE_BUNDLED_DEV?.trim().toLowerCase();
 const bundledDev = bundledDevEnv === "1" || bundledDevEnv === "true";
 
 const buildSourcemap: boolean | "hidden" =
-  sourcemapEnv === "0" || sourcemapEnv === "false"
-    ? false
+  sourcemapEnv === "1" || sourcemapEnv === "true"
+    ? true
     : sourcemapEnv === "hidden"
       ? "hidden"
-      : true;
+      : false;
 
 const unitTestProject = {
   extends: true,
@@ -87,7 +87,7 @@ export default defineConfig(({ command }) => {
   return {
     assetsInclude: ["**/*.wasm"],
     plugins: [
-      tanstackRouter(),
+      tanstackRouter({ autoCodeSplitting: true }),
       react(),
       babel({
         // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0

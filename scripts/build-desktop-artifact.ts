@@ -3,6 +3,7 @@
 import { fromYaml } from "@t3tools/shared/schemaYaml";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
+import { createPackageWithOptions, statFile } from "@electron/asar";
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
@@ -57,6 +58,7 @@ const StageWorkspaceConfig = Schema.Struct({
   allowBuilds: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   patchedDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
   overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+  nodeLinker: Schema.optional(Schema.Literals(["hoisted"])),
 });
 type StageWorkspaceConfig = typeof StageWorkspaceConfig.Type;
 
@@ -375,6 +377,30 @@ export class DesktopBuildNoArtifactsProducedError extends Schema.TaggedErrorClas
   }
 }
 
+export class WindowsServerSidecarPackError extends Schema.TaggedErrorClass<WindowsServerSidecarPackError>()(
+  "WindowsServerSidecarPackError",
+  {
+    asarPath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to pack the Windows server sidecar at ${this.asarPath}.`;
+  }
+}
+
+export class WindowsServerSidecarValidationError extends Schema.TaggedErrorClass<WindowsServerSidecarValidationError>()(
+  "WindowsServerSidecarValidationError",
+  {
+    resourcesPath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Invalid packaged Windows server sidecar at ${this.resourcesPath}.`;
+  }
+}
+
 export class WslNodePtyPrebuildMissingError extends Schema.TaggedErrorClass<WslNodePtyPrebuildMissingError>()(
   "WslNodePtyPrebuildMissingError",
   {
@@ -577,15 +603,32 @@ interface StagePackageJson {
 
 export const STAGE_INSTALL_ARGS = ["install", "--prod"] as const;
 export const DESKTOP_ELECTRON_LANGUAGES = ["en-US"] as const;
-export const DESKTOP_FILE_EXCLUSIONS = ["!node_modules/@openai/codex{,/**/*}"] as const;
-// The WSL backend launches the server with plain `wsl.exe -- node`, which
-// cannot read inside an asar archive — and the server bundle externalizes its
-// runtime deps, so the whole node_modules tree must be unpacked, not just the
-// bundle (otherwise ERR_MODULE_NOT_FOUND: "Cannot find package 'effect'").
-// The Windows primary backend reads the same files through the asar redirect,
-// so nothing is duplicated.
-export const WINDOWS_ASAR_UNPACK = ["apps/server/dist/**", "**/node_modules/**"] as const;
+export const DESKTOP_FILE_EXCLUSIONS = [
+  "!node_modules/@openai/codex{,/**/*}",
+  // Source maps are opt-in for release diagnostics. They add tens of MB and
+  // hundreds of loose files to the Windows package without runtime value.
+  "!**/*.map",
+  // Windows stages its server sidecar here as an electron-builder input. It
+  // is copied to resources/ through extraResources and must not also land in
+  // app.asar.
+  "!apps/desktop/prod-resources/windows-server{,/**/*}",
+] as const;
 export const DESKTOP_ASAR_UNPACK = ["node_modules/@larksuite/cli/**"] as const;
+export const WINDOWS_SERVER_ASAR_RESOURCE = "server.asar";
+export const WINDOWS_SERVER_RESOURCE_SOURCE_DIR = "apps/desktop/prod-resources/windows-server";
+export const WINDOWS_SERVER_ASAR_UNPACK_GLOB =
+  "{**/*.node,**/*.dll,**/*.exe,**/*.so,**/*.so.*,**/*.dylib}";
+export const WINDOWS_SERVER_ASAR_IGNORE_GLOBS = [
+  "**/node_modules/.bin",
+  "**/node_modules/.bin/**",
+] as const;
+export const WINDOWS_SERVER_EXTRA_RESOURCES = [
+  {
+    from: WINDOWS_SERVER_RESOURCE_SOURCE_DIR,
+    to: ".",
+    filter: [WINDOWS_SERVER_ASAR_RESOURCE, `${WINDOWS_SERVER_ASAR_RESOURCE}.unpacked/**/*`],
+  },
+] as const;
 export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/resources/enterprise-config.json",
@@ -695,14 +738,14 @@ export function createStageWorkspaceConfig(input: {
   readonly allowBuilds?: Record<string, boolean>;
   readonly patchedDependencies?: Record<string, string>;
   readonly overrides?: Record<string, string>;
+  readonly hoisted?: boolean;
 }): StageWorkspaceConfig {
-  const { platform, arch, allowBuilds, patchedDependencies, overrides } = input;
+  const { platform, arch, allowBuilds, patchedDependencies, overrides, hoisted = false } = input;
   const hostOs = platform === "mac" ? "darwin" : platform === "win" ? "win32" : "linux";
   const hostCpu = arch === "universal" ? ["arm64", "x64"] : [arch];
-  // Linux AppImages and Windows WSL backends both execute a Linux/glibc Node
-  // process that loads Linux-native optional deps at runtime (e.g.
-  // @yuuang/ffi-rs-linux-x64-gnu). Keep libc explicit so pnpm includes those
-  // optional packages in the staged production install.
+  // Linux AppImages execute a glibc Node process that loads Linux-native
+  // optional dependencies. Windows no longer ships a WSL backend, so its
+  // staged dependency graph must remain win32-only.
   const supportedArchitectures =
     platform === "linux"
       ? {
@@ -710,16 +753,10 @@ export function createStageWorkspaceConfig(input: {
           cpu: hostCpu,
           libc: ["glibc"],
         }
-      : platform === "win"
-        ? {
-            os: Array.from(new Set([hostOs, "linux"])),
-            cpu: hostCpu,
-            libc: ["glibc"],
-          }
-        : {
-            os: [hostOs],
-            cpu: hostCpu,
-          };
+      : {
+          os: [hostOs],
+          cpu: hostCpu,
+        };
 
   return {
     supportedArchitectures,
@@ -728,6 +765,7 @@ export function createStageWorkspaceConfig(input: {
       ? { patchedDependencies }
       : {}),
     ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
+    ...(hoisted ? { nodeLinker: "hoisted" as const } : {}),
   };
 }
 
@@ -1258,10 +1296,13 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     directories: {
       buildResources: "apps/desktop/resources",
     },
-    // The Feishu CLI is a native executable and must stay outside app.asar.
-    // Windows also unpacks the WSL backend and its runtime dependencies.
-    asarUnpack: platform === "win" ? [...WINDOWS_ASAR_UNPACK] : [...DESKTOP_ASAR_UNPACK],
-    extraResources: DESKTOP_EXTRA_RESOURCES,
+    // Native desktop helpers must stay outside app.asar. Windows server
+    // natives live in the separate server.asar.unpacked sidecar instead.
+    asarUnpack: [...DESKTOP_ASAR_UNPACK],
+    extraResources:
+      platform === "win"
+        ? [...DESKTOP_EXTRA_RESOURCES, ...WINDOWS_SERVER_EXTRA_RESOURCES]
+        : DESKTOP_EXTRA_RESOURCES,
   };
   buildConfig.publish = [
     {
@@ -1432,6 +1473,149 @@ const stageWslNodePtyPrebuild = Effect.fn("stageWslNodePtyPrebuild")(function* (
   );
 });
 
+export const packWindowsServerAsar = Effect.fn("packWindowsServerAsar")(function* (input: {
+  readonly sourceDir: string;
+  readonly asarPath: string;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  yield* Effect.tryPromise({
+    try: () =>
+      createPackageWithOptions(input.sourceDir, input.asarPath, {
+        dot: true,
+        unpack: WINDOWS_SERVER_ASAR_UNPACK_GLOB,
+        globOptions: { ignore: [...WINDOWS_SERVER_ASAR_IGNORE_GLOBS] },
+      }),
+    catch: (cause) => new WindowsServerSidecarPackError({ asarPath: input.asarPath, cause }),
+  });
+
+  const unpackedPath = `${input.asarPath}.unpacked`;
+  if (!(yield* fs.exists(unpackedPath))) {
+    return yield* new WindowsServerSidecarPackError({
+      asarPath: input.asarPath,
+      cause: new Error(`expected native runtime files at ${unpackedPath}`),
+    });
+  }
+});
+
+export const validatePackagedWindowsServerSidecar = Effect.fn(
+  "validatePackagedWindowsServerSidecar",
+)(function* (resourcesPath: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const asarPath = path.join(resourcesPath, WINDOWS_SERVER_ASAR_RESOURCE);
+  const unpackedPath = `${asarPath}.unpacked`;
+  const legacyLooseServerPath = path.join(resourcesPath, "app.asar.unpacked/apps/server/dist");
+
+  const fail = (cause: unknown) =>
+    new WindowsServerSidecarValidationError({ resourcesPath, cause });
+  if (!(yield* fs.exists(asarPath))) {
+    return yield* fail(new Error(`missing ${asarPath}`));
+  }
+  if (!(yield* fs.exists(unpackedPath))) {
+    return yield* fail(new Error(`missing ${unpackedPath}`));
+  }
+  if (yield* fs.exists(legacyLooseServerPath)) {
+    return yield* fail(new Error(`legacy loose server payload found at ${legacyLooseServerPath}`));
+  }
+
+  yield* Effect.try({
+    try: () => statFile(asarPath, path.join("apps", "server", "dist", "bin.mjs")),
+    catch: (cause) => fail(cause),
+  });
+});
+
+const findWindowsPackagedResourcesPath = Effect.fn("findWindowsPackagedResourcesPath")(function* (
+  stageDistDir: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const entries = yield* fs.readDirectory(stageDistDir);
+  for (const entry of entries) {
+    if (!entry.startsWith("win-") || !entry.endsWith("-unpacked")) continue;
+    const resourcesPath = path.join(stageDistDir, entry, "resources");
+    if (yield* fs.exists(resourcesPath)) return resourcesPath;
+  }
+  return yield* new WindowsServerSidecarValidationError({
+    resourcesPath: stageDistDir,
+    cause: new Error("Windows unpacked resources directory was not produced"),
+  });
+});
+
+export const stageWindowsServerSidecar = Effect.fn("stageWindowsServerSidecar")(function* (input: {
+  readonly stageRoot: string;
+  readonly stageAppDir: string;
+  readonly repoRoot: string;
+  readonly serverDistDir: string;
+  readonly arch: typeof BuildArch.Type;
+  readonly appVersion: string;
+  readonly dependencies: Record<string, string>;
+  readonly allowBuilds: Record<string, boolean>;
+  readonly patchedDependencies: Record<string, string>;
+  readonly overrides: Record<string, string>;
+  readonly verbose: boolean;
+}) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const serverStageDir = path.join(input.stageRoot, "server");
+  yield* fs.makeDirectory(path.join(serverStageDir, "apps/server"), { recursive: true });
+  yield* fs.copy(input.serverDistDir, path.join(serverStageDir, "apps/server/dist"));
+
+  const patchedDependencies = createStagePatchedDependencies(
+    input.patchedDependencies,
+    input.dependencies,
+  );
+  const packageJsonString = yield* encodeJsonString({
+    name: "fangde-ai-server",
+    version: input.appVersion,
+    private: true,
+    packageManager: rootPackageJson.packageManager,
+    dependencies: input.dependencies,
+  });
+  yield* fs.writeFileString(path.join(serverStageDir, "package.json"), `${packageJsonString}\n`);
+  const workspaceConfigString = yield* encodeStageWorkspaceConfig(
+    createStageWorkspaceConfig({
+      platform: "win",
+      arch: input.arch,
+      allowBuilds: input.allowBuilds,
+      patchedDependencies,
+      overrides: input.overrides,
+      // A flat, symlink-free tree makes ASAR packing and native-unpack paths
+      // deterministic across Windows release builders.
+      hoisted: true,
+    }),
+  );
+  yield* fs.writeFileString(
+    path.join(serverStageDir, "pnpm-workspace.yaml"),
+    workspaceConfigString,
+  );
+  if (Object.keys(patchedDependencies).length > 0) {
+    yield* fs.copy(path.join(input.repoRoot, "patches"), path.join(serverStageDir, "patches"));
+  }
+
+  yield* Effect.log("[desktop-artifact] Installing Windows server sidecar dependencies...");
+  const installCommand = yield* resolveSpawnCommand("vp", [...STAGE_INSTALL_ARGS]);
+  yield* runCommand(
+    ChildProcess.make(installCommand.command, installCommand.args, {
+      cwd: serverStageDir,
+      shell: installCommand.shell,
+    }),
+    { label: "vp install --prod (Windows server sidecar)", verbose: input.verbose },
+  );
+
+  const asarPath = path.join(
+    input.stageAppDir,
+    WINDOWS_SERVER_RESOURCE_SOURCE_DIR,
+    WINDOWS_SERVER_ASAR_RESOURCE,
+  );
+  yield* fs.makeDirectory(path.dirname(asarPath), { recursive: true });
+  yield* Effect.log("[desktop-artifact] Packing Windows server.asar sidecar...");
+  yield* packWindowsServerAsar({ sourceDir: serverStageDir, asarPath });
+  const packedStat = yield* fs.stat(asarPath);
+  yield* Effect.log(
+    `[desktop-artifact] Packed Windows server.asar (${String(packedStat.size)} bytes).`,
+  );
+});
+
 const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   options: ResolvedBuildOptions,
 ) {
@@ -1551,12 +1735,16 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry));
 
   yield* fs.makeDirectory(path.join(stageAppDir, "apps/desktop"), { recursive: true });
-  yield* fs.makeDirectory(path.join(stageAppDir, "apps/server"), { recursive: true });
+  if (options.platform !== "win") {
+    yield* fs.makeDirectory(path.join(stageAppDir, "apps/server"), { recursive: true });
+  }
 
   yield* Effect.log("[desktop-artifact] Staging release app...");
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
-  yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  if (options.platform !== "win") {
+    yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  }
   yield* stageResourceMonitor({
     repoRoot,
     stageResourcesDir,
@@ -1580,24 +1768,15 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
 
   const stageDependencies = {
-    ...resolvedServerDependencies,
+    ...(options.platform === "win" ? {} : resolvedServerDependencies),
     ...resolvedDesktopRuntimeDependencies,
-    ...resolveFffNativeDependencies(
-      options.platform,
-      options.arch,
-      serverPackageJson.dependencies["@ff-labs/fff-node"],
-    ),
-    // Windows artifacts also bundle the same-architecture WSL Linux backend, which loads the
-    // fff native binary through ffi-rs. The platform fff binary above is the
-    // host's (win32), so promote the matching Linux fff binaries too; without
-    // them file-finding in WSL fails to load its Linux native package.
     ...(options.platform === "win"
-      ? resolveFffNativeDependencies(
-          "linux",
+      ? {}
+      : resolveFffNativeDependencies(
+          options.platform,
           options.arch,
           serverPackageJson.dependencies["@ff-labs/fff-node"],
-        )
-      : {}),
+        )),
     "@openai/codex": resolveCodexRuntimePackage(options.platform, options.arch).packageSpec,
   };
   const stagePatchedDependencies = createStagePatchedDependencies(
@@ -1680,13 +1859,26 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     label: "bundled codex --version",
     verbose: options.verbose,
   });
-  // WSL is Windows-only, so only the Windows artifact carries the Linux backend
-  // binary; other platforms ignore the prebuild input.
   if (options.platform === "win") {
-    yield* stageWslNodePtyPrebuild({
+    yield* stageWindowsServerSidecar({
+      stageRoot,
       stageAppDir,
+      repoRoot,
+      serverDistDir: distDirs.serverDist,
       arch: options.arch,
-      prebuildPath: options.wslPrebuild,
+      appVersion,
+      dependencies: {
+        ...resolvedServerDependencies,
+        ...resolveFffNativeDependencies(
+          "win",
+          options.arch,
+          serverPackageJson.dependencies["@ff-labs/fff-node"],
+        ),
+      },
+      allowBuilds: workspaceAllowBuilds,
+      patchedDependencies: workspacePatchedDependencies,
+      overrides: resolvedOverrides,
+      verbose: options.verbose,
     });
   }
 
@@ -1763,6 +1955,11 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       platform: options.platform,
       arch: options.arch,
     });
+  }
+
+  if (options.platform === "win") {
+    const resourcesPath = yield* findWindowsPackagedResourcesPath(stageDistDir);
+    yield* validatePackagedWindowsServerSidecar(resourcesPath);
   }
 
   const packagedCodexBinaryPath = resolvePackagedCodexBinaryPath(

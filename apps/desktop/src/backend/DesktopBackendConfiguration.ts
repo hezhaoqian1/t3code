@@ -68,6 +68,20 @@ const EMPTY_OBSERVABILITY_SETTINGS: BackendObservabilitySettings = {
 const childEnvPatch = (): Record<string, string | undefined> =>
   Object.fromEntries(RETIRED_NETWORK_ENV_NAMES.map((name) => [name, undefined]));
 
+export function resolvePackagedBackendTraceEnv(input: {
+  readonly isPackaged: boolean;
+  readonly isDevelopment: boolean;
+  readonly inheritedEnv: Readonly<Record<string, string | undefined>>;
+}): Record<string, string> {
+  const explicitTraceLevel = input.inheritedEnv.T3CODE_TRACE_MIN_LEVEL?.trim();
+  if (!input.isPackaged || input.isDevelopment || explicitTraceLevel) return {};
+
+  // Successful startup spans can produce several MB of writes while Windows
+  // is also cold-reading the packaged app. Keep warnings and failures by
+  // default; maintainers can still opt into Info/Debug/Trace explicitly.
+  return { T3CODE_TRACE_MIN_LEVEL: "Warn" };
+}
+
 function resourceMonitorBinaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "t3-resource-monitor.exe" : "t3-resource-monitor";
 }
@@ -228,6 +242,11 @@ export const make = Effect.gen(function* () {
       cwd: officeWorkspaceRoot,
       env: {
         ...childEnvPatch(),
+        ...resolvePackagedBackendTraceEnv({
+          isPackaged: environment.isPackaged,
+          isDevelopment: environment.isDevelopment,
+          inheritedEnv: process.env,
+        }),
         ELECTRON_RUN_AS_NODE: "1",
         ...Option.match(bundledCodexBinaryPath, {
           onNone: () => ({}),

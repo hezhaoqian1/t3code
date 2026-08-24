@@ -7,6 +7,9 @@ import * as Option from "effect/Option";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 
+const portablePath = (value: string) => value.replaceAll("\\", "/");
+const portablePathOption = Option.map(portablePath);
+
 const defaultInput = {
   dirname: "/repo/apps/desktop/dist-electron",
   homeDirectory: "/Users/alice",
@@ -50,18 +53,32 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, true);
-      assert.equal(environment.appDataDirectory, "/Users/alice/Library/Application Support");
-      assert.equal(environment.baseDir, "/tmp/t3");
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.desktopSettingsPath, "/tmp/t3/userdata/desktop-settings.json");
-      assert.equal(environment.clientSettingsPath, "/tmp/t3/userdata/client-settings.json");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.rootDir, "/repo");
-      assert.equal(environment.appRoot, "/repo");
-      assert.equal(environment.backendEntryPath, "/repo/apps/server/dist/bin.mjs");
-      assert.equal(environment.backendCwd, "/repo");
+      assert.equal(
+        portablePath(environment.appDataDirectory),
+        "/Users/alice/Library/Application Support",
+      );
+      assert.equal(portablePath(environment.baseDir), "/tmp/t3");
+      assert.equal(portablePath(environment.stateDir), "/tmp/t3/userdata");
+      assert.equal(
+        portablePath(environment.desktopSettingsPath),
+        "/tmp/t3/userdata/desktop-settings.json",
+      );
+      assert.equal(
+        portablePath(environment.clientSettingsPath),
+        "/tmp/t3/userdata/client-settings.json",
+      );
+      assert.equal(portablePath(environment.serverSettingsPath), "/tmp/t3/userdata/settings.json");
+      assert.equal(portablePath(environment.logDir), "/tmp/t3/userdata/logs");
+      assert.equal(
+        portablePath(environment.browserArtifactsDir),
+        "/tmp/t3/userdata/browser-artifacts",
+      );
+      assert.isTrue(portablePath(environment.rootDir).endsWith("/repo"));
+      assert.isTrue(portablePath(environment.appRoot).endsWith("/repo"));
+      assert.isTrue(
+        portablePath(environment.backendEntryPath).endsWith("/repo/apps/server/dist/bin.mjs"),
+      );
+      assert.isTrue(portablePath(environment.backendCwd).endsWith("/repo"));
       assert.equal(environment.appUserModelId, "com.fdsure.enterprise-ai.dev");
       assert.equal(environment.linuxWmClass, "fangde-ai-dev");
       assert.deepEqual(
@@ -85,10 +102,32 @@ describe("DesktopEnvironment", () => {
       );
 
       assert.equal(environment.isDevelopment, false);
-      assert.equal(environment.stateDir, "/tmp/t3/userdata");
-      assert.equal(environment.logDir, "/tmp/t3/userdata/logs");
-      assert.equal(environment.browserArtifactsDir, "/tmp/t3/userdata/browser-artifacts");
-      assert.equal(environment.serverSettingsPath, "/tmp/t3/userdata/settings.json");
+      assert.equal(portablePath(environment.stateDir), "/tmp/t3/userdata");
+      assert.equal(portablePath(environment.logDir), "/tmp/t3/userdata/logs");
+      assert.equal(
+        portablePath(environment.browserArtifactsDir),
+        "/tmp/t3/userdata/browser-artifacts",
+      );
+      assert.equal(portablePath(environment.serverSettingsPath), "/tmp/t3/userdata/settings.json");
+    }),
+  );
+
+  it.effect("runs the packaged Windows backend from the server asar sidecar", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        platform: "win32",
+        processArch: "x64",
+        isPackaged: true,
+        appPath: "C:/Program Files/Fangde AI/resources/app.asar",
+        resourcesPath: "C:/Program Files/Fangde AI/resources",
+        homeDirectory: "C:/Users/Alice",
+      });
+
+      assert.equal(
+        environment.backendEntryPath.replaceAll("\\", "/"),
+        "C:/Program Files/Fangde AI/resources/server.asar/apps/server/dist/bin.mjs",
+      );
+      assert.equal(portablePath(environment.backendCwd), "C:/Users/Alice");
     }),
   );
 
@@ -100,8 +139,14 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/Library/Application Support/Fangde AI/dev");
-      assert.equal(production.stateDir, "/Users/alice/Library/Application Support/Fangde AI");
+      assert.equal(
+        portablePath(development.stateDir),
+        "/Users/alice/Library/Application Support/Fangde AI/dev",
+      );
+      assert.equal(
+        portablePath(production.stateDir),
+        "/Users/alice/Library/Application Support/Fangde AI",
+      );
       assert.equal(production.userDataDirName, "Fangde AI");
     }),
   );
@@ -130,11 +175,11 @@ describe("DesktopEnvironment", () => {
         Option.none(),
       );
       assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: "~" }),
+        portablePathOption(environment.resolvePickFolderDefaultPath({ initialPath: "~" })),
         Option.some("/Users/alice"),
       );
       assert.deepEqual(
-        environment.resolvePickFolderDefaultPath({ initialPath: "~/project" }),
+        portablePathOption(environment.resolvePickFolderDefaultPath({ initialPath: "~/project" })),
         Option.some("/Users/alice/project"),
       );
     }),

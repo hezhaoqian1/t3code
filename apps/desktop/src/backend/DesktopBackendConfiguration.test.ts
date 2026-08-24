@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -61,6 +62,33 @@ const withHarness = <A, E, R>(
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 describe("DesktopBackendConfiguration", () => {
+  it("uses low-write tracing for packaged desktop while preserving explicit diagnostics", () => {
+    assert.deepEqual(
+      DesktopBackendConfiguration.resolvePackagedBackendTraceEnv({
+        isPackaged: true,
+        isDevelopment: false,
+        inheritedEnv: {},
+      }),
+      { T3CODE_TRACE_MIN_LEVEL: "Warn" },
+    );
+    assert.deepEqual(
+      DesktopBackendConfiguration.resolvePackagedBackendTraceEnv({
+        isPackaged: true,
+        isDevelopment: false,
+        inheritedEnv: { T3CODE_TRACE_MIN_LEVEL: "Info" },
+      }),
+      {},
+    );
+    assert.deepEqual(
+      DesktopBackendConfiguration.resolvePackagedBackendTraceEnv({
+        isPackaged: false,
+        isDevelopment: true,
+        inheritedEnv: {},
+      }),
+      {},
+    );
+  });
+
   it.effect("always resolves the primary backend on configured loopback", () =>
     withHarness(
       Effect.gen(function* () {
@@ -76,7 +104,7 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(first.bootstrap.mode, "desktop");
         assert.equal(first.bootstrap.noBrowser, true);
         assert.deepEqual(first.args.slice(-1), ["--auto-bootstrap-project-from-cwd"]);
-        assert.match(first.cwd, /userdata\/office-workspace$/);
+        assert.equal(first.cwd.replaceAll("\\", "/").endsWith("/userdata/office-workspace"), true);
         assert.match(first.bootstrap.desktopBootstrapToken, /^[0-9a-f]{48}$/i);
         assert.equal(second.bootstrap.desktopBootstrapToken, first.bootstrap.desktopBootstrapToken);
         assert.isFalse("tailscaleServeEnabled" in first.bootstrap);
@@ -94,10 +122,11 @@ describe("DesktopBackendConfiguration", () => {
       () =>
         Effect.gen(function* () {
           const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
           const resourcesPath = yield* fileSystem.makeTempDirectoryScoped({
             prefix: "fd-desktop-codex-resources-",
           });
-          const codexBinaryPath = `${resourcesPath}/codex/bin/${executableName}`;
+          const codexBinaryPath = path.join(resourcesPath, "codex", "bin", executableName);
 
           yield* withHarness(
             Effect.gen(function* () {
@@ -121,6 +150,7 @@ describe("DesktopBackendConfiguration", () => {
 
         assert.equal(resolved.extendEnv, true);
         assert.equal(resolved.env.ELECTRON_RUN_AS_NODE, "1");
+        assert.equal(resolved.env.T3CODE_TRACE_MIN_LEVEL, "Warn");
         assert.isFalse("T3CODE_HOST" in resolved.env);
         for (const name of [
           "T3CODE_PORT",

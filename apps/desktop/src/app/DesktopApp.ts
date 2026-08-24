@@ -87,9 +87,11 @@ const fatalStartupCause = <E>(stage: string, cause: Cause.Cause<E>) =>
 const bootstrap = Effect.gen(function* () {
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const primaryBackend = yield* pool.primary;
+  const desktopWindow = yield* DesktopWindow.DesktopWindow;
   const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
   const state = yield* DesktopState.DesktopState;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const shellEnvironment = yield* DesktopShellEnvironment.DesktopShellEnvironment;
   yield* logBootstrapInfo("bootstrap start");
 
   const backendPort = yield* resolveDesktopBackendPort({
@@ -115,9 +117,18 @@ const bootstrap = Effect.gen(function* () {
   yield* installDesktopIpcHandlers();
   yield* logBootstrapInfo("bootstrap ipc handlers registered");
 
+  // The startup document does not depend on the local server. Show it before
+  // PowerShell profile hydration, while preserving the hydrated environment
+  // for the backend process that starts below.
+  yield* desktopWindow.createMain;
+
   const identity = yield* FdIdentity.FdIdentity;
   yield* identity.initialize;
   yield* logBootstrapInfo("FD identity initialized");
+
+  if (environment.platform === "win32") {
+    yield* shellEnvironment.installIntoProcess;
+  }
 
   if (!(yield* Ref.get(state.quitting))) {
     yield* primaryBackend.start;
@@ -138,7 +149,9 @@ const startup = Effect.gen(function* () {
   const updates = yield* DesktopUpdates.DesktopUpdates;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
 
-  yield* shellEnvironment.installIntoProcess;
+  if (environment.platform !== "win32") {
+    yield* shellEnvironment.installIntoProcess;
+  }
   const hasCommandLinePasswordStore =
     preReadyElectronOptions.linuxPasswordStoreCommandLine !== null;
   const linuxElectronOptions =
