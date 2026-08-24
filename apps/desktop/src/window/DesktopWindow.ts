@@ -32,6 +32,12 @@ const DEVELOPMENT_LOAD_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 const RENDERER_RECOVERY_RELOAD_DELAY_MS = 500;
 const RENDERER_RECOVERY_MAX_ATTEMPTS = 3;
 const RENDERER_RECOVERY_WINDOW_MS = 60_000;
+const STARTUP_DOCUMENT_URL = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
+<html><head><meta charset="utf-8"><title>Fangde AI</title><style>
+html,body{height:100%;margin:0;background:#fff;color:#111827;font:14px system-ui,-apple-system,"Segoe UI",sans-serif}
+body{display:grid;place-items:center}.shell{text-align:center}.mark{font-size:20px;font-weight:650}.status{margin-top:10px;color:#6b7280}
+@media(prefers-color-scheme:dark){html,body{background:#0a0a0a;color:#f8fafc}.status{color:#9ca3af}}
+</style></head><body><main class="shell" role="status" aria-live="polite"><div class="mark">Fangde AI</div><div class="status">Starting local service...</div></main></body></html>`)}`;
 const DEVELOPMENT_RETRYABLE_LOAD_ERROR_CODES = new Set([
   -2, // ERR_FAILED
   -7, // ERR_TIMED_OUT
@@ -248,13 +254,13 @@ export const make = Effect.gen(function* () {
   // Window-side latch for the primary backend's readiness. Set by
   // handleBackendReady (driven by the pool's onReady callback), cleared
   // by handleBackendNotReady (driven by onShutdown). Only consumed by
-  // createMainIfBackendReady, which gates the post-readiness window
-  // open in development and the macOS "activate without windows" path.
+  // createMainIfBackendReady and the one-time startup-document transition.
   const backendReadyRef = yield* Ref.make(false);
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runFork = Effect.runForkWith(context);
   const runPromise = Effect.runPromiseWith(context);
   let flushMainWindowBounds: Effect.Effect<void> = Effect.void;
+  let loadStartupApplication: (() => void) | undefined;
 
   const currentMainWindow = electronWindow.currentMainOrFirst;
   const focusedMainWindow = electronWindow.focusedMainOrFirst;
@@ -646,13 +652,27 @@ export const make = Effect.gen(function* () {
       revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
     }
     bindFirstRevealTrigger(revealSubscribers, () => {
+      // Startup runs unthrottled while the window is hidden so Chromium can
+      // paint immediately. Once it has been shown, restore normal throttling
+      // so a minimized or hidden window does not stay expensive forever.
+      if (!window.isDestroyed()) {
+        window.webContents.setBackgroundThrottling(true);
+      }
       if (persistedSettings.mainWindowMaximized) {
         window.maximize();
       }
       void runPromise(electronWindow.reveal(window));
     });
 
-    loadApplication();
+    // Load a zero-dependency document first. The backend starts in parallel,
+    // so a cold Windows launch always gets a visible window before HTTP ready.
+    const backendReady = yield* Ref.get(backendReadyRef);
+    if (backendReady) {
+      loadApplication();
+    } else {
+      loadStartupApplication = loadApplication;
+      void window.loadURL(STARTUP_DOCUMENT_URL).catch(() => undefined);
+    }
     if (environment.isDevelopment) {
       window.webContents.openDevTools({ mode: "detach" });
     }
@@ -660,6 +680,9 @@ export const make = Effect.gen(function* () {
     window.on("closed", () => {
       clearDevelopmentLoadRetry();
       clearBoundsPersist();
+      if (loadStartupApplication === loadApplication) {
+        loadStartupApplication = undefined;
+      }
       void runPromise(electronWindow.clearMain(Option.some(window)));
     });
 
@@ -711,7 +734,16 @@ export const make = Effect.gen(function* () {
     handleBackendReady: Effect.fn("desktop.window.handleBackendReady")(function* (httpBaseUrl) {
       yield* Ref.set(backendReadyRef, true);
       yield* logWindowInfo("backend ready", { source: "http", url: httpBaseUrl.href });
-      yield* createMainIfBackendReady;
+      const existingWindow = yield* currentMainWindow;
+      if (Option.isSome(existingWindow)) {
+        yield* Effect.sync(() => {
+          const loadApplication = loadStartupApplication;
+          loadStartupApplication = undefined;
+          loadApplication?.();
+        });
+      } else {
+        yield* createMain;
+      }
     }),
     handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
       Effect.withSpan("desktop.window.handleBackendNotReady"),

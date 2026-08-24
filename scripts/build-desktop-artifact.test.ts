@@ -1,5 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { createRequire } from "node:module";
 import { assert, it } from "@effect/vitest";
+import * as FileSystem from "effect/FileSystem";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -37,9 +39,13 @@ import {
   resolveMockUpdateServerPort,
   resolveMockUpdateServerUrl,
   resolvePackageManagerUserAgent,
+  packWindowsServerAsar,
   stageLinuxIconSize,
   STAGE_INSTALL_ARGS,
-  WINDOWS_ASAR_UNPACK,
+  WINDOWS_SERVER_ASAR_RESOURCE,
+  WINDOWS_SERVER_ASAR_UNPACK_GLOB,
+  WINDOWS_SERVER_EXTRA_RESOURCES,
+  validatePackagedWindowsServerSidecar,
 } from "./build-desktop-artifact.ts";
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
@@ -90,6 +96,33 @@ function iconResizeSpawnerLayer(
 }
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
+  it.effect("packs the Windows server into one asar with native files unpacked", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "fdai-server-asar-test-" });
+      const sourceDir = path.join(tempDir, "source");
+      const entryPath = path.join(sourceDir, "apps/server/dist/bin.mjs");
+      const nativePath = path.join(sourceDir, "node_modules/native/addon.node");
+      yield* fs.makeDirectory(path.dirname(entryPath), { recursive: true });
+      yield* fs.makeDirectory(path.dirname(nativePath), { recursive: true });
+      yield* fs.writeFileString(entryPath, "export const ok = true;\n");
+      yield* fs.writeFileString(nativePath, "native");
+
+      const asarPath = path.join(tempDir, WINDOWS_SERVER_ASAR_RESOURCE);
+      yield* packWindowsServerAsar({ sourceDir, asarPath });
+
+      const require = createRequire(import.meta.url);
+      const { statFile } = require("@electron/asar") as {
+        statFile: (archive: string, entry: string) => unknown;
+      };
+      assert.isDefined(statFile(asarPath, path.join("apps", "server", "dist", "bin.mjs")));
+      assert.isTrue(yield* fs.exists(`${asarPath}.unpacked/node_modules/native/addon.node`));
+      assert.include(WINDOWS_SERVER_ASAR_UNPACK_GLOB, "**/*.node");
+      yield* validatePackagedWindowsServerSidecar(tempDir);
+    }),
+  );
+
   it("stages the AI SDK schema runtime as a server production dependency", () => {
     assert.equal(serverPackageJson.dependencies.zod, "4.4.3");
   });
@@ -194,20 +227,16 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         libc: ["glibc"],
       },
     });
-    // Windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
-    // staged install must fetch its native optional deps (e.g. ffi-rs) too.
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "x64" }), {
       supportedArchitectures: {
-        os: ["win32", "linux"],
+        os: ["win32"],
         cpu: ["x64"],
-        libc: ["glibc"],
       },
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "arm64" }), {
       supportedArchitectures: {
-        os: ["win32", "linux"],
+        os: ["win32"],
         cpu: ["arm64"],
-        libc: ["glibc"],
       },
     });
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "universal" }), {
@@ -277,7 +306,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
   it("limits Electron locales without provider-specific package exclusions", () => {
     assert.deepStrictEqual(DESKTOP_ELECTRON_LANGUAGES, ["en-US"]);
-    assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, ["!node_modules/@openai/codex{,/**/*}"]);
+    assert.deepStrictEqual(DESKTOP_FILE_EXCLUSIONS, [
+      "!node_modules/@openai/codex{,/**/*}",
+      "!**/*.map",
+      "!apps/desktop/prod-resources/windows-server{,/**/*}",
+    ]);
   });
 
   it.effect("pins one native Codex runtime for each desktop artifact", () =>
@@ -295,11 +328,17 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         executableName: "codex.exe",
       });
       assert.equal(
-        resolvePackagedCodexBinaryPath("/stage/dist", "mac", "arm64", path.join),
+        resolvePackagedCodexBinaryPath("/stage/dist", "mac", "arm64", path.join).replaceAll(
+          "\\",
+          "/",
+        ),
         "/stage/dist/mac-arm64/Fangde AI.app/Contents/Resources/codex/bin/codex",
       );
       assert.equal(
-        resolvePackagedCodexBinaryPath("/stage/dist", "win", "x64", path.join),
+        resolvePackagedCodexBinaryPath("/stage/dist", "win", "x64", path.join).replaceAll(
+          "\\",
+          "/",
+        ),
         "/stage/dist/win-unpacked/resources/codex/bin/codex.exe",
       );
     }),
@@ -313,7 +352,11 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
 
       assert.deepStrictEqual(mac.asarUnpack, DESKTOP_ASAR_UNPACK);
       assert.deepStrictEqual(linux.asarUnpack, DESKTOP_ASAR_UNPACK);
-      assert.deepStrictEqual(win.asarUnpack, WINDOWS_ASAR_UNPACK);
+      assert.deepStrictEqual(win.asarUnpack, DESKTOP_ASAR_UNPACK);
+      assert.deepStrictEqual(win.extraResources, [
+        ...DESKTOP_EXTRA_RESOURCES,
+        ...WINDOWS_SERVER_EXTRA_RESOURCES,
+      ]);
       // Linux must register the renderer schemes so the generated .desktop
       assert.deepStrictEqual((linux.linux as Record<string, unknown>).protocols, [
         { name: "Fangde AI", schemes: ["fdai", "fdai-dev"] },

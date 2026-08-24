@@ -27,7 +27,7 @@ export default mergeConfig(
     pack: {
       entry: ["src/bin.ts"],
       outDir: "dist",
-      sourcemap: true,
+      sourcemap: process.env.T3CODE_SERVER_SOURCEMAP === "1",
       clean: true,
       deps: {
         alwaysBundle: shouldBundleCliDependency,

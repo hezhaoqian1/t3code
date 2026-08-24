@@ -5,7 +5,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
-import type * as Electron from "electron";
+import * as Electron from "electron";
 
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import { makeComponentLogger } from "./DesktopObservability.ts";
@@ -177,6 +177,22 @@ export const make = DesktopLifecycle.of({
     const runEffect = Effect.runPromiseWith(context);
     let quitAllowed = false;
     let updaterQuitAllowed = false;
+
+    // Electron scopes this lock to userData, which startup points at the real
+    // product directory before lifecycle registration. A secondary launch
+    // must stop here, before it can create its own backend and renderer tree.
+    const isPrimaryInstance = yield* Effect.sync(() => Electron.app.requestSingleInstanceLock());
+    if (!isPrimaryInstance) {
+      yield* logLifecycleInfo("secondary instance exiting");
+      yield* electronApp.quit;
+      return yield* Effect.interrupt;
+    }
+
+    yield* electronApp.on("second-instance", () => {
+      void runEffect(
+        desktopWindow.activate.pipe(Effect.withSpan("desktop.lifecycle.secondInstance")),
+      );
+    });
     yield* electronTheme.onUpdated(() => {
       void runEffect(
         desktopWindow.syncAppearance.pipe(Effect.withSpan("desktop.lifecycle.themeUpdated")),

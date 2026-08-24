@@ -179,6 +179,10 @@ const make = Effect.fn("desktop.environment.make")(function* (
     "applications",
   );
   const resourcesPath = input.resourcesPath;
+  const serverRoot =
+    input.isPackaged && input.platform === "win32"
+      ? path.join(resourcesPath, "server.asar")
+      : appRoot;
 
   return DesktopEnvironment.of({
     path,
@@ -201,7 +205,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
     rootDir,
     appRoot,
-    backendEntryPath: path.join(appRoot, "apps/server/dist/bin.mjs"),
+    backendEntryPath: path.join(serverRoot, "apps/server/dist/bin.mjs"),
     backendCwd: input.isPackaged ? homeDirectory : appRoot,
     preloadPath: path.join(input.dirname, "preload.cjs"),
     appUpdateYmlPath: input.isPackaged
