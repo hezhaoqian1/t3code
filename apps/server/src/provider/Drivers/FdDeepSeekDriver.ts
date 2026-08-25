@@ -1,5 +1,5 @@
 // @effect-diagnostics runEffectInsideEffect:off
-import type { ProviderSessionStartInput, ServerProvider } from "@t3tools/contracts";
+import type { ProviderSessionStartInput, RuntimeMode, ServerProvider } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -65,6 +65,7 @@ export const resolveFdLocalToolContext = Effect.fn("resolveFdLocalToolContext")(
   readonly projectWorkspaceRoot: string | undefined;
   readonly officeWorkspaceRoot: string;
   readonly officeModeEnabled: boolean;
+  readonly runtimeMode: RuntimeMode;
 }): Effect.fn.Return<
   { readonly cwd: string; readonly profile: FdLocalToolProfile },
   never,
@@ -80,6 +81,12 @@ export const resolveFdLocalToolContext = Effect.fn("resolveFdLocalToolContext")(
     canonicalOfficeWorkspaceRoot,
     () => input.officeWorkspaceRoot,
   );
+
+  // Office mode keeps the workspace path canonicalized, but only the
+  // supervised access mode stays on the read-only tool set.
+  if (input.runtimeMode !== "approval-required") {
+    return { cwd: safeOfficeWorkspaceRoot, profile: "project" };
+  }
 
   // Missing project provenance is not enough authority to grant write/command
   // tools. This also keeps legacy persisted sessions fail-closed.
@@ -255,6 +262,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
             officeWorkspaceRoot: serverConfig.cwd,
             officeModeEnabled:
               serverConfig.mode === "desktop" && serverConfig.autoBootstrapProjectFromCwd,
+            runtimeMode: input.runtimeMode,
           }).pipe(
             Effect.flatMap((context) => makeFdLocalTools(context.cwd, context.profile)),
             Effect.provideService(FileSystem.FileSystem, fileSystem),

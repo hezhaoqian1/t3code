@@ -127,11 +127,13 @@ describe("FdDeepSeekDriver", () => {
         readonly cwd: string;
         readonly projectWorkspaceRoot: string | undefined;
         readonly officeModeEnabled?: boolean;
+        readonly runtimeMode?: "approval-required" | "auto-accept-edits" | "auto" | "full-access";
       }) =>
         resolveFdLocalToolContext({
           ...input,
           officeWorkspaceRoot: officeRoot,
           officeModeEnabled: input.officeModeEnabled ?? true,
+          runtimeMode: input.runtimeMode ?? "approval-required",
         });
 
       expect(yield* contextFor({ cwd: projectRoot, projectWorkspaceRoot: officeRoot })).toEqual({
@@ -160,6 +162,20 @@ describe("FdDeepSeekDriver", () => {
           officeModeEnabled: false,
         }),
       ).toEqual({ cwd: projectRoot, profile: "project" });
+      expect(
+        yield* contextFor({
+          cwd: projectRoot,
+          projectWorkspaceRoot: officeRoot,
+          runtimeMode: "full-access",
+        }),
+      ).toEqual({ cwd: canonicalOfficeRoot, profile: "project" });
+      expect(
+        yield* contextFor({
+          cwd: projectRoot,
+          projectWorkspaceRoot: officeRoot,
+          runtimeMode: "auto",
+        }),
+      ).toEqual({ cwd: canonicalOfficeRoot, profile: "project" });
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
