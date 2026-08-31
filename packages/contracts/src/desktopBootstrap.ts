@@ -20,6 +20,7 @@ export const DesktopBackendBootstrap = Schema.Struct({
   fdConnectorBinPath: Schema.optionalKey(TrimmedNonEmptyString),
   fdConnectorConfigDir: Schema.optionalKey(TrimmedNonEmptyString),
   fdConnectorStatePath: Schema.optionalKey(TrimmedNonEmptyString),
+  fdPresentationSkillRoot: Schema.optionalKey(TrimmedNonEmptyString),
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
 
 export type DesktopBackendBootstrap = typeof DesktopBackendBootstrap.Type;

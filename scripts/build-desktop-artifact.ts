@@ -646,6 +646,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/prod-resources/codex",
     to: "codex",
   },
+  {
+    from: "apps/desktop/resources/presentation",
+    to: "presentation",
+  },
 ] as const;
 
 export function resolveCodexRuntimePackage(

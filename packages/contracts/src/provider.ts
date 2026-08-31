@@ -22,6 +22,7 @@ import {
   RuntimeMode,
 } from "./orchestration.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
+import { PresentationTurnSelection } from "./presentation.ts";
 
 const ProviderSessionStatus = Schema.Literals([
   "connecting",
@@ -70,6 +71,9 @@ export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
   fdSkillVersionId: Schema.optional(PositiveInt),
+  /** Internal one-turn local Skill selection; never included in user text. */
+  nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  presentation: Schema.optional(PresentationTurnSelection),
   // Stable across retries of the same accepted orchestration command. Only
   // the FD Enterprise transport uses this value for idempotent replay.
   idempotencyKey: Schema.optional(

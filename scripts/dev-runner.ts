@@ -271,6 +271,7 @@ export function createDevRunnerEnv({
   devUrl,
 }: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
   return Effect.gen(function* () {
+    const path = yield* Path.Path;
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
     // Precedence (--home-dir > worktree .t3 > ambient T3CODE_HOME) is resolved
@@ -286,6 +287,21 @@ export function createDevRunnerEnv({
         devUrl?.toString() ??
         `http://${isDesktopMode ? DESKTOP_DEV_LOOPBACK_HOST : "localhost"}:${webPort}`,
     };
+
+    // Keep Vite+ child processes on the same Node runtime as the runner. This
+    // matters on machines where the login shell exposes an older system Node
+    // (the `vp` shim resolves `node` from PATH for its own subprocesses).
+    const runnerNodeDir = path.dirname(process.execPath);
+    const inheritedPath = output.PATH ?? output.Path ?? output.path;
+    if (runnerNodeDir && inheritedPath) {
+      const pathDelimiter = process.platform === "win32" ? ";" : ":";
+      const pathEntries = inheritedPath.split(pathDelimiter);
+      if (!pathEntries.includes(runnerNodeDir)) {
+        output.PATH = [runnerNodeDir, ...pathEntries].join(pathDelimiter);
+      }
+    } else if (runnerNodeDir) {
+      output.PATH = runnerNodeDir;
+    }
 
     delete output.T3CODE_DEV_BROWSER_BOOTSTRAP;
     delete output.T3CODE_DEV_BOOTSTRAP_TOKEN;
@@ -560,6 +576,16 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       port: input.port,
       devUrl: input.devUrl,
     });
+    // `vp` is installed in the workspace rather than globally. Keep its
+    // shim discoverable even when the runtime PATH was intentionally reduced
+    // to the bundled Node distribution.
+    const path = yield* Path.Path;
+    const workspaceBinDir = path.join(yield* HostProcessWorkingDirectory, "node_modules", ".bin");
+    const pathDelimiter = process.platform === "win32" ? ";" : ":";
+    const currentPath = env.PATH ?? env.Path ?? env.path ?? "";
+    if (!currentPath.split(pathDelimiter).includes(workspaceBinDir)) {
+      env.PATH = currentPath ? `${workspaceBinDir}${pathDelimiter}${currentPath}` : workspaceBinDir;
+    }
 
     const selectionSuffix =
       serverOffset !== offset || webOffset !== offset

@@ -96,6 +96,7 @@ export class ServerConfig extends Context.Service<
     readonly fdConnectorBinPath?: string | undefined;
     readonly fdConnectorConfigDir?: string | undefined;
     readonly fdConnectorStatePath?: string | undefined;
+    readonly fdPresentationSkillRoot?: string | undefined;
     readonly autoBootstrapProjectFromCwd: boolean;
     readonly taskWorkspaceRoot?: string | undefined;
     readonly logWebSocketEvents: boolean;
@@ -214,6 +215,7 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     fdConnectorBinPath: undefined,
     fdConnectorConfigDir: undefined,
     fdConnectorStatePath: undefined,
+    fdPresentationSkillRoot: undefined,
     staticDir: undefined,
     devUrl,
     noBrowser: false,

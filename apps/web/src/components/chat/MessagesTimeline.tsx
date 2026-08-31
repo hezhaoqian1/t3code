@@ -14,6 +14,8 @@ import {
 
 const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
+const NOOP_OPEN_PRESENTATION = () => {};
+const NOOP_CONTINUE_PRESENTATION_EDIT = () => {};
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
   createContext,
@@ -37,6 +39,7 @@ import {
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
   workLogEntryIsToolLike,
+  type WorkLogEntry,
 } from "../../session-logic";
 import { type TurnDiffSummary } from "../../types";
 import {
@@ -58,6 +61,10 @@ import {
   MessageCircleIcon,
   MousePointerClickIcon,
   PaintbrushIcon,
+  PresentationIcon,
+  DownloadIcon,
+  FolderOpenIcon,
+  PencilIcon,
   MinusIcon,
   SquarePenIcon,
   TerminalIcon,
@@ -144,6 +151,8 @@ interface TimelineRowSharedState {
   onRevertUserMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenPresentation: (artifact: NonNullable<WorkLogEntry["presentationArtifact"]>) => void;
+  onContinuePresentationEdit: (artifact: NonNullable<WorkLogEntry["presentationArtifact"]>) => void;
   onToggleTurnFold: (turnId: TurnId) => void;
   onToggleWorkGroup: (groupId: string, anchorKey: string) => void;
   agentPanelModel: AgentPanelModel;
@@ -219,6 +228,10 @@ interface MessagesTimelineProps {
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
   routeThreadKey: string;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenPresentation?: (artifact: NonNullable<WorkLogEntry["presentationArtifact"]>) => void;
+  onContinuePresentationEdit?: (
+    artifact: NonNullable<WorkLogEntry["presentationArtifact"]>,
+  ) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
@@ -265,6 +278,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   turnDiffSummaryByAssistantMessageId,
   routeThreadKey,
   onOpenTurnDiff,
+  onOpenPresentation = NOOP_OPEN_PRESENTATION,
+  onContinuePresentationEdit = NOOP_CONTINUE_PRESENTATION_EDIT,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
@@ -543,6 +558,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onOpenPresentation,
+      onContinuePresentationEdit,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -559,6 +576,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       onRevertUserMessage,
       onImageExpand,
       onOpenTurnDiff,
+      onOpenPresentation,
+      onContinuePresentationEdit,
       onToggleTurnFold,
       onToggleWorkGroup,
       agentPanelModel,
@@ -2312,7 +2331,139 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
   if (workEntry.agentSpawn) {
     return <AgentSpawnCtaRow workEntry={workEntry} />;
   }
+  if (workEntry.presentationArtifact) {
+    return <PresentationArtifactCard artifact={workEntry.presentationArtifact} />;
+  }
   return <PlainWorkEntryRow workEntry={workEntry} workspaceRoot={workspaceRoot} />;
+});
+
+const PresentationArtifactCard = memo(function PresentationArtifactCard({
+  artifact,
+}: {
+  artifact: NonNullable<WorkLogEntry["presentationArtifact"]>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const bridge = window.desktopBridge?.presentation;
+    if (!bridge || !artifact.previewPath) return;
+
+    const projectRoot = artifact.projectPath.replaceAll("\\", "/").replace(/\/$/, "");
+    const previewAbsolute = artifact.previewPath.replaceAll("\\", "/");
+    const relativePath = previewAbsolute.startsWith(`${projectRoot}/`)
+      ? previewAbsolute.slice(projectRoot.length + 1)
+      : (previewAbsolute.split("/").pop() ?? "");
+    if (!relativePath) return;
+
+    void bridge
+      .readProject({ projectPath: artifact.projectPath })
+      .then((result) => {
+        if (cancelled) return;
+        const normalized = relativePath.replace(/^\.\//, "");
+        const match = result.files.find(
+          (file) => file.path.replaceAll("\\", "/") === normalized && file.dataUrl,
+        );
+        if (match?.dataUrl) setPreviewUrl(match.dataUrl);
+      })
+      .catch(() => {
+        // A preview is optional; the card remains useful without it.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [artifact.previewPath, artifact.projectPath]);
+
+  const openProject = () => {
+    if (ctx.onOpenPresentation) {
+      ctx.onOpenPresentation(artifact);
+      return;
+    }
+    void window.desktopBridge?.openPath(artifact.projectPath);
+  };
+  const download = async () => {
+    if (!window.desktopBridge?.presentation) return;
+    if (isExporting) return;
+    setIsExporting(true);
+    try {
+      if (artifact.pptxPath) {
+        await window.desktopBridge.openPath(artifact.pptxPath);
+      } else {
+        const result = await window.desktopBridge.presentation.export({
+          projectPath: artifact.projectPath,
+        });
+        await window.desktopBridge.openPath(result.pptxPath);
+      }
+    } catch {
+      // The card remains usable for editing/retry when export is unavailable.
+    } finally {
+      setIsExporting(false);
+    }
+  };
+  return (
+    <section
+      className="my-1 overflow-hidden rounded-xl border border-amber-500/30 bg-card shadow-sm"
+      aria-label="演示文稿"
+    >
+      {previewUrl ? (
+        <div className="border-b border-border/60 bg-muted/20 p-2">
+          <img
+            src={previewUrl}
+            alt={`${artifact.label} 首页预览`}
+            className="mx-auto block max-h-56 w-full rounded-lg object-contain"
+            loading="lazy"
+          />
+        </div>
+      ) : null}
+      <div className="flex items-start gap-3 border-b border-border/60 bg-gradient-to-r from-slate-950 to-slate-900 px-3.5 py-3 text-white">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-400/15 text-amber-300">
+          <PresentationIcon className="size-5" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium text-sm">{artifact.label}</p>
+          <p className="mt-0.5 text-white/65 text-xs">
+            {artifact.pageCount} 页 · 第 {artifact.version} 版 · 可继续编辑
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full border border-emerald-300/25 bg-emerald-300/10 px-2 py-0.5 text-emerald-200 text-[11px]">
+          已就绪
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 px-3.5 py-2.5">
+        <Button type="button" size="xs" variant="default" onClick={openProject}>
+          <PencilIcon className="size-3.5" /> 打开演示
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="outline"
+          onClick={() => ctx.onContinuePresentationEdit?.(artifact)}
+        >
+          <MessageCircleIcon className="size-3.5" /> 继续修改
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          disabled={isExporting}
+          onClick={() => void download()}
+        >
+          <DownloadIcon className="size-3.5" /> {isExporting ? "正在导出…" : "导出 PPTX"}
+        </Button>
+        <Button
+          type="button"
+          size="xs"
+          variant="ghost"
+          onClick={() => void window.desktopBridge?.openPath(artifact.projectPath)}
+        >
+          <FolderOpenIcon className="size-3.5" /> 打开目录
+        </Button>
+      </div>
+    </section>
+  );
 });
 
 const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {

@@ -18,10 +18,11 @@ export const FD_MANAGED_SKILL_IDENTITIES = new Set([
   "company-database-query",
   "company-knowledge-helper",
   "company-report-writing",
+  "fd-presentation-studio",
 ]);
 
-export type NativeSkillScope = "project" | "user";
-export type NativeSkillSource = "agents" | "codex-compat" | "connector";
+export type NativeSkillScope = "project" | "user" | "managed";
+export type NativeSkillSource = "agents" | "codex-compat" | "connector" | "managed";
 
 export interface NativeSkillSummary {
   readonly name: string;
@@ -60,6 +61,7 @@ export interface NativeSkillCatalogOptions {
   readonly projectRoot?: string;
   readonly userHome?: string;
   readonly extraRoots?: ReadonlyArray<string>;
+  readonly managedRoots?: ReadonlyArray<string>;
   readonly nativeSkillsEnabled?: boolean;
   readonly managedSkillNames?: ReadonlySet<string>;
 }
@@ -220,6 +222,14 @@ function configuredRoots(options: NativeSkillCatalogOptions): ReadonlyArray<Skil
       precedence: 4 + index,
     });
   }
+  for (const [index, rootPath] of (options.managedRoots ?? []).entries()) {
+    roots.push({
+      path: rootPath,
+      scope: "managed",
+      source: "managed",
+      precedence: -100 + index,
+    });
+  }
   return roots;
 }
 
@@ -317,7 +327,7 @@ export class NativeSkillCatalog {
           );
           continue;
         }
-        if (managedNames.has(parsed.name)) {
+        if (managedNames.has(parsed.name) && root.source !== "managed") {
           diagnostics.push(
             diagnostic(
               "managed-collision",

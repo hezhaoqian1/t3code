@@ -12,6 +12,7 @@ import {
   RuntimeRequestId,
   ThreadId,
   TurnId,
+  type PresentationTurnSelection,
 } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
@@ -53,6 +54,7 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import type { ProviderAdapterShape, ProviderThreadSnapshot } from "../Services/ProviderAdapter.ts";
+import { discoverPresentationArtifacts } from "../../presentation/PresentationArtifactDiscovery.ts";
 
 export { FD_DEEPSEEK_DRIVER_KIND, FD_DEEPSEEK_INSTANCE_ID } from "../../fd-agent/FdModelPolicy.ts";
 
@@ -76,6 +78,7 @@ interface ActiveTurn {
   readonly userMessage: FdResponsesMessageInputItem;
   readonly instructions: string | undefined;
   readonly fdSkillVersionId: number | undefined;
+  readonly presentation: PresentationTurnSelection | undefined;
   readonly idempotencyKey: string;
   readonly enterpriseGeneration: number;
   cancelRequested: boolean;
@@ -98,6 +101,9 @@ interface FdSessionContext {
   readonly fdSkillCatalog: FdSkillCatalog | undefined;
   readonly enterpriseClient: FdEnterpriseAgentClient | undefined;
   readonly pendingApprovals: Map<string, PendingApproval>;
+  readonly pendingPresentations: Map<TurnId, PresentationTurnSelection>;
+  readonly completedPresentations: Set<TurnId>;
+  pendingPresentation: PresentationTurnSelection | undefined;
   activeTurn: ActiveTurn | undefined;
   stopped: boolean;
 }
@@ -274,23 +280,6 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
   const lifetimeScope = yield* Scope.make("sequential");
   const sessions = new Map<ThreadId, FdSessionContext>();
 
-  if (options.ordinaryAdapter) {
-    yield* Stream.runForEach(options.ordinaryAdapter.streamEvents, (event) => {
-      if (
-        event.type === "thread.started" ||
-        event.type === "session.state.changed" ||
-        event.type === "session.exited"
-      ) {
-        return Effect.void;
-      }
-      return Queue.offer(events, {
-        ...event,
-        provider: FD_DEEPSEEK_DRIVER_KIND,
-        providerInstanceId: instanceId,
-      }).pipe(Effect.asVoid);
-    }).pipe(Effect.forkIn(lifetimeScope));
-  }
-
   const timestamp = () => now().toISOString();
   const eventBase = (threadId: ThreadId, turnId?: TurnId) => ({
     eventId: EventId.make(randomId()),
@@ -302,6 +291,74 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
   });
   const publish = (event: ProviderRuntimeEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
   const publishFromPromise = (event: ProviderRuntimeEvent) => Effect.runPromise(publish(event));
+
+  const publishPresentationArtifacts = async (
+    context: FdSessionContext,
+    turnId: TurnId,
+    presentation: PresentationTurnSelection,
+  ): Promise<void> => {
+    // Desktop office mode may remap the provider's effective cwd to the
+    // isolated office workspace. Discover artifacts where the active provider
+    // session actually executed, falling back to the original project cwd for
+    // legacy sessions and enterprise turns.
+    const discoveryCwd =
+      context.session.cwd ??
+      context.startInput.cwd ??
+      context.startInput.projectWorkspaceRoot ??
+      process.cwd();
+    const artifacts = await discoverPresentationArtifacts({
+      cwd: discoveryCwd,
+      operation: presentation.operation,
+      ...(presentation.artifactId ? { artifactId: presentation.artifactId } : {}),
+    });
+    for (const artifact of artifacts) {
+      await publishFromPromise({
+        ...eventBase(context.session.threadId, turnId),
+        itemId: RuntimeItemId.make(`${turnId}:presentation:${artifact.id}`),
+        type: "item.completed",
+        payload: {
+          itemType: "dynamic_tool_call",
+          status: "completed",
+          title: presentation.operation === "revise" ? "演示文稿已更新" : "演示文稿已生成",
+          data: { presentationArtifact: artifact },
+        },
+      });
+    }
+  };
+
+  if (options.ordinaryAdapter) {
+    yield* Stream.runForEach(options.ordinaryAdapter.streamEvents, (event) =>
+      Effect.gen(function* () {
+        const context = sessions.get(event.threadId);
+        if (event.type === "turn.completed" && event.turnId && context) {
+          const presentation =
+            context.pendingPresentations.get(event.turnId) ?? context.pendingPresentation;
+          context.pendingPresentations.delete(event.turnId);
+          context.pendingPresentation = undefined;
+          if (presentation && event.payload.state === "completed") {
+            context.completedPresentations.add(event.turnId);
+            yield* Effect.promise(() =>
+              publishPresentationArtifacts(context, event.turnId!, presentation),
+            );
+          }
+        } else if (event.type === "turn.aborted" && event.turnId && context) {
+          context.pendingPresentations.delete(event.turnId);
+        }
+        if (
+          event.type === "thread.started" ||
+          event.type === "session.state.changed" ||
+          event.type === "session.exited"
+        ) {
+          return;
+        }
+        yield* Queue.offer(events, {
+          ...event,
+          provider: FD_DEEPSEEK_DRIVER_KIND,
+          providerInstanceId: instanceId,
+        });
+      }),
+    ).pipe(Effect.forkIn(lifetimeScope));
+  }
 
   const requireSession = (
     threadId: ThreadId,
@@ -350,6 +407,9 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
           type: "item.completed",
           payload: { itemType: "assistant_message", status: "completed" },
         });
+      }
+      if (turn.presentation !== undefined) {
+        await publishPresentationArtifacts(context, turn.id, turn.presentation);
       }
       await publishFromPromise({
         ...eventBase(context.session.threadId, turn.id),
@@ -841,6 +901,9 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       enterpriseClient: options.enterpriseClient,
       pendingApprovals: new Map(),
       activeTurn: undefined,
+      pendingPresentations: new Map(),
+      completedPresentations: new Set(),
+      pendingPresentation: undefined,
       stopped: false,
     });
     yield* Queue.offerAll(events, [
@@ -913,6 +976,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       });
     }
     if (options.ordinaryAdapter) {
+      context.pendingPresentation = input.presentation;
       let ordinaryInput = input;
       if (attachments.length > 0) {
         if (!options.resolveAttachments || !options.visionService) {
@@ -1002,7 +1066,19 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
           providerInstanceId: instanceId,
         };
       }
-      const result = yield* options.ordinaryAdapter.sendTurn(ordinaryInput);
+      const result = yield* options.ordinaryAdapter.sendTurn(ordinaryInput).pipe(
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            context.pendingPresentation = undefined;
+          }),
+        ),
+      );
+      if (input.presentation !== undefined) {
+        if (!context.completedPresentations.delete(result.turnId)) {
+          context.pendingPresentations.set(result.turnId, input.presentation);
+        }
+        context.pendingPresentation = undefined;
+      }
       context.session = { ...context.session, model: selectedModel };
       if (result.resumeCursor !== undefined) {
         context.ordinaryResumeCursors.set(requestedProfile, result.resumeCursor);
@@ -1039,7 +1115,9 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     };
     let instructions: string | undefined;
     if (context.nativeSkillCatalog && inputText) {
-      const selectedNames = selectedNativeSkillNames(inputText);
+      const selectedNames = input.nativeSkillNames?.length
+        ? input.nativeSkillNames
+        : selectedNativeSkillNames(inputText);
       if (selectedNames.length > 0) {
         const selectedInstructions = yield* Effect.tryPromise({
           try: () => context.nativeSkillCatalog!.loadSelected(selectedNames),
@@ -1051,6 +1129,15 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
             }),
         });
         instructions = selectedInstructions.join("\n\n");
+        if (input.presentation) {
+          instructions = [
+            instructions,
+            "本轮由方德演示工作流触发。请严格按 Skill 生成可交付的 PPTD 项目与 PPTX。",
+            input.presentation.operation === "revise"
+              ? `这是对当前线程已有演示文稿的修改（artifactId: ${input.presentation.artifactId ?? "最近版本"}）。请在 presentations 目录中定位并原地更新对应项目，保持可编辑结构。`
+              : "这是新建演示文稿。请将项目放在当前任务工作区的 presentations/<short-slug>/ 目录。",
+          ].join("\n\n");
+        }
       }
     }
     const turnId = TurnId.make(randomId());
@@ -1062,6 +1149,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       userMessage,
       instructions,
       fdSkillVersionId: input.fdSkillVersionId,
+      presentation: input.presentation,
       idempotencyKey:
         input.fdSkillVersionId === undefined
           ? randomId()

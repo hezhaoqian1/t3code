@@ -111,6 +111,14 @@ import type {
   FdConnectorState,
 } from "./fd/connectors.ts";
 import type { FdUsageSummary } from "./fd/usage.ts";
+import type {
+  PresentationExportInput as PresentationExportInputType,
+  PresentationExportResult as PresentationExportResultType,
+  PresentationOpenInput as PresentationOpenInputType,
+  PresentationReadProjectInput as PresentationReadProjectInputType,
+  PresentationReadProjectResult as PresentationReadProjectResultType,
+  PresentationWriteFileInput as PresentationWriteFileInputType,
+} from "./presentation.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -858,6 +866,14 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  presentation?: {
+    export: (input: PresentationExportInputType) => Promise<PresentationExportResultType>;
+    open: (input: PresentationOpenInputType) => Promise<void>;
+    readProject: (
+      input: PresentationReadProjectInputType,
+    ) => Promise<PresentationReadProjectResultType>;
+    writeFile: (input: PresentationWriteFileInputType) => Promise<void>;
+  };
   /**
    * Desktop-only preview surface. Present iff the renderer is hosted by the
    * Electron desktop build; web builds have `preview === undefined`.

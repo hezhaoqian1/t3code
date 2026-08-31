@@ -972,6 +972,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.fdSkillVersionId !== undefined
             ? { fdSkillVersionId: command.fdSkillVersionId }
             : {}),
+          ...(command.nativeSkillNames !== undefined
+            ? { nativeSkillNames: command.nativeSkillNames }
+            : {}),
+          ...(command.presentation !== undefined ? { presentation: command.presentation } : {}),
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),

@@ -220,6 +220,13 @@ export const make = Effect.gen(function* () {
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
     const taskWorkspaceRoot = environment.path.join(environment.homeDirectory, "FangdeAI", "Tasks");
+    const presentationResourcesRoot = environment.isPackaged
+      ? environment.path.join(environment.resourcesPath, "presentation")
+      : environment.path.join(environment.rootDir, "apps/desktop/resources/presentation");
+    const presentationSkillRoot = environment.path.join(
+      presentationResourcesRoot,
+      "fd-presentation-studio",
+    );
     const connectorRoot = environment.path.join(environment.stateDir, "connectors");
     const feishuConnectorRoot = environment.path.join(connectorRoot, "feishu");
     const feishuConnectorResources = resolveFeishuConnectorResources(environment);
@@ -248,6 +255,8 @@ export const make = Effect.gen(function* () {
           inheritedEnv: process.env,
         }),
         ELECTRON_RUN_AS_NODE: "1",
+        FD_PRESENTATION_NODE: process.execPath,
+        FD_PRESENTATION_SKILL_ROOT: presentationSkillRoot,
         ...Option.match(bundledCodexBinaryPath, {
           onNone: () => ({}),
           onSome: (value) => ({ FD_CODEX_BINARY: value }),
@@ -269,6 +278,7 @@ export const make = Effect.gen(function* () {
         fdConnectorBinPath: feishuConnectorBinPath,
         fdConnectorConfigDir: environment.path.join(feishuConnectorRoot, "config"),
         fdConnectorStatePath: environment.path.join(feishuConnectorRoot, "connector-state.json"),
+        fdPresentationSkillRoot: presentationResourcesRoot,
         ...Option.match(resourceMonitorPath, {
           onNone: () => ({}),
           onSome: (value) => ({ resourceMonitorPath: value }),

@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off
 import { describe, expect, it, vi } from "@effect/vitest";
 import {
   ApprovalRequestId,
@@ -13,7 +14,11 @@ import {
   FD_RUNTIME_VISION_MODEL,
 } from "@t3tools/contracts/fd/runtime-credentials";
 import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 
 import {
@@ -1642,6 +1647,99 @@ describe("FdDeepSeekAdapter", () => {
           fdSkillVersionId: 10004,
         });
       }),
+  );
+
+  it.effect("publishes a presentation artifact for an ordinary Codex turn", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() =>
+        fs.mkdtemp(path.join(os.tmpdir(), "fd-presentation-turn-")),
+      );
+      const hostProjectRoot = path.join(root, "host-project");
+      const project = path.join(root, "presentations", "market-review");
+      yield* Effect.promise(() => fs.mkdir(hostProjectRoot, { recursive: true }));
+      yield* Effect.promise(() => fs.mkdir(path.join(project, "pages"), { recursive: true }));
+      yield* Effect.promise(() =>
+        fs.writeFile(
+          path.join(project, "market-review.pptd"),
+          "version: v3\npages:\n  - pages/1.page\n  - pages/2.page\n",
+        ),
+      );
+      const eventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+      const codexProvider = ProviderDriverKind.make("codex");
+      const codexTurnId = TurnId.make("codex-presentation-turn");
+      const ordinaryAdapter: ProviderAdapterShape<never> = {
+        provider: codexProvider,
+        capabilities: { sessionModelSwitch: "in-session" },
+        startSession: (input) =>
+          Effect.succeed({
+            provider: codexProvider,
+            providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+            status: "ready" as const,
+            runtimeMode: input.runtimeMode,
+            cwd: root,
+            model: "deepseek-v4-flash",
+            threadId: input.threadId,
+            createdAt: "2026-08-11T00:00:00.000Z",
+            updatedAt: "2026-08-11T00:00:00.000Z",
+          }),
+        sendTurn: (input) => Effect.succeed({ threadId: input.threadId, turnId: codexTurnId }),
+        interruptTurn: () => Effect.void,
+        respondToRequest: () => Effect.void,
+        respondToUserInput: () => Effect.void,
+        stopSession: () => Effect.void,
+        listSessions: () => Effect.succeed([]),
+        hasSession: () => Effect.succeed(false),
+        readThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        rollbackThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        stopAll: () => Effect.void,
+        streamEvents: Stream.fromQueue(eventQueue),
+      };
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([])),
+        ordinaryAdapter,
+      });
+      const events: ProviderRuntimeEvent[] = [];
+      yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => events.push(event)),
+      ).pipe(Effect.forkChild);
+      // The desktop host may start the provider with the registered project
+      // cwd while the ordinary adapter remaps execution to its office cwd.
+      yield* adapter.startSession({ ...startInput, cwd: hostProjectRoot });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "请生成演示文稿",
+        presentation: { operation: "create" },
+      });
+      yield* Queue.offer(eventQueue, {
+        eventId: EventId.make("codex-presentation-complete"),
+        provider: codexProvider,
+        threadId,
+        turnId: turn.turnId,
+        createdAt: "2026-08-11T00:00:01.000Z",
+        type: "turn.completed",
+        payload: { state: "completed" },
+      });
+      const hasPresentationArtifact = (event: ProviderRuntimeEvent) =>
+        event.type === "item.completed" &&
+        Boolean(
+          (event.payload as { readonly data?: { readonly presentationArtifact?: unknown } }).data
+            ?.presentationArtifact,
+        );
+      yield* waitFor(() => events.some(hasPresentationArtifact));
+      const artifactEvent = events.find(hasPresentationArtifact);
+      expect(artifactEvent).toMatchObject({
+        provider: FD_DEEPSEEK_DRIVER_KIND,
+        turnId: codexTurnId,
+        payload: {
+          data: {
+            presentationArtifact: { label: "market review", version: 3, operation: "create" },
+          },
+        },
+      });
+      yield* Effect.promise(() => fs.rm(root, { recursive: true, force: true }));
+    }),
   );
 
   it.effect("preprocesses ordinary images and keeps the Codex runtime profile unchanged", () =>

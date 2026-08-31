@@ -472,6 +472,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         from: "apps/desktop/prod-resources/codex",
         to: "codex",
       },
+      {
+        from: "apps/desktop/resources/presentation",
+        to: "presentation",
+      },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [
       "aarch64-apple-darwin",

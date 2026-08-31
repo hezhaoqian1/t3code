@@ -47,6 +47,19 @@ export interface WorkLogEntry {
   toolLifecycleStatus?: WorkLogToolLifecycleStatus;
   /** Originating orchestration activity kind (e.g. `user-input.requested`) for row chrome. */
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
+  /** A completed presentation project discovered by the managed presentation Skill. */
+  presentationArtifact?: {
+    id: string;
+    label: string;
+    projectPath: string;
+    pptdPath: string;
+    pptxPath?: string;
+    previewPath?: string;
+    pageCount: number;
+    version: number;
+    operation: "create" | "revise";
+    updatedAt: string;
+  };
   /** Grouping key for subagent lifecycle rows (one row per agent). */
   taskId?: string;
   /** Agent role (subagent_type) for labeled timeline rows. */
@@ -834,6 +847,38 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     if (data?.item !== undefined) {
       entry.toolData = data.item;
     }
+  }
+  const activityData = asRecord(payload?.data);
+  const presentationArtifact = asRecord(activityData?.presentationArtifact);
+  if (
+    presentationArtifact &&
+    typeof presentationArtifact.id === "string" &&
+    typeof presentationArtifact.projectPath === "string" &&
+    typeof presentationArtifact.pptdPath === "string" &&
+    typeof presentationArtifact.pageCount === "number" &&
+    typeof presentationArtifact.version === "number" &&
+    (presentationArtifact.operation === "create" || presentationArtifact.operation === "revise")
+  ) {
+    entry.presentationArtifact = {
+      id: presentationArtifact.id,
+      label:
+        typeof presentationArtifact.label === "string" ? presentationArtifact.label : "演示文稿",
+      projectPath: presentationArtifact.projectPath,
+      pptdPath: presentationArtifact.pptdPath,
+      ...(typeof presentationArtifact.pptxPath === "string"
+        ? { pptxPath: presentationArtifact.pptxPath }
+        : {}),
+      ...(typeof presentationArtifact.previewPath === "string"
+        ? { previewPath: presentationArtifact.previewPath }
+        : {}),
+      pageCount: presentationArtifact.pageCount,
+      version: presentationArtifact.version,
+      operation: presentationArtifact.operation,
+      updatedAt:
+        typeof presentationArtifact.updatedAt === "string"
+          ? presentationArtifact.updatedAt
+          : activity.createdAt,
+    };
   }
   if (itemType) {
     entry.itemType = itemType;

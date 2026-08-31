@@ -289,6 +289,7 @@ export const resolveServerConfig = (
     const fdConnectorBinPath = bootstrap?.fdConnectorBinPath ?? env.connectorBinPath;
     const fdConnectorConfigDir = bootstrap?.fdConnectorConfigDir ?? env.connectorConfigDir;
     const fdConnectorStatePath = bootstrap?.fdConnectorStatePath ?? env.connectorStatePath;
+    const fdPresentationSkillRoot = bootstrap?.fdPresentationSkillRoot;
     const autoBootstrapProjectFromCwd = Option.getOrElse(
       resolveOptionPrecedence(
         normalizedFlags.autoBootstrapProjectFromCwd,
@@ -343,6 +344,7 @@ export const resolveServerConfig = (
       fdConnectorBinPath,
       fdConnectorConfigDir,
       fdConnectorStatePath,
+      fdPresentationSkillRoot,
       autoBootstrapProjectFromCwd,
       taskWorkspaceRoot: bootstrap?.taskWorkspaceRoot ?? env.taskWorkspaceRoot,
       logWebSocketEvents,

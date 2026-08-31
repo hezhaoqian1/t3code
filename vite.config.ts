@@ -39,6 +39,7 @@ export default defineConfig({
       "apps/web/public/mockServiceWorker.js",
       "apps/web/src/lib/vendor/qrcodegen.ts",
       "apps/desktop/resources/connectors/feishu/skills/**",
+      "apps/desktop/resources/presentation/fd-presentation-studio/editor/neo-ppt/**",
       "*.icon/**",
     ],
     sortPackageJson: {},

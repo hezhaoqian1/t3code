@@ -26,6 +26,7 @@ import {
 import * as PreviewIpc from "./methods/preview.ts";
 import * as AccountIpc from "./methods/account.ts";
 import * as ConnectorIpc from "./methods/connectors.ts";
+import * as PresentationIpc from "./methods/presentation.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
@@ -61,5 +62,8 @@ export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers"
   }
   for (const connectorMethod of ConnectorIpc.methods) {
     yield* ipc.handle(connectorMethod);
+  }
+  for (const presentationMethod of PresentationIpc.methods) {
+    yield* ipc.handle(presentationMethod);
   }
 });

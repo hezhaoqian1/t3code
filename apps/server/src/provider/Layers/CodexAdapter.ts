@@ -87,6 +87,7 @@ export interface CodexAdapterLiveOptions {
   readonly resolveTurnSkills?: (input: {
     readonly cwd: string;
     readonly prompt: string;
+    readonly nativeSkillNames?: ReadonlyArray<string>;
   }) => Effect.Effect<
     ReadonlyArray<{ readonly name: string; readonly path: string }>,
     ProviderAdapterRequestError
@@ -1852,7 +1853,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     const session = yield* requireSession(input.threadId);
     const codexSkills =
       input.input !== undefined && options?.resolveTurnSkills
-        ? yield* options.resolveTurnSkills({ cwd: session.cwd, prompt: input.input })
+        ? yield* options.resolveTurnSkills({
+            cwd: session.cwd,
+            prompt: input.input,
+            ...(input.nativeSkillNames ? { nativeSkillNames: input.nativeSkillNames } : {}),
+          })
         : [];
     const reasoningEffort =
       input.modelSelection?.instanceId === boundInstanceId

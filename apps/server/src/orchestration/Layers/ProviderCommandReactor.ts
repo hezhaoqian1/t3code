@@ -731,6 +731,11 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly messageText: string;
     readonly fdSkillVersionId?: number;
+    readonly nativeSkillNames?: ReadonlyArray<string>;
+    readonly presentation?: {
+      readonly operation: "create" | "revise";
+      readonly artifactId?: string | undefined;
+    };
     readonly idempotencyKey?: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
@@ -828,6 +833,8 @@ const make = Effect.gen(function* () {
     return {
       threadId: input.threadId,
       ...(input.fdSkillVersionId !== undefined ? { fdSkillVersionId: input.fdSkillVersionId } : {}),
+      ...(input.nativeSkillNames !== undefined ? { nativeSkillNames: input.nativeSkillNames } : {}),
+      ...(input.presentation !== undefined ? { presentation: input.presentation } : {}),
       ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
       ...(inputWithDocuments ? { input: inputWithDocuments } : {}),
       ...(providerAttachments.length > 0 ? { attachments: providerAttachments } : {}),
@@ -1210,6 +1217,12 @@ const make = Effect.gen(function* () {
         : {}),
       ...(event.payload.fdSkillVersionId !== undefined
         ? { fdSkillVersionId: event.payload.fdSkillVersionId }
+        : {}),
+      ...(event.payload.nativeSkillNames !== undefined
+        ? { nativeSkillNames: event.payload.nativeSkillNames }
+        : {}),
+      ...(event.payload.presentation !== undefined
+        ? { presentation: event.payload.presentation }
         : {}),
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
       ...(event.payload.modelSelection !== undefined

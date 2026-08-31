@@ -103,6 +103,7 @@ import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { ComposerAddMenu } from "./ComposerAddMenu";
+import { PresentationAction } from "./PresentationAction";
 import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { searchSlashCommandItems } from "./composerSlashCommandSearch";
@@ -482,6 +483,10 @@ export interface ChatComposerHandle {
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Remove current-turn document files after a successful dispatch. */
   clearDocuments: () => void;
+  /** Clear one-turn native Skill selection after a successful dispatch. */
+  clearNativeSkillSelection: () => void;
+  /** Select a generated presentation as the target of the next turn. */
+  selectPresentationArtifact: (artifactId: string) => void;
   /** Get the current prompt/effort/model state for use in send. */
   getSendContext: () => {
     prompt: string;
@@ -495,6 +500,8 @@ export interface ChatComposerHandle {
     providerAvailable: boolean;
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
+    nativeSkillNames: ReadonlyArray<string>;
+    presentation?: { readonly operation: "create" | "revise"; readonly artifactId?: string };
   };
 }
 
@@ -942,6 +949,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const [composerMenuAnchor, setComposerMenuAnchor] = useState<HTMLDivElement | null>(null);
   const [isStashMenuOpen, setIsStashMenuOpen] = useState(false);
   const [fdSkillPickerOpenRequest, setFdSkillPickerOpenRequest] = useState(0);
+  const [presentationOpen, setPresentationOpen] = useState(false);
+  const [nativeSkillNames, setNativeSkillNames] = useState<ReadonlyArray<string>>([]);
+  const [presentationOperation, setPresentationOperation] = useState<"create" | "revise" | null>(
+    null,
+  );
+  const [presentationArtifactId, setPresentationArtifactId] = useState<string | null>(null);
   const [stashPulse, setStashPulse] = useState<{ key: number; active: boolean }>({
     key: 0,
     active: false,
@@ -1200,6 +1213,39 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setComposerDraftPrompt(composerDraftTarget, nextPrompt);
     },
     [composerDraftTarget, setComposerDraftPrompt],
+  );
+
+  const startPresentation = useCallback(
+    (presentationPrompt: string) => {
+      const current = promptRef.current.trim();
+      const next =
+        current.length > 0 ? `${presentationPrompt}\n\n补充要求：\n${current}` : presentationPrompt;
+      promptRef.current = next;
+      setNativeSkillNames(["fd-presentation-studio"]);
+      setPresentationOperation("create");
+      setPresentationArtifactId(null);
+      setComposerDraftPrompt(composerDraftTarget, next);
+      setComposerCursor(collapseExpandedComposerCursor(next, next.length));
+      setComposerTrigger(null);
+      window.setTimeout(() => composerEditorRef.current?.focus(), 0);
+    },
+    [composerDraftTarget, setComposerDraftPrompt],
+  );
+
+  const selectPresentationArtifact = useCallback(
+    (artifactId: string) => {
+      const current = promptRef.current.trim();
+      const next = current.length > 0 ? current : "请继续修改这份演示文稿";
+      promptRef.current = next;
+      setNativeSkillNames(["fd-presentation-studio"]);
+      setPresentationOperation("revise");
+      setPresentationArtifactId(artifactId);
+      setComposerDraftPrompt(composerDraftTarget, next);
+      setComposerCursor(collapseExpandedComposerCursor(next, next.length));
+      setComposerTrigger(null);
+      window.setTimeout(() => composerEditorRef.current?.focusAtEnd(), 0);
+    },
+    [composerDraftTarget, setComposerDraftPrompt, promptRef],
   );
 
   const addComposerImage = useCallback(
@@ -2590,6 +2636,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
       },
       clearDocuments: () => setComposerDocuments([]),
+      clearNativeSkillSelection: () => {
+        setNativeSkillNames([]);
+        setPresentationOperation(null);
+        setPresentationArtifactId(null);
+      },
+      selectPresentationArtifact,
       getSendContext: () => ({
         prompt: promptRef.current,
         images: composerImagesRef.current,
@@ -2602,6 +2654,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         providerAvailable: !noProviderAvailable,
         selectedProvider,
         selectedModel,
+        nativeSkillNames,
+        ...(presentationOperation
+          ? {
+              presentation: {
+                operation: presentationOperation,
+                ...(presentationArtifactId ? { artifactId: presentationArtifactId } : {}),
+              },
+            }
+          : {}),
       }),
     }),
     [
@@ -2625,6 +2686,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       readComposerSnapshot,
       selectedModel,
       selectedModelSelection,
+      nativeSkillNames,
+      presentationOperation,
+      presentationArtifactId,
+      selectPresentationArtifact,
       noProviderAvailable,
       selectedProvider,
     ],
@@ -3171,6 +3236,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   }
                   onOpenLocalSkills={() => openComposerTrigger("$")}
                   onOpenConnectors={() => void navigate({ to: "/connectors" })}
+                  onOpenPresentation={() => setPresentationOpen(true)}
+                />
+
+                <PresentationAction
+                  open={presentationOpen}
+                  onOpenChange={setPresentationOpen}
+                  onStart={startPresentation}
+                  disabled={!activeThreadId}
                 />
 
                 {noProviderAvailable ? (

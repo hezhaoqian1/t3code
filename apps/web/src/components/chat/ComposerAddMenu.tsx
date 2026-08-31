@@ -7,6 +7,7 @@ import {
   ShieldCheckIcon,
   SparklesIcon,
   SquareTerminalIcon,
+  PresentationIcon,
 } from "lucide-react";
 import { memo } from "react";
 
@@ -32,6 +33,7 @@ export const ComposerAddMenu = memo(function ComposerAddMenu(props: {
   readonly onOpenFdSkills: () => void;
   readonly onOpenLocalSkills: () => void;
   readonly onOpenConnectors: () => void;
+  readonly onOpenPresentation: () => void;
 }) {
   const connectorDescription = props.connectorState.available
     ? props.connectorState.status === "connected"
@@ -92,6 +94,15 @@ export const ComposerAddMenu = memo(function ComposerAddMenu(props: {
           <span className="min-w-0 flex-1">
             <span className="block">引用工作区文件</span>
             <span className="block text-[11px] text-muted-foreground">搜索并插入 @ 文件引用</span>
+          </span>
+        </MenuItem>
+        <MenuItem onClick={props.onOpenPresentation}>
+          <PresentationIcon />
+          <span className="min-w-0 flex-1">
+            <span className="block">制作 PPT</span>
+            <span className="block text-[11px] text-muted-foreground">
+              将当前材料整理为可编辑演示文稿
+            </span>
           </span>
         </MenuItem>
         <MenuItem onClick={props.onOpenTerminal}>

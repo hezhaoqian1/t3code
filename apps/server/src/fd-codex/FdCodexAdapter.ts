@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off
+// @effect-diagnostics nodeBuiltinImport:off,runEffectInsideEffect:off
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { ProviderInstanceId } from "@t3tools/contracts";
@@ -19,17 +19,22 @@ import { prepareFdManagedCodexHome } from "./FdManagedCodexHome.ts";
 export async function resolveFdCodexTurnSkills(input: {
   readonly cwd: string;
   readonly prompt: string;
+  readonly nativeSkillNames?: ReadonlyArray<string>;
   readonly userHome?: string;
   readonly extraRoots?: ReadonlyArray<string>;
+  readonly managedRoots?: ReadonlyArray<string>;
   readonly connectorStatePath?: string | undefined;
 }): Promise<ReadonlyArray<{ readonly name: string; readonly path: string }>> {
-  const selectedNames = selectedNativeSkillNames(input.prompt);
+  const selectedNames = input.nativeSkillNames?.length
+    ? input.nativeSkillNames
+    : selectedNativeSkillNames(input.prompt);
   if (selectedNames.length === 0) return [];
   const connectorEnabled = await readConnectorEnabled(input.connectorStatePath);
 
   const catalog = new NativeSkillCatalog({
     projectRoot: input.cwd,
     extraRoots: connectorEnabled ? (input.extraRoots ?? []) : [],
+    ...(input.managedRoots ? { managedRoots: input.managedRoots } : {}),
     ...(input.userHome ? { userHome: input.userHome } : {}),
   });
   const snapshot = await catalog.refresh();
@@ -47,6 +52,7 @@ export async function prepareFdCodexRuntime(input: {
   readonly connectorBinPath?: string | undefined;
   readonly connectorConfigDir?: string | undefined;
   readonly connectorStatePath?: string | undefined;
+  readonly presentationSkillRoot?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
 }): Promise<{
   readonly environment: NodeJS.ProcessEnv;
@@ -59,11 +65,13 @@ export async function prepareFdCodexRuntime(input: {
     codexHome,
     newApiOrigin: input.credentials.newApiOrigin,
   });
+  const skillExtraRoots = [
+    ...(input.presentationSkillRoot ? [input.presentationSkillRoot] : []),
+    ...(connectorEnabled && input.connectorSkillsRoot ? [input.connectorSkillsRoot] : []),
+  ];
   return {
     homePath: codexHome,
-    ...(connectorEnabled && input.connectorSkillsRoot
-      ? { skillExtraRoots: [input.connectorSkillsRoot] }
-      : {}),
+    ...(skillExtraRoots.length > 0 ? { skillExtraRoots } : {}),
     environment: makeFdCodexChildEnvironment({
       codexHome,
       runtimeApiKey: input.credentials.runtimeApiKey,
@@ -80,8 +88,10 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
 }) {
   const credentials = yield* FdRuntimeCredentialStore;
   const serverConfig = yield* ServerConfig;
+  const credentialsContext = yield* Effect.context<FdRuntimeCredentialStore>();
+  const runCredentialPromise = Effect.runPromiseWith(credentialsContext);
   const enterpriseClient = new FdEnterpriseCodexClient({
-    credentials: () => Effect.runPromise(credentials.current).then(Option.getOrUndefined),
+    credentials: () => runCredentialPromise(credentials.current).then(Option.getOrUndefined),
   });
 
   return yield* makeCodexAdapter(
@@ -111,6 +121,7 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
                 connectorBinPath: serverConfig.fdConnectorBinPath,
                 connectorConfigDir: serverConfig.fdConnectorConfigDir,
                 connectorStatePath: serverConfig.fdConnectorStatePath,
+                presentationSkillRoot: serverConfig.fdPresentationSkillRoot,
               }),
             catch: () =>
               new ProviderAdapterRequestError({
@@ -128,6 +139,9 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
               connectorStatePath: serverConfig.fdConnectorStatePath,
               extraRoots: serverConfig.fdConnectorSkillsRoot
                 ? [serverConfig.fdConnectorSkillsRoot]
+                : [],
+              managedRoots: serverConfig.fdPresentationSkillRoot
+                ? [serverConfig.fdPresentationSkillRoot]
                 : [],
             }),
           catch: () =>

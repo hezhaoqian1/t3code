@@ -116,6 +116,7 @@ export const resolveFdOrdinarySessionInput = Effect.fn("resolveFdOrdinarySession
       projectWorkspaceRoot: input.session.projectWorkspaceRoot,
       officeWorkspaceRoot: input.officeWorkspaceRoot,
       officeModeEnabled: input.officeModeEnabled,
+      runtimeMode: input.session.runtimeMode,
     });
 
     // The office profile limits which local tools exist; it must not silently

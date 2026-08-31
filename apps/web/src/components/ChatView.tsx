@@ -242,6 +242,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { detectPresentationIntent } from "./chat/presentationIntent";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -4628,6 +4629,8 @@ function ChatViewContent(props: ChatViewProps) {
       reviewComments: composerReviewComments,
       selectedModel: ctxSelectedModel,
       selectedModelSelection: ctxSelectedModelSelection,
+      nativeSkillNames: selectedNativeSkillNames,
+      presentation: selectedPresentation,
     } = sendCtx;
     const composerImages =
       directAnnotation?.image &&
@@ -4650,6 +4653,14 @@ function ChatViewContent(props: ChatViewProps) {
           ]
         : sendContextPreviewAnnotations;
     const promptForSend = promptRef.current;
+    const inferredPresentationIntent = detectPresentationIntent(promptForSend);
+    const nativeSkillNames =
+      selectedNativeSkillNames.length > 0
+        ? selectedNativeSkillNames
+        : inferredPresentationIntent
+          ? ["fd-presentation-studio"]
+          : [];
+    const presentation = selectedPresentation ?? inferredPresentationIntent;
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -4988,6 +4999,8 @@ function ChatViewContent(props: ChatViewProps) {
             attachments: turnAttachmentsResult.value,
           },
           ...(fdSkillVersionId !== undefined ? { fdSkillVersionId } : {}),
+          ...(nativeSkillNames.length > 0 ? { nativeSkillNames } : {}),
+          ...(presentation ? { presentation } : {}),
           modelSelection: ctxSelectedModelSelection,
           ...(fdSkillVersionId === undefined ? { titleSeed: title } : {}),
           runtimeMode,
@@ -5001,6 +5014,7 @@ function ChatViewContent(props: ChatViewProps) {
       } else {
         turnStartSucceeded = true;
         composerRef.current?.clearDocuments();
+        composerRef.current?.clearNativeSkillSelection();
         acknowledgeActiveThreadWoke();
       }
     }
@@ -5057,6 +5071,23 @@ function ChatViewContent(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+
+  const onOpenPresentation = useCallback((artifact: { projectPath: string; pptxPath?: string }) => {
+    const bridge = window.desktopBridge;
+    if (!bridge) return;
+    if (bridge.presentation?.open) {
+      void bridge.presentation.open({ projectPath: artifact.projectPath });
+    } else {
+      void bridge.openPath(artifact.projectPath);
+    }
+  }, []);
+
+  const onContinuePresentationEdit = useCallback(
+    (artifact: { id: string }) => {
+      composerRef.current?.selectPresentationArtifact(artifact.id);
+    },
+    [composerRef],
+  );
 
   const onInterrupt = async () => {
     if (!activeThread) return;
@@ -5816,6 +5847,8 @@ function ChatViewContent(props: ChatViewProps) {
                 activeThreadEnvironmentId={activeThread.environmentId}
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
+                onOpenPresentation={onOpenPresentation}
+                onContinuePresentationEdit={onContinuePresentationEdit}
                 revertTurnCountByUserMessageId={
                   isOfficeMode ? EMPTY_REVERT_TURN_COUNTS : revertTurnCountByUserMessageId
                 }

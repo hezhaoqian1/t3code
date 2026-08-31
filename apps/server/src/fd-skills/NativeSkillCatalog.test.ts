@@ -46,7 +46,7 @@ afterEach(async () => {
 });
 
 describe("NativeSkillCatalog", () => {
-  it("parses all four original ZIP Skills", async () => {
+  it("parses the managed first-party Skills", async () => {
     const project = await makeTempDirectory();
     const root = NodePath.join(project, ".agents", "skills");
     for (const name of FD_MANAGED_SKILL_IDENTITIES) await copyFixtureSkill(root, name);
@@ -62,6 +62,7 @@ describe("NativeSkillCatalog", () => {
       "company-database-query",
       "company-knowledge-helper",
       "company-report-writing",
+      "fd-presentation-studio",
     ]);
     expect(snapshot.skills).toHaveLength(FD_MANAGED_SKILL_IDENTITIES.size);
     expect(snapshot.diagnostics).toEqual([]);

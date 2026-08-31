@@ -160,6 +160,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(IpcChannels.UPDATE_STATE_CHANNEL, wrappedListener);
     };
   },
+  presentation: {
+    export: (input) => ipcRenderer.invoke(IpcChannels.PRESENTATION_EXPORT_CHANNEL, input),
+    open: (input) => ipcRenderer.invoke(IpcChannels.PRESENTATION_OPEN_CHANNEL, input),
+    readProject: (input) =>
+      ipcRenderer.invoke(IpcChannels.PRESENTATION_READ_PROJECT_CHANNEL, input),
+    writeFile: (input) => ipcRenderer.invoke(IpcChannels.PRESENTATION_WRITE_FILE_CHANNEL, input),
+  },
   preview: {
     createTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CREATE_TAB_CHANNEL, { tabId }),
     closeTab: (tabId) => ipcRenderer.invoke(IpcChannels.PREVIEW_CLOSE_TAB_CHANNEL, { tabId }),

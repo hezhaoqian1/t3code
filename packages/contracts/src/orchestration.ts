@@ -21,6 +21,7 @@ import {
   TurnId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { PresentationTurnSelection } from "./presentation.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -800,6 +801,9 @@ export const ThreadTurnStartCommand = Schema.Struct({
     attachments: Schema.Array(ChatAttachment),
   }),
   fdSkillVersionId: Schema.optional(PositiveInt),
+  /** Internal one-turn local Skill selection; never included in user text. */
+  nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  presentation: Schema.optional(PresentationTurnSelection),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
@@ -822,6 +826,9 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     attachments: Schema.Array(UploadChatAttachment),
   }),
   fdSkillVersionId: Schema.optional(PositiveInt),
+  /** Internal one-turn local Skill selection; never included in user text. */
+  nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  presentation: Schema.optional(PresentationTurnSelection),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode,
@@ -1215,6 +1222,8 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   fdSkillVersionId: Schema.optional(PositiveInt),
+  nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  presentation: Schema.optional(PresentationTurnSelection),
   modelSelection: Schema.optional(ModelSelection),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
