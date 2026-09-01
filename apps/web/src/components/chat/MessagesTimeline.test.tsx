@@ -225,6 +225,23 @@ function buildUserTimelineEntry(text: string) {
   };
 }
 
+function buildAssistantTimelineEntry(text: string, streaming: boolean) {
+  return {
+    id: "entry-assistant-1",
+    kind: "message" as const,
+    createdAt: MESSAGE_CREATED_AT,
+    message: {
+      id: MessageId.make("message-assistant-1"),
+      role: "assistant" as const,
+      text,
+      turnId: TurnId.make("turn-assistant-1"),
+      createdAt: MESSAGE_CREATED_AT,
+      updatedAt: MESSAGE_CREATED_AT,
+      streaming,
+    },
+  };
+}
+
 describe("MessagesTimeline", () => {
   it("uses the larger leading inset only when the top fade is enabled", () => {
     const timelineEntries = [buildUserTimelineEntry("Hello")];
@@ -525,9 +542,35 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('aria-label="复制链接"');
+    expect(markup).toContain('aria-label="复制消息"');
     expect(markup).toContain('data-user-message-collapsed="true"');
     expect(markup).toContain('data-user-message-footer="true"');
+  });
+
+  it("renders feedback controls on completed assistant replies", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildAssistantTimelineEntry("A useful answer", false)]}
+      />,
+    );
+
+    expect(markup).toContain('aria-label="回答有帮助"');
+    expect(markup).toContain('aria-label="回答需要改进"');
+    expect(markup).toContain('aria-label="重新生成回答"');
+    expect(markup).toContain("耗时");
+  });
+
+  it("does not render feedback controls while an assistant reply is streaming", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[buildAssistantTimelineEntry("Still writing", true)]}
+      />,
+    );
+
+    expect(markup).not.toContain('aria-label="回答有帮助"');
+    expect(markup).not.toContain('aria-label="回答需要改进"');
   });
 
   it("renders context compaction entries in the normal work log", () => {

@@ -35,6 +35,7 @@ import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   deriveTimelineEntries,
+  formatDuration,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
@@ -62,6 +63,7 @@ import {
   MousePointerClickIcon,
   PaintbrushIcon,
   PresentationIcon,
+  RotateCcwIcon,
   DownloadIcon,
   FolderOpenIcon,
   PencilIcon,
@@ -79,6 +81,7 @@ import { ProposedPlanCard } from "./ProposedPlanCard";
 import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { MessageFeedbackControls } from "./MessageFeedbackControls";
 import {
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
@@ -149,6 +152,7 @@ interface TimelineRowSharedState {
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onRegenerateAssistantMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   onOpenPresentation: (artifact: NonNullable<WorkLogEntry["presentationArtifact"]>) => void;
@@ -234,6 +238,7 @@ interface MessagesTimelineProps {
   ) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
+  onRegenerateAssistantMessage?: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   activeThreadEnvironmentId: EnvironmentId;
@@ -282,6 +287,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onContinuePresentationEdit = NOOP_CONTINUE_PRESENTATION_EDIT,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
+  onRegenerateAssistantMessage = () => {},
   isRevertingCheckpoint,
   onImageExpand,
   activeThreadEnvironmentId,
@@ -556,6 +562,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onRegenerateAssistantMessage,
       onImageExpand,
       onOpenTurnDiff,
       onOpenPresentation,
@@ -574,6 +581,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       skills,
       activeThreadEnvironmentId,
       onRevertUserMessage,
+      onRegenerateAssistantMessage,
       onImageExpand,
       onOpenTurnDiff,
       onOpenPresentation,
@@ -1117,7 +1125,12 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           <div className="flex items-center gap-0.5">
             {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
             {displayedUserMessage.copyText && (
-              <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
+              <MessageCopyButton
+                text={displayedUserMessage.copyText}
+                variant="ghost"
+                ariaLabel="复制消息"
+                tooltipLabel="复制消息"
+              />
             )}
           </div>
         </div>
@@ -1198,7 +1211,9 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  const activity = use(TimelineRowActivityCtx);
   const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const durationMs = Math.max(0, Date.parse(row.message.updatedAt) - Date.parse(row.durationStart));
 
   return (
     <>
@@ -1217,12 +1232,42 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           onOpenTurnDiff={ctx.onOpenTurnDiff}
         />
         {row.showAssistantMeta ? (
-          <div className="mt-1.5 flex items-center gap-2 text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
-            <AssistantCopyButton row={row} />
-            {!row.message.streaming && (
+          <div className="mt-1.5 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden text-xs tabular-nums opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/assistant:opacity-100">
+            <span className="flex shrink-0 items-center gap-0.5">
+              <AssistantCopyButton row={row} />
               <Tooltip>
                 <TooltipTrigger
-                  render={<p className="text-muted-foreground text-xs tabular-nums" />}
+                  render={
+                    <Button
+                      type="button"
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label="重新生成回答"
+                      title="重新生成回答"
+                      disabled={activity.isWorking}
+                      onClick={() => ctx.onRegenerateAssistantMessage(row.message.id)}
+                    />
+                  }
+                >
+                  <RotateCcwIcon className="size-3" />
+                </TooltipTrigger>
+                <TooltipPopup side="top">重新生成回答</TooltipPopup>
+              </Tooltip>
+            </span>
+            {!row.message.streaming ? (
+              <MessageFeedbackControls threadKey={ctx.routeThreadKey} messageId={row.message.id} />
+            ) : null}
+            {!row.message.streaming ? (
+              <span className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-border/70 px-2 text-[10px] font-semibold text-muted-foreground">
+                耗时 {formatDuration(durationMs)}
+              </span>
+            ) : null}
+            {!row.message.streaming ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span className="shrink-0 whitespace-nowrap text-muted-foreground text-xs tabular-nums" />
+                  }
                 >
                   {formatShortTimestamp(row.message.updatedAt, ctx.timestampFormat)}
                 </TooltipTrigger>
@@ -1230,7 +1275,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
                   {formatChatTimestampTooltip(row.message.updatedAt, ctx.timestampFormat)}
                 </TooltipPopup>
               </Tooltip>
-            )}
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -1249,7 +1294,14 @@ function AssistantCopyButton({ row }: { row: Extract<TimelineRow, { kind: "messa
     return null;
   }
 
-  return <MessageCopyButton text={assistantCopyState.text ?? ""} variant="ghost" />;
+  return (
+    <MessageCopyButton
+      text={assistantCopyState.text ?? ""}
+      variant="ghost"
+      ariaLabel="复制回答"
+      tooltipLabel="复制回答"
+    />
+  );
 }
 
 function ProposedPlanTimelineRow({
