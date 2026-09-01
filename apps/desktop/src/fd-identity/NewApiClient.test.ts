@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { PendingFdRevocation } from "./CredentialVault.ts";
-import { NewApiClient, NewApiClientError } from "./NewApiClient.ts";
+import { FD_RUNTIME_MODEL_LIMITS, NewApiClient, NewApiClientError } from "./NewApiClient.ts";
 
 describe("NewApiClient", () => {
   it("retires stale same-device tokens and creates exact Flash and Pro access", async () => {
@@ -25,7 +25,7 @@ describe("NewApiClient", () => {
       name: "FD AI Desktop device123",
       status: 1,
       model_limits_enabled: true,
-      model_limits: "deepseek-v4-flash,deepseek-v4-pro",
+      model_limits: FD_RUNTIME_MODEL_LIMITS,
     });
     expect(JSON.stringify(fetch.mock.calls.slice(1))).not.toContain("password-secret");
   });
@@ -44,7 +44,7 @@ describe("NewApiClient", () => {
 
   it("upgrades a legacy Flash-only token in place without changing its key", async () => {
     const legacy = runtimeToken({ model_limits: "deepseek-v4-flash" });
-    const upgraded = runtimeToken({ model_limits: "deepseek-v4-flash,deepseek-v4-pro" });
+    const upgraded = runtimeToken({ model_limits: FD_RUNTIME_MODEL_LIMITS });
     const fetch = responseQueue([
       jsonResponse(apiSuccess(apiUser())),
       jsonResponse(apiSuccess(legacy)),
@@ -60,7 +60,7 @@ describe("NewApiClient", () => {
     expect(JSON.parse(request(fetch, 2).body)).toMatchObject({
       id: 41,
       model_limits_enabled: true,
-      model_limits: "deepseek-v4-flash,deepseek-v4-pro",
+      model_limits: FD_RUNTIME_MODEL_LIMITS,
     });
   });
 
@@ -68,7 +68,7 @@ describe("NewApiClient", () => {
     ["failed response", { success: false, data: null }],
     [
       "different token identity",
-      apiSuccess(runtimeToken({ id: 42, model_limits: "deepseek-v4-flash,deepseek-v4-pro" })),
+      apiSuccess(runtimeToken({ id: 42, model_limits: FD_RUNTIME_MODEL_LIMITS })),
     ],
     ["inexact upgraded policy", apiSuccess(runtimeToken({ model_limits: "deepseek-v4-flash" }))],
   ])("fails closed when a legacy token upgrade returns %s", async (_caseName, upgradeResponse) => {
@@ -514,7 +514,7 @@ function runtimeToken(overrides: Record<string, unknown> = {}) {
     remain_quota: 0,
     unlimited_quota: true,
     model_limits_enabled: true,
-    model_limits: "deepseek-v4-flash,deepseek-v4-pro",
+    model_limits: FD_RUNTIME_MODEL_LIMITS,
     allow_ips: "",
     group: "default",
     cross_group_retry: false,

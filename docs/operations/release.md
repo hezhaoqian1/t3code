@@ -1,7 +1,6 @@
 # Fangde AI Desktop Release
 
-当前已激活的内部版本和人工验收清单见
-[`releases/0.2.11.md`](./releases/0.2.11.md)。通用构建、发布和回滚流程以本文为准。
+各版本的人工验收清单见 [`releases/`](./releases/)。通用构建、发布和回滚流程以本文为准。
 
 `.github/workflows/fd-desktop-release.yml` builds one immutable internal release bundle for:
 
@@ -13,10 +12,16 @@ and writes `SHA256SUMS`. The native runners also install the matching pinned Fei
 the 27 official `lark-*` Skills are bundled from the repository resources. Employee machines do
 not need Node.js, npm, or WorkBuddy.
 
-The company-internal channel is intentionally unsigned. Employees may see macOS Gatekeeper or
-Windows SmartScreen prompts on first install. Windows supports the in-app download and install
-handoff; macOS employees download the new DMG from the company website and replace the existing
-application because this unsigned channel does not provide a reliable in-app macOS install path.
+The company-internal channel uses ad-hoc sealing on macOS and remains unsigned on Windows.
+Employees may see Gatekeeper or SmartScreen prompts on first install. Subsequent macOS updates use
+the existing electron-updater manifest download and SHA-512 verification, then a bundled internal
+installer validates bundle ID, version, architecture, and the code seal before replacement. It
+keeps the old bundle until the new version starts and rolls back if replacement validation fails.
+An administrator prompt is used only when the installed app directory is not writable.
+
+This internal macOS installer is a temporary distribution adapter. Remove it only after Developer
+ID signing and notarization have passed two consecutive production upgrades through the native
+electron-updater install path. Until then, retain the DMG as a failure/cancellation fallback.
 
 Each artifact bundles the pinned native Codex App Server runtime for its platform. Employee machines
 do not need a global Codex installation or a PATH entry. The build verifies the staged runtime and
@@ -68,8 +73,9 @@ For `0.2.11`, the pinned binary is `1.0.86`. Its official help confirms `config 
 ## Acceptance
 
 After activation, verify `latest.json`, `latest-mac.yml`, `latest.yml`, both download buttons,
-manual DMG replacement on a real Apple Silicon Mac, and application update check, download, visible
-installation, and restart on a Windows x64 machine. Also verify that the bundled Codex App Server
+an in-app update from the previous macOS version on a real Apple Silicon Mac, rollback against an
+invalid candidate, and application update check, download, visible installation, and restart on a
+Windows x64 machine. Also verify that the bundled Codex App Server
 answers a real task without a system-wide Codex install, and that Windows retains both desktop and
 Start menu shortcuts. Keep the prior release until this check is complete; then remove the retired
 release and confirm no old alias or backup remains.

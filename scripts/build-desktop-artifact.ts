@@ -650,6 +650,10 @@ export const DESKTOP_EXTRA_RESOURCES = [
     from: "apps/desktop/resources/presentation",
     to: "presentation",
   },
+  {
+    from: "apps/desktop/resources/updater",
+    to: "updater",
+  },
 ] as const;
 
 export function resolveCodexRuntimePackage(

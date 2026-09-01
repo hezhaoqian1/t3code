@@ -23,12 +23,14 @@ import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
+import * as MacInternalUpdater from "./MacInternalUpdater.ts";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -50,6 +52,7 @@ type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type;
 
 const UpdateInfo = Schema.Struct({
   version: Schema.String,
+  downloadedFile: Schema.optional(Schema.String),
   // Left unvalidated on purpose: a malformed release-notes payload must never
   // fail the decode and block the update state transition. The shape is
   // validated defensively in normalizeDesktopUpdateReleaseNotes.
@@ -217,7 +220,7 @@ function shouldBroadcastDownloadProgress(
   return nextStep !== previousStep || nextPercent === 100;
 }
 
-function getAutoUpdateDisabledReason(args: {
+export function getAutoUpdateDisabledReason(args: {
   isDevelopment: boolean;
   isPackaged: boolean;
   platform: NodeJS.Platform;
@@ -231,9 +234,6 @@ function getAutoUpdateDisabledReason(args: {
   }
   if (args.disabledByEnv) {
     return "Automatic updates are disabled by the T3CODE_DISABLE_AUTO_UPDATE setting.";
-  }
-  if (args.platform === "darwin" && !args.mockUpdates) {
-    return "当前为公司内部未签名版本。macOS 请从官网下载新版安装包并覆盖安装。";
   }
   if (!args.hasUpdateFeedConfig) {
     return "Automatic updates are not available because no update feed is configured.";
@@ -255,11 +255,13 @@ export const make = Effect.gen(function* () {
   const config = yield* DesktopConfig.DesktopConfig;
   const pool = yield* DesktopBackendPool.DesktopBackendPool;
   const desktopState = yield* DesktopState.DesktopState;
+  const electronApp = yield* ElectronApp.ElectronApp;
   const electronUpdater = yield* ElectronUpdater.ElectronUpdater;
   const electronWindow = yield* ElectronWindow.ElectronWindow;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
+  const macInternalUpdater = yield* MacInternalUpdater.MacInternalUpdater;
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
   const updateCheckInFlightRef = yield* Ref.make(false);
@@ -269,6 +271,7 @@ export const make = Effect.gen(function* () {
     ReadonlyArray<DesktopBackendPool.DesktopBackendInstance>
   >([]);
   const updaterConfiguredRef = yield* Ref.make(false);
+  const downloadedArchivePathRef = yield* Ref.make<Option.Option<string>>(Option.none());
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1);
   const updateStateRef = yield* Ref.make<DesktopUpdateState>(
     createInitialDesktopUpdateState(
@@ -413,7 +416,11 @@ export const make = Effect.gen(function* () {
       yield* setState(reduceDesktopUpdateStateOnDownloadStart(state));
       yield* electronUpdater.setDisableDifferentialDownload(DISABLE_DIFFERENTIAL_DOWNLOAD);
       yield* logUpdaterInfo("downloading update");
-      yield* electronUpdater.downloadUpdate;
+      const downloadedPaths = yield* electronUpdater.downloadUpdate;
+      if (environment.platform === "darwin") {
+        const archivePath = downloadedPaths.find((path) => path.endsWith(".zip"));
+        if (archivePath) yield* Ref.set(downloadedArchivePathRef, Option.some(archivePath));
+      }
       return { accepted: true, completed: true };
     }).pipe(
       Effect.catchTags({
@@ -501,15 +508,43 @@ export const make = Effect.gen(function* () {
         (instance) => instance.stop({ timeout: Duration.seconds(5) }),
         { concurrency: "unbounded" },
       );
-      yield* electronUpdater.quitAndInstall({
-        // Keep the Windows installer visible so an upgrade never looks like an
-        // unexplained uninstall. macOS ignores this NSIS-specific flag.
-        isSilent: environment.platform !== "win32",
-        isForceRunAfter: true,
-      });
+      if (environment.platform === "darwin" && !config.mockUpdates) {
+        const archivePath = yield* Ref.get(downloadedArchivePathRef);
+        if (Option.isNone(archivePath) || state.downloadedVersion === null) {
+          return yield* new MacInternalUpdater.MacInternalUpdateError({
+            stage: "prepare",
+            cause: new Error("Downloaded macOS archive path is unavailable"),
+          });
+        }
+        yield* macInternalUpdater.install({
+          archivePath: archivePath.value,
+          expectedVersion: state.downloadedVersion,
+        });
+        yield* electronApp.quit;
+      } else {
+        yield* electronUpdater.quitAndInstall({
+          // Keep the Windows installer visible so an upgrade never looks like an
+          // unexplained uninstall. macOS mock updates retain the native handoff.
+          isSilent: environment.platform !== "win32",
+          isForceRunAfter: true,
+        });
+      }
       return { accepted: true, completed: false };
     }).pipe(
       Effect.catchTags({
+        MacInternalUpdateError: Effect.fn("desktop.updates.handleMacInstallFailure")(
+          function* (error) {
+            yield* recoverAfterInstallFailure;
+            yield* updateState((current) =>
+              reduceDesktopUpdateStateOnInstallFailure(current, error.message),
+            );
+            yield* logUpdaterError(error.message, {
+              errorTag: error._tag,
+              stage: error.stage,
+            });
+            return { accepted: true, completed: false };
+          },
+        ),
         ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
           function* (error) {
             yield* recoverAfterInstallFailure;
@@ -709,6 +744,9 @@ export const make = Effect.gen(function* () {
       Effect.flatMap(
         Effect.fn("desktop.updates.applyUpdateDownloaded")(function* (info) {
           const state = yield* Ref.get(updateStateRef);
+          if (info.downloadedFile?.endsWith(".zip")) {
+            yield* Ref.set(downloadedArchivePathRef, Option.some(info.downloadedFile));
+          }
           yield* setState(reduceDesktopUpdateStateOnDownloadComplete(state, info.version));
           yield* logUpdaterInfo("update downloaded", { version: info.version });
         }),
@@ -738,6 +776,7 @@ export const make = Effect.gen(function* () {
 
       const appUpdateYmlConfig = yield* readAppUpdateYml;
       yield* Ref.set(appUpdateYmlConfigRef, appUpdateYmlConfig);
+      yield* macInternalUpdater.recover;
 
       if (config.mockUpdates) {
         yield* electronUpdater.setFeedURL({
