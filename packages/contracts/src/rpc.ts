@@ -143,6 +143,11 @@ import {
   ResourceTelemetrySnapshot,
 } from "./resourceTelemetry.ts";
 import { UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import {
+  DesktopMessageFeedbackError,
+  DesktopMessageFeedbackInput,
+  DesktopMessageFeedbackResult,
+} from "./messageFeedback.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   SourceControlCloneRepositoryInput,
@@ -235,6 +240,7 @@ export const WS_METHODS = {
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
+  serverSetDesktopMessageFeedback: "server.setDesktopMessageFeedback",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -352,6 +358,15 @@ export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSumm
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
 });
+
+export const WsServerSetDesktopMessageFeedbackRpc = Rpc.make(
+  WS_METHODS.serverSetDesktopMessageFeedback,
+  {
+    payload: DesktopMessageFeedbackInput,
+    success: DesktopMessageFeedbackResult,
+    error: Schema.Union([EnvironmentAuthorizationError, DesktopMessageFeedbackError]),
+  },
+);
 
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
@@ -774,6 +789,7 @@ export const LocalWsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
+  WsServerSetDesktopMessageFeedbackRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,

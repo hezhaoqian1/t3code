@@ -151,6 +151,7 @@ interface TimelineRowSharedState {
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   activeThreadEnvironmentId: EnvironmentId;
+  feedbackUserInputByAssistantMessageId: ReadonlyMap<MessageId, string>;
   onRevertUserMessage: (messageId: MessageId) => void;
   onRegenerateAssistantMessage: (messageId: MessageId) => void;
   onImageExpand: (preview: ExpandedImagePreview) => void;
@@ -470,6 +471,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     ],
   );
   const rows = useStableRows(rawRows);
+  const feedbackUserInputByAssistantMessageId = useMemo(() => {
+    const result = new Map<MessageId, string>();
+    let latestUserInput = "";
+    for (const row of rows) {
+      if (row.kind !== "message") continue;
+      if (row.message.role === "user") {
+        latestUserInput = row.message.text;
+      } else if (row.message.role === "assistant") {
+        result.set(row.message.id, latestUserInput);
+      }
+    }
+    return result;
+  }, [rows]);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
   const [timelineViewportElement, setTimelineViewportElement] = useState<HTMLDivElement | null>(
     null,
@@ -561,6 +575,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      feedbackUserInputByAssistantMessageId,
       onRevertUserMessage,
       onRegenerateAssistantMessage,
       onImageExpand,
@@ -580,6 +595,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workspaceRoot,
       skills,
       activeThreadEnvironmentId,
+      feedbackUserInputByAssistantMessageId,
       onRevertUserMessage,
       onRegenerateAssistantMessage,
       onImageExpand,
@@ -1255,7 +1271,14 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
               </Tooltip>
             </span>
             {!row.message.streaming ? (
-              <MessageFeedbackControls threadKey={ctx.routeThreadKey} messageId={row.message.id} />
+              <MessageFeedbackControls
+                environmentId={ctx.activeThreadEnvironmentId}
+                threadKey={ctx.routeThreadKey}
+                clientThreadId={ctx.threadRef?.threadId ?? ""}
+                messageId={row.message.id}
+                userInput={ctx.feedbackUserInputByAssistantMessageId.get(row.message.id) ?? ""}
+                assistantOutput={messageText}
+              />
             ) : null}
             {!row.message.streaming ? (
               <span className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-border/70 px-2 text-[10px] font-semibold text-muted-foreground">

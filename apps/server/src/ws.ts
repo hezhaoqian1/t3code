@@ -14,7 +14,6 @@ import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
   type AuthEnvironmentScope,
-  AuthSessionId,
   CommandId,
   type DiscoveredLocalServerList,
   EventId,
@@ -46,6 +45,7 @@ import {
   AssetWorkspaceContextResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
+  DesktopMessageFeedbackError,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -76,6 +76,8 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import { FdEnterpriseThreadRuntime } from "./fd-skills/FdEnterpriseThreadRuntime.ts";
+import { FdDesktopFeedbackClient } from "./fd-feedback/FdDesktopFeedbackClient.ts";
+import * as FdRuntimeCredentialStore from "./fd/FdRuntimeCredentialStore.ts";
 import { listProjectSkills } from "./fd-skills/ProjectSkillCatalogQuery.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -117,6 +119,8 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
+
+const isDesktopMessageFeedbackError = Schema.is(DesktopMessageFeedbackError);
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -368,6 +372,18 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const resourceTelemetry = yield* ResourceTelemetry.ResourceTelemetry;
       const usage = yield* UsageService.UsageService;
+      const fdRuntimeCredentials = yield* Effect.serviceOption(
+        FdRuntimeCredentialStore.FdRuntimeCredentialStore,
+      );
+      const rpcContext = yield* Effect.context<never>();
+      const desktopFeedbackClient = new FdDesktopFeedbackClient({
+        credentials: () =>
+          Option.match(fdRuntimeCredentials, {
+            onNone: () => Promise.resolve(undefined),
+            onSome: (credentials) =>
+              Effect.runPromiseWith(rpcContext)(credentials.current).then(Option.getOrUndefined),
+          }),
+      });
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -1553,6 +1569,21 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverSetDesktopMessageFeedback]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverSetDesktopMessageFeedback,
+            Effect.tryPromise({
+              try: () => desktopFeedbackClient.submit(input),
+              catch: (cause) =>
+                isDesktopMessageFeedbackError(cause)
+                  ? cause
+                  : new DesktopMessageFeedbackError({
+                      code: "gateway_unavailable",
+                      message: "反馈服务暂时不可用，请稍后重试。",
+                    }),
+            }),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
