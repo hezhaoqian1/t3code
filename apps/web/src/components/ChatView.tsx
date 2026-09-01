@@ -4575,6 +4575,7 @@ function ChatViewContent(props: ChatViewProps) {
       annotation: PreviewAnnotationPayload;
       image: ComposerImageAttachment | null;
     },
+    regenerateText?: string,
   ) => {
     e?.preventDefault();
     const notifyDirectAnnotationAttached = () => {
@@ -4652,7 +4653,7 @@ function ChatViewContent(props: ChatViewProps) {
             },
           ]
         : sendContextPreviewAnnotations;
-    const promptForSend = promptRef.current;
+    const promptForSend = regenerateText ?? promptRef.current;
     const inferredPresentationIntent = detectPresentationIntent(promptForSend);
     const nativeSkillNames =
       selectedNativeSkillNames.length > 0
@@ -5071,6 +5072,23 @@ function ChatViewContent(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+
+  const onRegenerateAssistantMessage = useCallback(
+    (assistantMessageId: MessageId) => {
+      if (!activeThread || isSendBusy || sendInFlightRef.current) return;
+      const assistantIndex = activeThread.messages.findIndex(
+        (message) => message.id === assistantMessageId,
+      );
+      if (assistantIndex < 0) return;
+      const sourceMessage = [...activeThread.messages]
+        .slice(0, assistantIndex)
+        .reverse()
+        .find((message) => message.role === "user");
+      if (!sourceMessage || sourceMessage.text.trim().length === 0) return;
+      void onSend(undefined, undefined, sourceMessage.text);
+    },
+    [activeThread, isSendBusy, onSend],
+  );
 
   const onOpenPresentation = useCallback((artifact: { projectPath: string; pptxPath?: string }) => {
     const bridge = window.desktopBridge;
@@ -5853,6 +5871,7 @@ function ChatViewContent(props: ChatViewProps) {
                   isOfficeMode ? EMPTY_REVERT_TURN_COUNTS : revertTurnCountByUserMessageId
                 }
                 onRevertUserMessage={onRevertUserMessage}
+                onRegenerateAssistantMessage={onRegenerateAssistantMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
                 onImageExpand={onExpandTimelineImage}
                 markdownCwd={gitCwd ?? undefined}
