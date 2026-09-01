@@ -24,6 +24,7 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
+import * as MacInternalUpdater from "../updates/MacInternalUpdater.ts";
 import * as FdIdentity from "../fd-identity/FdIdentity.ts";
 
 const makeDesktopRunId = Crypto.Crypto.pipe(
@@ -147,6 +148,7 @@ const startup = Effect.gen(function* () {
   const preReadyElectronOptions = yield* DesktopPreReadyPlatform.DesktopPreReadyElectronOptions;
   const safeStorage = yield* ElectronSafeStorage.ElectronSafeStorage;
   const updates = yield* DesktopUpdates.DesktopUpdates;
+  const macInternalUpdater = yield* MacInternalUpdater.MacInternalUpdater;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
 
   if (environment.platform !== "win32") {
@@ -203,6 +205,7 @@ const startup = Effect.gen(function* () {
   yield* appIdentity.configure;
   yield* applicationMenu.configure;
   yield* updates.configure;
+  yield* macInternalUpdater.confirmStartup;
   yield* linuxUrlHandler.register;
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));

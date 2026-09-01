@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { createRequire } from "node:module";
+import * as NodeModule from "node:module";
 import { assert, it } from "@effect/vitest";
 import * as FileSystem from "effect/FileSystem";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -50,6 +50,8 @@ import {
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
+
+const createRequire = NodeModule.createRequire;
 
 it("uses the release version for the bundled renderer", () => {
   assert.deepStrictEqual(
@@ -475,6 +477,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       {
         from: "apps/desktop/resources/presentation",
         to: "presentation",
+      },
+      {
+        from: "apps/desktop/resources/updater",
+        to: "updater",
       },
     ]);
     assert.deepStrictEqual(resolveResourceMonitorRustTargets("mac", "universal"), [

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
+import { FD_RUNTIME_MODELS } from "@t3tools/contracts/fd/runtime-credentials";
 
 import {
   CredentialVault,
@@ -495,7 +496,7 @@ describe("FdIdentityBroker", () => {
         accessToken: "refreshed-access",
         policy: expect.objectContaining({
           model: "deepseek-v4-flash",
-          models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+          models: [...FD_RUNTIME_MODELS],
           expiresAt: 2_000_000_100,
         }),
       }),

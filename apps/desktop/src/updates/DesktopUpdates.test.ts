@@ -5,6 +5,7 @@ import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -17,10 +18,12 @@ import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as ElectronUpdater from "../electron/ElectronUpdater.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
+import * as MacInternalUpdater from "./MacInternalUpdater.ts";
 
 interface UpdatesHarnessOptions {
   readonly checkForUpdates?: Effect.Effect<
@@ -33,6 +36,8 @@ interface UpdatesHarnessOptions {
   readonly backendDesiredRunning?: boolean;
   readonly platform?: NodeJS.Platform;
   readonly mockUpdates?: boolean;
+  readonly resourcesPath?: string;
+  readonly macInstall?: Effect.Effect<void, MacInternalUpdater.MacInternalUpdateError>;
   readonly env?: Record<string, string | undefined>;
 }
 
@@ -50,6 +55,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     readonly isForceRunAfter: boolean;
   }> = [];
   let backendStartCount = 0;
+  let appQuitCount = 0;
+  const macInstallCalls: Array<{ readonly archivePath: string; readonly expectedVersion: string }> =
+    [];
 
   const addListener = (eventName: string, listener: (...args: readonly unknown[]) => void) => {
     const eventListeners = listeners.get(eventName) ?? new Set();
@@ -91,7 +99,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
-    downloadUpdate: Effect.void,
+    downloadUpdate: Effect.succeed([]),
     quitAndInstall: (input) =>
       Effect.sync(() => {
         quitAndInstallCalls.push(input);
@@ -151,7 +159,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     appVersion: "1.2.3",
     appPath: "/repo",
     isPackaged: true,
-    resourcesPath: "/missing/resources",
+    resourcesPath: options.resourcesPath ?? "/missing/resources",
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
@@ -179,6 +187,23 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
 
   const layer = DesktopUpdates.layer.pipe(
     Layer.provideMerge(updaterLayer),
+    Layer.provideMerge(
+      Layer.succeed(ElectronApp.ElectronApp, {
+        quit: Effect.sync(() => {
+          appQuitCount += 1;
+        }),
+      } as ElectronApp.ElectronApp["Service"]),
+    ),
+    Layer.provideMerge(
+      Layer.succeed(MacInternalUpdater.MacInternalUpdater, {
+        recover: Effect.void,
+        confirmStartup: Effect.void,
+        install: (input) =>
+          Effect.sync(() => {
+            macInstallCalls.push(input);
+          }).pipe(Effect.andThen(options.macInstall ?? Effect.void)),
+      }),
+    ),
     Layer.provideMerge(windowLayer),
     Layer.provideMerge(backendLayer),
     Layer.provideMerge(DesktopState.layer),
@@ -208,6 +233,8 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       ),
     sentStates,
     quitAndInstallCalls: () => quitAndInstallCalls,
+    appQuitCount: () => appQuitCount,
+    macInstallCalls: () => macInstallCalls,
     emit: (eventName: string, payload?: unknown) => {
       for (const listener of listeners.get(eventName) ?? []) {
         listener(payload);
@@ -217,24 +244,61 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
 }
 
 describe("DesktopUpdates", () => {
-  it.effect("disables in-app updates for internal unsigned macOS builds", () => {
-    const harness = makeHarness({ platform: "darwin", mockUpdates: false });
-
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const updates = yield* DesktopUpdates.DesktopUpdates;
-        yield* updates.configure;
-
-        const reason = yield* updates.disabledReason;
-        assert.isTrue(Option.isSome(reason));
-        if (Option.isSome(reason)) {
-          assert.include(reason.value, "公司内部未签名版本");
-          assert.include(reason.value, "官网下载新版安装包");
-        }
-        assert.equal(harness.checkCount(), 0);
+  it("enables packaged internal macOS builds when an update feed exists", () => {
+    assert.isNull(
+      DesktopUpdates.getAutoUpdateDisabledReason({
+        isDevelopment: false,
+        isPackaged: true,
+        platform: "darwin",
+        disabledByEnv: false,
+        hasUpdateFeedConfig: true,
+        mockUpdates: false,
       }),
-    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    );
   });
+
+  it.effect("hands a downloaded production macOS ZIP to the internal installer", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const resourcesPath = yield* fs.makeTempDirectoryScoped({
+          prefix: "fd-desktop-update-resources-",
+        });
+        yield* fs.writeFileString(
+          `${resourcesPath}/app-update.yml`,
+          "provider: generic\nurl: https://updates.example.test\n",
+        );
+        const harness = makeHarness({
+          platform: "darwin",
+          mockUpdates: false,
+          resourcesPath,
+        });
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const updates = yield* DesktopUpdates.DesktopUpdates;
+            yield* updates.configure;
+            harness.emit("update-downloaded", {
+              version: "1.2.4",
+              downloadedFile: "/tmp/FD-Enterprise-AI-1.2.4-mac-arm64.zip",
+            });
+            yield* flushCallbacks;
+
+            yield* updates.install;
+
+            assert.deepEqual(harness.macInstallCalls(), [
+              {
+                archivePath: "/tmp/FD-Enterprise-AI-1.2.4-mac-arm64.zip",
+                expectedVersion: "1.2.4",
+              },
+            ]);
+            assert.equal(harness.appQuitCount(), 1);
+            assert.deepEqual(harness.quitAndInstallCalls(), []);
+          }).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer))),
+        );
+      }),
+    ).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   it("preserves complete causes for update poller and event failures", () => {
     const cause = Cause.combine(
