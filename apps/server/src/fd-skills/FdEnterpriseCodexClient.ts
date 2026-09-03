@@ -8,8 +8,9 @@ const FD_ENTERPRISE_CODEX_TIMEOUT_MS = 30_000;
 
 const ApiEnvelopeSchema = Schema.Struct({
   success: Schema.Boolean,
+  code: Schema.optional(Schema.String),
   message: Schema.optional(Schema.String),
-  data: Schema.Unknown,
+  data: Schema.optional(Schema.Unknown),
 });
 
 const RuntimeToolSchema = Schema.Struct({
@@ -175,12 +176,23 @@ export class FdEnterpriseCodexClient {
     }
     if (!response.ok || !envelope.success) {
       throw new FdEnterpriseCodexError(
-        response.ok ? "request_rejected" : "http_error",
+        fdEnterpriseToolFailureCode(envelope.code, response.ok ? "request_rejected" : "http_error"),
         response.status,
         envelope.message || "FD enterprise Codex request was rejected.",
       );
     }
     return envelope.data;
+  }
+}
+
+function fdEnterpriseToolFailureCode(code: string | undefined, fallback: string): string {
+  switch (code) {
+    case "query_timed_out":
+    case "connector_query_failed":
+    case "tool_execution_failed":
+      return code;
+    default:
+      return fallback;
   }
 }
 
