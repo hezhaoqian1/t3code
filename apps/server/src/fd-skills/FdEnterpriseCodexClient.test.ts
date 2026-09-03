@@ -131,4 +131,28 @@ describe("FdEnterpriseCodexClient", () => {
       }),
     ).rejects.toMatchObject({ code: "invalid_tool_result" });
   });
+
+  it("preserves approved desktop tool failure codes without trusting arbitrary codes", async () => {
+    const fetch = vi.fn(async () =>
+      jsonResponse({
+        success: false,
+        code: "query_timed_out",
+        message: "企业数据查询超时，未返回结果，请稍后重试。",
+      }),
+    );
+    const client = new FdEnterpriseCodexClient({ credentials: async () => credentials, fetch });
+
+    await expect(
+      client.executeToolCall({
+        skillVersionId: 9,
+        releaseDigest,
+        clientThreadId,
+        providerThreadId,
+        turnId,
+        callId: "call-1",
+        tool: "fd_data_list_resources",
+        arguments: {},
+      }),
+    ).rejects.toMatchObject({ code: "query_timed_out" });
+  });
 });

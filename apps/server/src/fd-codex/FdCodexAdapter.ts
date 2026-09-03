@@ -11,7 +11,10 @@ import { FdRuntimeCredentialStore } from "../fd/FdRuntimeCredentialStore.ts";
 import { ProviderAdapterRequestError } from "../provider/Errors.ts";
 import { makeCodexAdapter } from "../provider/Layers/CodexAdapter.ts";
 import { FD_DEEPSEEK_DRIVER_KIND } from "../provider/Layers/FdDeepSeekAdapter.ts";
-import { FdEnterpriseCodexClient } from "../fd-skills/FdEnterpriseCodexClient.ts";
+import {
+  FdEnterpriseCodexClient,
+  FdEnterpriseCodexError,
+} from "../fd-skills/FdEnterpriseCodexClient.ts";
 import { NativeSkillCatalog, selectedNativeSkillNames } from "../fd-skills/NativeSkillCatalog.ts";
 import { makeFdCodexChildEnvironment } from "./FdCodexChildEnvironment.ts";
 import { prepareFdManagedCodexHome } from "./FdManagedCodexHome.ts";
@@ -190,12 +193,12 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
                 }),
               ).pipe(
                 Effect.match({
-                  onFailure: () => ({
+                  onFailure: (cause) => ({
                     success: false,
                     contentItems: [
                       {
                         type: "inputText" as const,
-                        text: "FD enterprise tool call failed or its authorization changed.",
+                        text: fdEnterpriseToolFailureMessage(cause),
                       },
                     ],
                   }),
@@ -221,6 +224,18 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
     },
   );
 });
+
+export function fdEnterpriseToolFailureMessage(cause: unknown): string {
+  if (cause instanceof FdEnterpriseCodexError) {
+    switch (cause.code) {
+      case "query_timed_out":
+        return "企业数据查询超时，未返回结果，请稍后重试。";
+      case "connector_query_failed":
+        return "企业数据连接暂不可用，未返回结果，请稍后重试。";
+    }
+  }
+  return "企业数据工具调用失败，未返回结果，请稍后重试。";
+}
 
 async function readConnectorEnabled(statePath: string | undefined): Promise<boolean> {
   if (!statePath) return false;

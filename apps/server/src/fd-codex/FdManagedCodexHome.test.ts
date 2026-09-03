@@ -6,7 +6,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { makeFdCodexChildEnvironment } from "./FdCodexChildEnvironment.ts";
-import { prepareFdCodexRuntime, resolveFdCodexTurnSkills } from "./FdCodexAdapter.ts";
+import {
+  fdEnterpriseToolFailureMessage,
+  prepareFdCodexRuntime,
+  resolveFdCodexTurnSkills,
+} from "./FdCodexAdapter.ts";
+import { FdEnterpriseCodexError } from "../fd-skills/FdEnterpriseCodexClient.ts";
 import {
   FD_CODEX_API_KEY_ENV,
   prepareFdManagedCodexHome,
@@ -21,6 +26,15 @@ afterEach(async () => {
 });
 
 describe("FD managed Codex runtime boundary", () => {
+  it("reports a database timeout without suggesting authorization changed", () => {
+    expect(fdEnterpriseToolFailureMessage(new FdEnterpriseCodexError("query_timed_out", 200))).toBe(
+      "企业数据查询超时，未返回结果，请稍后重试。",
+    );
+    expect(fdEnterpriseToolFailureMessage(new Error("raw database detail"))).toBe(
+      "企业数据工具调用失败，未返回结果，请稍后重试。",
+    );
+  });
+
   it("writes exact FD model/provider config without credentials", async () => {
     const root = await mkdtemp(join(tmpdir(), "fd-codex-home-"));
     temporaryRoots.add(root);
