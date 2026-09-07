@@ -323,11 +323,18 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       const enterpriseEvents = Array.isArray(enterpriseResult)
         ? enterpriseResult
         : [enterpriseResult];
-      expect(enterpriseEvents).toHaveLength(1);
-      expect(enterpriseEvents[0]?.type).toBe("thread.turn-start-requested");
-      if (enterpriseEvents[0]?.type === "thread.turn-start-requested") {
-        expect(enterpriseEvents[0].payload.fdSkillVersionId).toBe(10004);
-        expect("titleSeed" in enterpriseEvents[0].payload).toBe(false);
+      expect(enterpriseEvents).toHaveLength(2);
+      expect(enterpriseEvents[0]?.type).toBe("thread.message-sent");
+      expect(enterpriseEvents[0]?.payload).toMatchObject({
+        role: "user",
+        text: "sensitive enterprise prompt",
+      });
+      expect("attachments" in (enterpriseEvents[0]?.payload ?? {})).toBe(false);
+      expect(enterpriseEvents[1]?.type).toBe("thread.turn-start-requested");
+      if (enterpriseEvents[1]?.type === "thread.turn-start-requested") {
+        expect(enterpriseEvents[1].payload.fdSkillVersionId).toBe(10004);
+        expect(enterpriseEvents[1].causationEventId).toBe(enterpriseEvents[0]?.eventId ?? null);
+        expect("titleSeed" in enterpriseEvents[1].payload).toBe(false);
       }
     }),
   );

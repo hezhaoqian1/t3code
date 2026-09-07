@@ -425,10 +425,12 @@ audit reference. Zero rows are a successful data result only when a real audited
 
 ### 12.1 Enterprise Threads
 
-The server-side Enterprise Agent history is canonical. Local T3 persistence stores the stable client
-thread reference and non-sensitive lifecycle metadata, not decrypted customer query content. On
-login or restart, Desktop reloads authorized enterprise history from the existing history endpoint
-and reconstructs the view in memory.
+The server-side Enterprise Agent remains canonical for authorization, tools, audit, and the
+server-side enterprise history copy. Desktop also persists the employee-visible user and assistant
+message text through T3's local event store so completed conversations survive process restarts and
+temporary history-endpoint outages. Reasoning, tool arguments/results, audit identifiers, policy,
+and credentials remain memory-only. On login or restart, the existing history endpoint repairs and
+locally backfills older or incomplete histories without duplicating messages already present.
 
 ### 12.2 Ordinary Local Threads
 

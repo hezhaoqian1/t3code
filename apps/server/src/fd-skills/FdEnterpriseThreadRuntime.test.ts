@@ -1,6 +1,7 @@
 import {
   EventId,
   MessageId,
+  type OrchestrationMessage,
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderRuntimeEvent,
@@ -14,12 +15,13 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { describe, expect } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import type { FdEnterpriseHistory } from "./FdEnterpriseAgentClient.ts";
 import {
   FdEnterpriseThreadRuntime,
   FdEnterpriseThreadRuntimeLive,
+  withoutDurableEnterpriseHistory,
 } from "./FdEnterpriseThreadRuntime.ts";
 
 const threadId = ThreadId.make("550e8400-e29b-41d4-a716-446655440000");
@@ -34,7 +36,96 @@ const eventBase = {
   persistence: "memory-only" as const,
 };
 
+const message = (
+  id: string,
+  role: OrchestrationMessage["role"],
+  text: string,
+): OrchestrationMessage => ({
+  id: MessageId.make(id),
+  role,
+  text,
+  turnId: null,
+  streaming: false,
+  createdAt: "2026-08-10T00:00:00.000Z",
+  updatedAt: "2026-08-10T00:00:00.000Z",
+});
+
 describe("FdEnterpriseThreadRuntime", () => {
+  it("removes restored history already persisted under the same stable ID", () => {
+    const persisted = message("fd-enterprise-history:7:11", "assistant", "已持久化回答");
+    const overlay = {
+      threadId,
+      revision: 1,
+      messages: [persisted],
+      activities: [],
+    };
+
+    expect(withoutDurableEnterpriseHistory(overlay, [persisted]).messages).toEqual([]);
+  });
+
+  it("matches restored user history to a locally generated ID by role and text", () => {
+    const overlay = {
+      threadId,
+      revision: 1,
+      messages: [message("fd-enterprise-history:7:10", "user", "查询持仓")],
+      activities: [],
+    };
+
+    expect(
+      withoutDurableEnterpriseHistory(overlay, [message("local-user-1", "user", "查询持仓")])
+        .messages,
+    ).toEqual([]);
+  });
+
+  it("preserves repeated restored messages beyond the durable multiplicity", () => {
+    const overlay = {
+      threadId,
+      revision: 1,
+      messages: [
+        message("fd-enterprise-history:7:10", "user", "重复查询"),
+        message("fd-enterprise-history:7:12", "user", "重复查询"),
+      ],
+      activities: [],
+    };
+
+    expect(
+      withoutDurableEnterpriseHistory(overlay, [message("local-user-1", "user", "重复查询")])
+        .messages,
+    ).toEqual([overlay.messages[0]]);
+  });
+
+  it("keeps a recovered assistant when only its user prompt is durable", () => {
+    const overlay = {
+      threadId,
+      revision: 1,
+      messages: [
+        message("fd-enterprise-history:7:10", "user", "中断前查询"),
+        message("fd-enterprise-history:7:11", "assistant", "服务端补回回答"),
+      ],
+      activities: [],
+    };
+
+    expect(
+      withoutDurableEnterpriseHistory(overlay, [
+        message("local-user-before-interruption", "user", "中断前查询"),
+      ]).messages,
+    ).toEqual([overlay.messages[1]]);
+  });
+
+  it("does not let a stable-ID match consume an additional same-text history entry", () => {
+    const persisted = message("fd-enterprise-history:7:11", "assistant", "相同回答");
+    const overlay = {
+      threadId,
+      revision: 1,
+      messages: [persisted, message("fd-enterprise-history:7:12", "assistant", "相同回答")],
+      activities: [],
+    };
+
+    expect(withoutDurableEnterpriseHistory(overlay, [persisted]).messages).toEqual([
+      overlay.messages[1],
+    ]);
+  });
+
   effectIt.effect("keeps staged and streamed enterprise content in the volatile overlay", () =>
     Effect.gen(function* () {
       const runtime = yield* FdEnterpriseThreadRuntime;
@@ -71,6 +162,24 @@ describe("FdEnterpriseThreadRuntime", () => {
       expect(yield* runtime.getStagedTurn(threadId, MessageId.make("message-1"))).toMatchObject({
         text: "查询蔡梦晨持仓",
       });
+    }).pipe(Effect.provide(FdEnterpriseThreadRuntimeLive)),
+  );
+
+  effectIt.effect("does not persist an assistant completion without authoritative final text", () =>
+    Effect.gen(function* () {
+      const runtime = yield* FdEnterpriseThreadRuntime;
+      const durableMessage = yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId: RuntimeItemId.make("assistant-without-final-text"),
+        type: "item.completed",
+        payload: {
+          itemType: "assistant_message",
+          status: "completed",
+        },
+      });
+
+      expect(durableMessage).toBeUndefined();
+      expect((yield* runtime.getSnapshot(threadId)).messages).toEqual([]);
     }).pipe(Effect.provide(FdEnterpriseThreadRuntimeLive)),
   );
 

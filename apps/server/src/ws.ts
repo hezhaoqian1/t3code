@@ -25,6 +25,7 @@ import {
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
   type OrchestrationThreadStreamItem,
+  type OrchestrationVolatileThreadOverlay,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
@@ -75,7 +76,11 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
-import { FdEnterpriseThreadRuntime } from "./fd-skills/FdEnterpriseThreadRuntime.ts";
+import {
+  FD_ENTERPRISE_HISTORY_MESSAGE_PREFIX,
+  FdEnterpriseThreadRuntime,
+  withoutDurableEnterpriseHistory,
+} from "./fd-skills/FdEnterpriseThreadRuntime.ts";
 import { FdDesktopFeedbackClient } from "./fd-feedback/FdDesktopFeedbackClient.ts";
 import * as FdRuntimeCredentialStore from "./fd/FdRuntimeCredentialStore.ts";
 import { listProjectSkills } from "./fd-skills/ProjectSkillCatalogQuery.ts";
@@ -1324,6 +1329,84 @@ const makeWsRpcLayer = (
                 event.aggregateKind === "thread" &&
                 event.aggregateId === input.threadId &&
                 isThreadDetailEvent(event);
+              const reconcileEnterpriseOverlay = (overlay: OrchestrationVolatileThreadOverlay) =>
+                Effect.gen(function* () {
+                  const readDurableThread = projectionSnapshotQuery.getThreadDetailById(
+                    input.threadId,
+                  );
+                  const initialRead = yield* readDurableThread.pipe(
+                    Effect.map((thread) => ({ _tag: "success" as const, thread })),
+                    Effect.catch((error) =>
+                      Effect.logWarning("enterprise history durable-message lookup failed", {
+                        threadId: input.threadId,
+                        error,
+                      }).pipe(Effect.as({ _tag: "failure" as const })),
+                    ),
+                  );
+                  if (initialRead._tag === "failure") return overlay;
+                  let thread = initialRead.thread;
+                  const durableMessages = Option.match(thread, {
+                    onNone: () => [],
+                    onSome: (value) => value.messages,
+                  });
+                  const missingHistory = withoutDurableEnterpriseHistory(
+                    overlay,
+                    durableMessages,
+                  ).messages.filter(
+                    (
+                      message,
+                    ): message is typeof message & { readonly role: "user" | "assistant" } =>
+                      message.id.startsWith(FD_ENTERPRISE_HISTORY_MESSAGE_PREFIX) &&
+                      message.turnId === null &&
+                      (message.role === "user" || message.role === "assistant"),
+                  );
+                  const backfilledMessages = (yield* Effect.forEach(missingHistory, (message) =>
+                    orchestrationEngine
+                      .dispatch({
+                        type: "thread.message.restore",
+                        commandId: CommandId.make(`fd-history:${input.threadId}:${message.id}`),
+                        threadId: input.threadId,
+                        message: {
+                          id: message.id,
+                          role: message.role,
+                          text: message.text,
+                          createdAt: message.createdAt,
+                          updatedAt: message.updatedAt,
+                        },
+                      })
+                      .pipe(
+                        Effect.as(message),
+                        Effect.catch((error) =>
+                          Effect.logWarning("enterprise history local backfill failed", {
+                            threadId: input.threadId,
+                            messageId: message.id,
+                            error,
+                          }).pipe(Effect.as(undefined)),
+                        ),
+                      ),
+                  )).filter(
+                    (message): message is (typeof missingHistory)[number] => message !== undefined,
+                  );
+                  if (backfilledMessages.length > 0) {
+                    const refreshedRead = yield* readDurableThread.pipe(
+                      Effect.map((thread) => ({ _tag: "success" as const, thread })),
+                      Effect.catch((error) =>
+                        Effect.logWarning("enterprise history durable-message refresh failed", {
+                          threadId: input.threadId,
+                          error,
+                        }).pipe(Effect.as({ _tag: "failure" as const })),
+                      ),
+                    );
+                    if (refreshedRead._tag === "success") thread = refreshedRead.thread;
+                  }
+                  return withoutDurableEnterpriseHistory(overlay, [
+                    ...Option.match(thread, {
+                      onNone: () => durableMessages,
+                      onSome: (value) => value.messages,
+                    }),
+                    ...backfilledMessages,
+                  ]);
+                });
 
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(isThisThreadDetailEvent),
@@ -1343,10 +1426,8 @@ const makeWsRpcLayer = (
               const volatileResetStream = Option.isSome(enterpriseThreadRuntime)
                 ? enterpriseThreadRuntime.value.resetStream.pipe(
                     Stream.filter((overlay) => overlay.threadId === input.threadId),
-                    Stream.map((overlay) => ({
-                      kind: "volatile-snapshot" as const,
-                      overlay,
-                    })),
+                    Stream.mapEffect(reconcileEnterpriseOverlay),
+                    Stream.map((overlay) => ({ kind: "volatile-snapshot" as const, overlay })),
                   )
                 : Stream.empty;
               const volatileStream = Stream.merge(volatileEventStream, volatileResetStream);
@@ -1364,8 +1445,12 @@ const makeWsRpcLayer = (
               const volatileSnapshotStream = Option.isSome(enterpriseThreadRuntime)
                 ? yield* enterpriseThreadRuntime.value.ensureHistory(input.threadId).pipe(
                     Effect.andThen(enterpriseThreadRuntime.value.getSnapshot(input.threadId)),
+                    Effect.flatMap(reconcileEnterpriseOverlay),
                     Effect.map((overlay) =>
-                      Stream.make({ kind: "volatile-snapshot" as const, overlay }),
+                      Stream.make({
+                        kind: "volatile-snapshot" as const,
+                        overlay,
+                      }),
                     ),
                   )
                 : Stream.empty;

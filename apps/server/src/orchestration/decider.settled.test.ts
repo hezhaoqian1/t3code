@@ -5,6 +5,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type OrchestrationReadModel,
   type OrchestrationSession,
   type OrchestrationThread,
@@ -69,6 +70,108 @@ function makeSession(status: OrchestrationSession["status"]): OrchestrationSessi
 }
 
 it.layer(NodeServices.layer)("settled thread decider", (it) => {
+  it.effect("persists an authoritative assistant completion atomically", () =>
+    Effect.gen(function* () {
+      const event = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.assistant.complete",
+          commandId: CommandId.make("cmd-assistant-final"),
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("assistant-final"),
+          text: "最终企业回答",
+          createdAt: NOW,
+        },
+        readModel: makeReadModel(null),
+      });
+
+      expect(event).toMatchObject({
+        type: "thread.message-sent",
+        payload: {
+          messageId: MessageId.make("assistant-final"),
+          role: "assistant",
+          text: "最终企业回答",
+          streaming: false,
+        },
+      });
+    }),
+  );
+
+  it.effect("imports recovered enterprise history without starting a turn", () =>
+    Effect.gen(function* () {
+      const event = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.restore",
+          commandId: CommandId.make("cmd-restore-enterprise-history"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            id: MessageId.make("fd-enterprise-history:7:11"),
+            role: "assistant",
+            text: "服务端恢复的历史回答",
+            createdAt: "2025-12-01T00:00:00.000Z",
+            updatedAt: "2025-12-01T00:00:00.000Z",
+          },
+        },
+        readModel: makeReadModel(null),
+      });
+
+      expect(event).toMatchObject({
+        type: "thread.message-sent",
+        occurredAt: NOW,
+        metadata: { historyRestore: true },
+        payload: {
+          messageId: MessageId.make("fd-enterprise-history:7:11"),
+          role: "assistant",
+          text: "服务端恢复的历史回答",
+          streaming: false,
+          createdAt: "2025-12-01T00:00:00.000Z",
+        },
+      });
+    }),
+  );
+
+  it.effect("does not erase a live turn association during history reconciliation", () =>
+    Effect.gen(function* () {
+      const messageId = MessageId.make("fd-enterprise-history:7:12");
+      const turnId = TurnId.make("enterprise-turn-1");
+      const event = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.message.restore",
+          commandId: CommandId.make("cmd-raced-history-restore"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            id: messageId,
+            role: "assistant",
+            text: "实时完成的回答",
+            createdAt: NOW,
+            updatedAt: NOW,
+          },
+        },
+        readModel: makeReadModel(
+          null,
+          null,
+          null,
+          [],
+          [
+            {
+              id: messageId,
+              role: "assistant",
+              text: "实时完成的回答",
+              turnId,
+              streaming: false,
+              createdAt: NOW,
+              updatedAt: NOW,
+            },
+          ],
+        ),
+      });
+
+      expect(event).toMatchObject({
+        type: "thread.message-sent",
+        payload: { messageId, turnId },
+      });
+    }),
+  );
+
   it.effect("settles active threads and re-emits idempotently for settled ones", () =>
     Effect.gen(function* () {
       const event = yield* decideOrchestrationCommand({

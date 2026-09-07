@@ -578,7 +578,9 @@ describe("ProviderCommandReactor", () => {
 
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-    expect(thread?.messages).toEqual([]);
+    expect(thread?.messages).toMatchObject([
+      { id: asMessageId("user-message-1"), role: "user", text: "hello reactor" },
+    ]);
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
@@ -591,7 +593,7 @@ describe("ProviderCommandReactor", () => {
     ]);
 
     const persisted = await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0, 100)));
-    expect(JSON.stringify(Array.from(persisted))).not.toContain("hello reactor");
+    expect(JSON.stringify(Array.from(persisted))).toContain("hello reactor");
   });
 
   it("rejects FD Skill document attachments before starting a provider session", async () => {

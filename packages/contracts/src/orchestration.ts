@@ -963,8 +963,22 @@ const ThreadMessageAssistantCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   messageId: MessageId,
+  text: Schema.optional(Schema.String),
   turnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
+});
+
+const ThreadMessageRestoreCommand = Schema.Struct({
+  type: Schema.Literal("thread.message.restore"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  message: Schema.Struct({
+    id: MessageId,
+    role: Schema.Literals(["user", "assistant"]),
+    text: Schema.String,
+    createdAt: IsoDateTime,
+    updatedAt: IsoDateTime,
+  }),
 });
 
 const ThreadProposedPlanUpsertCommand = Schema.Struct({
@@ -1017,6 +1031,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
+  ThreadMessageRestoreCommand,
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
@@ -1302,6 +1317,7 @@ export const OrchestrationEventMetadata = Schema.Struct({
   adapterKey: Schema.optional(TrimmedNonEmptyString),
   requestId: Schema.optional(ApprovalRequestId),
   ingestedAt: Schema.optional(IsoDateTime),
+  historyRestore: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationEventMetadata = typeof OrchestrationEventMetadata.Type;
 

@@ -1478,7 +1478,27 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       if (event.persistence === "memory-only") {
         if (Option.isSome(enterpriseRuntime)) {
-          yield* enterpriseRuntime.value.applyRuntimeEvent(event);
+          const durableMessage = yield* enterpriseRuntime.value.applyRuntimeEvent(event);
+          if (durableMessage) {
+            const thread = yield* resolveThreadDetail(event.threadId);
+            const existing = thread?.messages.find((message) => message.id === durableMessage.id);
+            if (
+              existing?.text === durableMessage.text &&
+              existing.streaming === false &&
+              existing.turnId === durableMessage.turnId
+            ) {
+              return;
+            }
+            yield* orchestrationEngine.dispatch({
+              type: "thread.message.assistant.complete",
+              commandId: yield* providerCommandId(event, "enterprise-assistant-complete"),
+              threadId: event.threadId,
+              messageId: durableMessage.id,
+              text: durableMessage.text,
+              ...(durableMessage.turnId ? { turnId: durableMessage.turnId } : {}),
+              createdAt: durableMessage.createdAt,
+            });
+          }
         }
         return;
       }

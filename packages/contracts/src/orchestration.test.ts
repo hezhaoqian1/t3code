@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import {
+  ClientOrchestrationCommand,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   ModelSelection,
@@ -50,6 +51,7 @@ function getOptionValue(
   return options?.find((option) => option.id === id)?.value;
 }
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
@@ -694,6 +696,48 @@ it.effect("accepts an internal title regeneration completion", () =>
       assert.strictEqual(parsed.requestId, "cmd-title-regenerate");
       assert.strictEqual(parsed.title, "Updated title");
     }
+  }),
+);
+
+it.effect("accepts visible Enterprise history only as an internal command", () =>
+  Effect.gen(function* () {
+    const command = {
+      type: "thread.message.restore",
+      commandId: "cmd-restore-history",
+      threadId: "thread-1",
+      message: {
+        id: "fd-enterprise-history:7:11",
+        role: "assistant",
+        text: "恢复的回答",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    };
+
+    const parsed = yield* decodeOrchestrationCommand(command);
+    assert.strictEqual(parsed.type, "thread.message.restore");
+    const clientResult = yield* Effect.exit(decodeClientOrchestrationCommand(command));
+    assert.strictEqual(clientResult._tag, "Failure");
+  }),
+);
+
+it.effect("rejects non-visible roles from Enterprise history restore", () =>
+  Effect.gen(function* () {
+    const result = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.message.restore",
+        commandId: "cmd-restore-system-history",
+        threadId: "thread-1",
+        message: {
+          id: "fd-enterprise-history:7:12",
+          role: "system",
+          text: "internal policy",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      }),
+    );
+    assert.strictEqual(result._tag, "Failure");
   }),
 );
 

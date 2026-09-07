@@ -374,7 +374,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(thread.session?.lastError).toBe("turn failed");
   });
 
-  it("keeps Enterprise content volatile while durable lifecycle reaches ready", async () => {
+  it("persists Enterprise final text while keeping tool details volatile", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
     const provider = ProviderDriverKind.make("fd-deepseek");
@@ -477,8 +477,25 @@ describe("ProviderRuntimeIngestion", () => {
       ),
     );
     const durableJson = JSON.stringify(durableEvents);
+    const durableAssistantEvents = durableEvents.filter(
+      (event) =>
+        event.type === "thread.message-sent" &&
+        String(event.payload.messageId) === String(assistantItemId),
+    );
 
-    expect(thread.messages).toEqual([]);
+    expect(thread.messages).toEqual([
+      expect.objectContaining({
+        id: assistantItemId,
+        role: "assistant",
+        text: "客户敏感最终回答",
+        streaming: false,
+        turnId,
+      }),
+    ]);
+    expect(durableAssistantEvents).toHaveLength(1);
+    expect(durableAssistantEvents[0]).toMatchObject({
+      payload: { text: "客户敏感最终回答", streaming: false },
+    });
     expect(overlay.messages).toEqual([
       expect.objectContaining({
         id: assistantItemId,
@@ -494,9 +511,80 @@ describe("ProviderRuntimeIngestion", () => {
         payload: { detail: "audit sensitive-audit-id" },
       }),
     ]);
-    expect(durableJson).not.toContain("客户敏感");
+    expect(durableJson).toContain("客户敏感最终回答");
     expect(durableJson).not.toContain("sensitive-audit-id");
     expect(durableJson).not.toContain("正在查询客户持仓");
+
+    await Effect.runPromise(harness.enterpriseRuntime.clearAll());
+    expect(
+      (await Effect.runPromise(harness.enterpriseRuntime.getSnapshot(asThreadId("thread-1"))))
+        .messages,
+    ).toEqual([]);
+    expect(
+      (await harness.readModel()).threads
+        .find((entry) => entry.id === asThreadId("thread-1"))
+        ?.messages.find((message) => String(message.id) === String(assistantItemId)),
+    ).toMatchObject({
+      role: "assistant",
+      text: "客户敏感最终回答",
+      streaming: false,
+      turnId,
+    });
+  });
+
+  it("repairs a raced history restore with the authoritative Enterprise turn ID", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    const provider = ProviderDriverKind.make("fd-deepseek");
+    const turnId = asTurnId("fd-enterprise-turn-raced-restore");
+    const messageId = asMessageId("fd-enterprise-history:7:13");
+
+    await harness.dispatch({
+      type: "thread.message.restore",
+      commandId: CommandId.make("cmd-history-restore-before-live-completion"),
+      threadId: asThreadId("thread-1"),
+      message: {
+        id: messageId,
+        role: "assistant",
+        text: "权威实时回答",
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+
+    harness.emit({
+      type: "item.completed",
+      persistence: "memory-only",
+      eventId: asEventId("evt-fd-enterprise-raced-restore-completed"),
+      provider,
+      threadId: asThreadId("thread-1"),
+      createdAt: now,
+      turnId,
+      itemId: asItemId("fd-enterprise-raced-restore-assistant"),
+      payload: {
+        itemType: "assistant_message",
+        status: "completed",
+        data: {
+          finalText: "权威实时回答",
+          enterpriseConversationId: 7,
+          enterpriseMessageId: 13,
+        },
+      },
+    });
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.messages.some((message) => message.id === messageId && message.turnId === turnId),
+    );
+    await harness.drain();
+
+    expect(thread.messages).toContainEqual(
+      expect.objectContaining({
+        id: messageId,
+        text: "权威实时回答",
+        turnId,
+        streaming: false,
+      }),
+    );
   });
 
   it("applies provider session.state.changed transitions directly", async () => {

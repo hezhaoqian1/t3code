@@ -18,15 +18,18 @@ connects to Fangde identity, usage policy, and enterprise FD Skills after sign-i
 - On the desktop app, click your employee name in the lower-left corner to open the account menu
   for usage, settings, or sign out. The web app keeps these as separate sidebar entries.
 - Download the current Windows x64 or macOS Apple Silicon installer from
-  the [Fangde AI download page](https://ai-api.fdsure.com/api-access). The internal channel
-  currently publishes version `0.2.11`.
+  the [Fangde AI download page](https://ai-api.fdsure.com/api-access). The page resolves the active
+  version from the stable Desktop release manifest, so this README does not pin a version number.
 
 ## Architecture
 
-- T3-derived Desktop and Web code own the task, workspace, conversation, and local workbench UI.
+- T3-derived Desktop and Web code own the task, workspace, local conversation history, and
+  workbench UI. FD Skill user and final assistant text are persisted in the existing local event
+  store; reasoning, tool payloads, audit identifiers, policy, and credentials stay memory-only.
 - Codex App Server owns ordinary project and local-Skill Agent execution.
 - Fangde identity owns login, short-lived runtime credentials, model policy, and AI-point usage.
-- FD Enterprise Agent owns enterprise Skills, data authorization, audit, and enterprise history.
+- FD Enterprise Agent owns enterprise Skills, data authorization, audit, and the server-side
+  enterprise history copy used to repair older or interrupted local history.
 
 The runtime is local by construction: the bundled server binds to loopback only, and renderer/server
 traffic is authenticated. The retired mobile, relay, public pairing, SSH, WSL, and third-party

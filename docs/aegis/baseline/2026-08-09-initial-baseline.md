@@ -97,6 +97,11 @@ can distinguish intended redesign from accidental drift.
 - T3's existing Codex App Server runtime owns ordinary, project, and local-Skill Agent execution
   against exact FD New API `deepseek-v4-flash` after compatibility proof.
 - The existing FD Enterprise Agent remains canonical for selected FD Skill turns.
+- T3's local event store persists employee-visible FD Skill user and final assistant text; provider
+  reasoning, tool arguments/results, audit identifiers, policy, and credentials remain memory-only.
+- The Enterprise Agent history endpoint remains the compatibility and recovery source for older or
+  interrupted FD Skill turns, backfilled through the local message owner and reconciled before
+  presentation.
 - Each conversation binds exactly one execution owner. Changing owner creates a new conversation;
   no transparent mid-conversation handoff is allowed.
 - The Codex adapter and FD enterprise adapter normalize their respective paths into the same T3

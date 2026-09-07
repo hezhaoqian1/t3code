@@ -5,6 +5,11 @@ records, not authoritative runtime decisions.
 
 | Date       | Kind     | Path                                                                                                   | Title                                                                |
 | ---------- | -------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| 2026-09-07 | evidence | docs/aegis/work/2026-09-07-fd-enterprise-local-history/90-evidence.md                                  | FD Enterprise Local History evidence                                 |
+| 2026-09-07 | work     | docs/aegis/work/2026-09-07-fd-enterprise-local-history/20-checkpoint.md                                | FD Enterprise Local History checkpoint                               |
+| 2026-09-07 | intent   | docs/aegis/work/2026-09-07-fd-enterprise-local-history/10-intent.md                                    | FD Enterprise Local History intent                                   |
+| 2026-09-07 | adr      | docs/aegis/adr/ADR-0002-persist-visible-fd-enterprise-history-locally.md                               | Persist visible FD Enterprise history locally                        |
+| 2026-09-07 | plan     | docs/aegis/plans/2026-09-07-fd-enterprise-local-history.md                                             | FD Enterprise Local History                                          |
 | 2026-08-19 | plan     | docs/aegis/plans/2026-08-19-desktop-file-analysis-v1.md                                                | Desktop One-Off File Analysis V1 Implementation Plan                 |
 | 2026-08-24 | plan     | docs/aegis/plans/2026-08-24-desktop-vision-routing.md                                                  | Desktop Vision Routing Implementation Plan                           |
 | 2026-08-19 | work     | docs/aegis/work/2026-08-19-desktop-file-analysis-v1/10-intent.md                                       | Desktop File Analysis V1 intent                                      |

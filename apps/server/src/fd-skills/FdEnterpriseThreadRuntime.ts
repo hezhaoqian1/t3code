@@ -23,15 +23,22 @@ import type { FdEnterpriseHistory } from "./FdEnterpriseAgentClient.ts";
 const MAX_MESSAGES = 2_000;
 const MAX_ACTIVITIES = 500;
 const OVERLAY_IDLE_TTL_MS = 30 * 60 * 1_000;
-const ENTERPRISE_HISTORY_MESSAGE_PREFIX = "fd-enterprise-history:";
+export const FD_ENTERPRISE_HISTORY_MESSAGE_PREFIX = "fd-enterprise-history:";
 
 const enterpriseHistoryMessageId = (conversationId: number, messageId: number): MessageId =>
-  MessageId.make(ENTERPRISE_HISTORY_MESSAGE_PREFIX + conversationId + ":" + messageId);
+  MessageId.make(FD_ENTERPRISE_HISTORY_MESSAGE_PREFIX + conversationId + ":" + messageId);
 
 type HistoryLoader = (threadId: ThreadId) => Promise<FdEnterpriseHistory | undefined>;
 
 interface StagedTurn {
   readonly message: OrchestrationMessage;
+}
+
+export interface FdEnterpriseDurableMessage {
+  readonly id: MessageId;
+  readonly text: string;
+  readonly turnId: OrchestrationMessage["turnId"];
+  readonly createdAt: string;
 }
 
 interface ThreadOverlayState {
@@ -64,7 +71,9 @@ export interface FdEnterpriseThreadRuntimeShape {
   readonly clearAll: () => Effect.Effect<void>;
   readonly reloadAllHistory: () => Effect.Effect<void>;
   readonly getGeneration: () => number;
-  readonly applyRuntimeEvent: (event: ProviderRuntimeEvent) => Effect.Effect<void>;
+  readonly applyRuntimeEvent: (
+    event: ProviderRuntimeEvent,
+  ) => Effect.Effect<FdEnterpriseDurableMessage | void>;
   readonly restoreHistory: (history: FdEnterpriseHistory) => Effect.Effect<void>;
   readonly ensureHistory: (threadId: ThreadId) => Effect.Effect<void>;
   readonly getSnapshot: (threadId: ThreadId) => Effect.Effect<OrchestrationVolatileThreadOverlay>;
@@ -77,6 +86,39 @@ export class FdEnterpriseThreadRuntime extends Context.Service<
   FdEnterpriseThreadRuntime,
   FdEnterpriseThreadRuntimeShape
 >()("t3/fd-skills/FdEnterpriseThreadRuntime") {}
+
+export function withoutDurableEnterpriseHistory(
+  overlay: OrchestrationVolatileThreadOverlay,
+  durableMessages: ReadonlyArray<OrchestrationMessage>,
+): OrchestrationVolatileThreadOverlay {
+  const durableIds = new Set(durableMessages.map((message) => message.id));
+  const overlayIds = new Set(overlay.messages.map((message) => message.id));
+  const durableSignatures = new Map<string, number>();
+  for (const message of durableMessages) {
+    if (overlayIds.has(message.id)) continue;
+    const signature = `${message.role}\u0000${message.text}`;
+    durableSignatures.set(signature, (durableSignatures.get(signature) ?? 0) + 1);
+  }
+  const messages: Array<OrchestrationMessage> = [];
+  for (let index = overlay.messages.length - 1; index >= 0; index -= 1) {
+    const message = overlay.messages[index]!;
+    const keep = (() => {
+      if (durableIds.has(message.id)) return false;
+      if (!message.id.startsWith(FD_ENTERPRISE_HISTORY_MESSAGE_PREFIX)) return true;
+      const signature = `${message.role}\u0000${message.text}`;
+      const remaining = durableSignatures.get(signature) ?? 0;
+      if (remaining === 0) return true;
+      durableSignatures.set(signature, remaining - 1);
+      return false;
+    })();
+    if (keep) messages.push(message);
+  }
+  messages.reverse();
+  return {
+    ...overlay,
+    messages,
+  };
+}
 
 const make = Effect.gen(function* () {
   const events = yield* PubSub.unbounded<OrchestrationEvent>();
@@ -356,7 +398,7 @@ const make = Effect.gen(function* () {
         turnId: event.turnId ?? null,
         streaming: true,
         createdAt: event.createdAt,
-      });
+      }).pipe(Effect.as(undefined));
     }
     if (event.type === "content.delta" && event.payload.streamKind === "reasoning_summary_text") {
       const state = stateFor(event.threadId);
@@ -372,7 +414,7 @@ const make = Effect.gen(function* () {
         payload: { text: summary },
         turnId: event.turnId ?? null,
         createdAt: event.createdAt,
-      });
+      }).pipe(Effect.as(undefined));
     }
     if (event.type === "item.started" || event.type === "item.completed") {
       if (event.payload.itemType === "assistant_message") {
@@ -380,14 +422,15 @@ const make = Effect.gen(function* () {
         const final = (() => {
           const data = event.payload.data;
           if (typeof data !== "object" || data === null) {
-            return { text: "", messageId: undefined };
+            return undefined;
           }
           const value = (data as { finalText?: unknown }).finalText;
+          if (typeof value !== "string") return undefined;
           const conversationId = (data as { enterpriseConversationId?: unknown })
             .enterpriseConversationId;
           const messageId = (data as { enterpriseMessageId?: unknown }).enterpriseMessageId;
           return {
-            text: typeof value === "string" ? value : "",
+            text: value,
             messageId:
               Number.isSafeInteger(conversationId) &&
               (conversationId as number) >= 0 &&
@@ -397,6 +440,7 @@ const make = Effect.gen(function* () {
                 : undefined,
           };
         })();
+        if (!final) return Effect.void;
         const runtimeMessageId = MessageId.make(
           event.itemId ?? RuntimeItemId.make(`${event.turnId ?? "turn"}:assistant`),
         );
@@ -407,6 +451,12 @@ const make = Effect.gen(function* () {
           state.liveMessageIds.delete(runtimeMessageId);
         }
         state.liveMessageIds.add(finalMessageId);
+        const durableMessage = {
+          id: finalMessageId,
+          text: final.text,
+          turnId: event.turnId ?? null,
+          createdAt: event.createdAt,
+        } satisfies FdEnterpriseDurableMessage;
         return emitMessage({
           threadId: event.threadId,
           messageId: finalMessageId,
@@ -415,7 +465,7 @@ const make = Effect.gen(function* () {
           turnId: event.turnId ?? null,
           streaming: false,
           createdAt: event.createdAt,
-        });
+        }).pipe(Effect.as(durableMessage));
       }
       const completed = event.type === "item.completed";
       return emitActivity({
@@ -427,7 +477,7 @@ const make = Effect.gen(function* () {
         payload: event.payload.detail ? { detail: event.payload.detail } : {},
         turnId: event.turnId ?? null,
         createdAt: event.createdAt,
-      });
+      }).pipe(Effect.as(undefined));
     }
     return Effect.void;
   };

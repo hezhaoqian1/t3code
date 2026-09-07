@@ -215,9 +215,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           );
 
         commandReadModel = committedCommand.nextCommandReadModel;
-        // Stage the sensitive user text only after the durable lifecycle
-        // command has committed. A rejected command must never leave a ghost
-        // message in the process-local enterprise overlay.
+        // Mirror the durable Enterprise user message into the live overlay only
+        // after commit. A rejected command must never leave a ghost message.
         if (
           envelope.command.type === "thread.turn.start" &&
           envelope.command.fdSkillVersionId !== undefined

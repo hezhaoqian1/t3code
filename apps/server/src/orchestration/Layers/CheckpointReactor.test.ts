@@ -848,6 +848,29 @@ describe("CheckpointReactor", () => {
     ).toBe("v1\n");
   });
 
+  it("does not capture a pre-turn baseline for restored Enterprise history", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const baselineRef = checkpointRefForThreadTurn(ThreadId.make("thread-1"), 0);
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.message.restore",
+        commandId: CommandId.make("fd-history:thread-1:fd-enterprise-history:7:10"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          id: MessageId.make("fd-enterprise-history:7:10"),
+          role: "user",
+          text: "恢复的历史问题",
+          createdAt: "2025-12-01T00:00:00.000Z",
+          updatedAt: "2025-12-01T00:00:00.000Z",
+        },
+      }),
+    );
+    await harness.drain();
+
+    expect(gitRefExists(harness.cwd, baselineRef)).toBe(false);
+  });
+
   it("captures turn completion checkpoint from project workspace root when provider session cwd is unavailable", async () => {
     const harness = await createHarness({
       hasSession: false,
