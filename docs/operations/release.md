@@ -31,18 +31,66 @@ the release artifact.
 ## Build And Publish
 
 1. Merge verified source to `main`.
-2. Dispatch `FD Desktop Internal Release` with a stable version higher than the active version.
-3. Download the `fd-desktop-release-<version>` workflow artifact.
-4. Run the Gateway publisher from the FD Gateway repository:
+2. Read the active version from the public stable manifest and choose a strictly higher stable
+   version. Never infer it from README text or a previous release record.
+3. Dispatch `FD Desktop Internal Release` from `main` with that version.
+4. Download the completed `fd-desktop-release-<version>` workflow artifact.
+5. Run the Gateway publisher from the FD Gateway repository:
 
 ```bash
-FD_DESKTOP_RELEASE_MODE=internal-unsigned scripts/publish-desktop-release.sh verify <version> <asset-directory>
-FD_DESKTOP_RELEASE_MODE=internal-unsigned scripts/publish-desktop-release.sh publish <version> <asset-directory>
+latest=https://ai-api.fdsure.com/downloads/desktop/latest/latest.json
+curl --proto '=https' --tlsv1.2 -fsS "$latest" | jq -r .latestVersion
+
+repo=hezhaoqian1/t3code
+version=<next-stable-version>
+previous_run_id=$(gh run list --repo "$repo" --workflow fd-desktop-release.yml --branch main \
+  --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // 0')
+gh workflow run fd-desktop-release.yml --repo "$repo" --ref main -f version="$version"
+
+run_id=
+for attempt in $(seq 1 30); do
+  candidate=$(gh run list --repo "$repo" --workflow fd-desktop-release.yml --branch main \
+    --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+  if [ -n "$candidate" ] && [ "$candidate" != "$previous_run_id" ]; then
+    run_id=$candidate
+    break
+  fi
+  sleep 2
+done
+test -n "$run_id"
+gh run watch "$run_id" --repo "$repo" --exit-status
+
+bundle_dir=$(mktemp -d "${TMPDIR:-/tmp}/fd-desktop-$version.XXXXXX")
+gh run download "$run_id" --repo "$repo" --name "fd-desktop-release-$version" \
+  --dir "$bundle_dir"
+```
+
+Serialize release dispatches so the newly observed run ID cannot belong to another operator. After
+the artifact download succeeds, change to the FD Gateway repository and run its publisher:
+
+```bash
+FD_DESKTOP_RELEASE_MODE=internal-unsigned scripts/publish-desktop-release.sh verify \
+  "$version" "$bundle_dir"
+FD_DESKTOP_RELEASE_MODE=internal-unsigned scripts/publish-desktop-release.sh publish \
+  "$version" "$bundle_dir"
 ```
 
 The Gateway publisher verifies manifests, byte sizes, hashes, app identifiers, architectures,
 manifest byte sizes and hashes before atomically switching the public
 `latest` link. It creates `latest.json` and stable legacy aliases used by the official download page.
+
+Do not replace the publisher with `scp`. The publisher already uploads the four large artifacts in
+16 MiB chunks, retries each chunk up to four times, transfers at most four files concurrently, and
+reuses verified chunks after an interruption. Small manifests and checksums are uploaded in a
+separate batch. The server assembles each file to a temporary path, verifies its complete SHA-256,
+freezes `releases/<version>`, verifies immutable public URLs, and only then atomically switches
+`latest`; a failed stable smoke check restores `previous`.
+
+Use the dedicated `fddeploy` account and SSH key or agent in normal operation. If an emergency
+credential helper is required, pass it through `FD_DESKTOP_RELEASE_SSH_COMMAND` without writing a
+password into Git, a script, a command argument, or this document. Re-running the same publish
+command resumes the deterministic incoming bundle; an `another publisher` error means a release
+session already owns that bundle and must be allowed to finish.
 
 ## Upstream API Verification
 
