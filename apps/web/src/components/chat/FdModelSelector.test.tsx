@@ -16,6 +16,7 @@ const models = [
   {
     slug: FD_RUNTIME_DEFAULT_MODEL,
     name: "DeepSeek V4 Flash",
+    shortName: "V4 Flash",
     isCustom: false,
     isDefault: true,
     capabilities: { optionDescriptors: [] },
@@ -23,6 +24,7 @@ const models = [
   {
     slug: FD_RUNTIME_PRO_MODEL,
     name: "DeepSeek V4 Pro",
+    shortName: "V4 Pro",
     isCustom: false,
     isDefault: false,
     capabilities: { optionDescriptors: [] },
@@ -30,10 +32,10 @@ const models = [
 ] as const;
 
 describe("FdModelSelector", () => {
-  it("keeps only exact managed models in provider order", () => {
+  it("keeps every advertised model in provider order", () => {
     expect(
       resolveFdModelOptions([...models, { ...models[0], slug: "other-model", name: "Other" }]),
-    ).toEqual([FD_RUNTIME_DEFAULT_MODEL, FD_RUNTIME_PRO_MODEL]);
+    ).toEqual([FD_RUNTIME_DEFAULT_MODEL, FD_RUNTIME_PRO_MODEL, "other-model"]);
   });
 
   it("renders the compact selected-model trigger", () => {
@@ -45,10 +47,10 @@ describe("FdModelSelector", () => {
     expect(markup).toContain("w-24");
     expect(markup).toContain("min-w-24");
     expect(markup).toContain("V4 Pro");
-    expect(fdModelLabel(FD_RUNTIME_DEFAULT_MODEL)).toBe("V4 Flash");
+    expect(fdModelLabel(models[0])).toBe("V4 Flash");
   });
 
-  it("accepts only advertised managed model changes", () => {
+  it("accepts only advertised model changes", () => {
     const options = resolveFdModelOptions(models);
 
     expect(resolveFdModelChange(FD_RUNTIME_PRO_MODEL, options)).toBe(FD_RUNTIME_PRO_MODEL);

@@ -418,22 +418,44 @@ describe("FdDeepSeekDriver", () => {
         status: "warning",
         auth: { status: "unauthenticated", type: "fd-account" },
       });
-      expect(snapshot.models).toEqual([
-        expect.objectContaining({
-          slug: FD_RESPONSES_MODEL,
-          name: "DeepSeek V4 Flash",
-          shortName: "V4 Flash",
-          isDefault: true,
-          isCustom: false,
-        }),
-        expect.objectContaining({
-          slug: "deepseek-v4-pro",
-          name: "DeepSeek V4 Pro",
-          shortName: "V4 Pro",
-          isDefault: false,
-          isCustom: false,
-        }),
-      ]);
+      expect(snapshot.models).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            slug: FD_RESPONSES_MODEL,
+            name: "DeepSeek V4 Flash",
+            shortName: "V4 Flash",
+            isDefault: true,
+            isCustom: false,
+          }),
+          expect.objectContaining({
+            slug: "deepseek-v4-pro",
+            name: "DeepSeek V4 Pro",
+            shortName: "V4 Pro",
+            isDefault: false,
+            isCustom: false,
+          }),
+          expect.objectContaining({
+            slug: "qwen3.8-flash",
+            name: "Qwen 3.8 Flash",
+            shortName: "Qwen Flash",
+            isDefault: false,
+            isCustom: false,
+            capabilities: expect.objectContaining({ supportsVision: false }),
+          }),
+          expect.objectContaining({
+            slug: "glm-5.2",
+            name: "GLM 5.2",
+            isDefault: false,
+            isCustom: false,
+          }),
+          expect.objectContaining({
+            slug: "kimi-k3",
+            name: "Kimi K3",
+            isDefault: false,
+            isCustom: false,
+          }),
+        ]),
+      );
       expect(snapshot).not.toHaveProperty("installed");
       expect(snapshot).not.toHaveProperty("version");
       expect(snapshot).not.toHaveProperty("updateState");

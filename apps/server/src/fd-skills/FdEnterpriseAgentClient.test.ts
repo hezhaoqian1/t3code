@@ -142,7 +142,32 @@ describe("FdEnterpriseAgentClient", () => {
     } as FdEnterpriseAgentClient);
     await catalog.refresh();
     expect(catalog.authorized).toBe(true);
+    expect(catalog.supportsModel("deepseek-v4-pro")).toBe(false);
+    expect(catalog.supportsModel("deepseek-v4-flash")).toBe(true);
     expect(catalog.findVersion(10004)?.name).toBe("company-database-query");
+    expect(catalog.findVersion(10004, "deepseek-v4-pro")).toBeUndefined();
+  });
+
+  it("forwards an explicitly selected enterprise model", async () => {
+    const fetch = vi.fn(
+      async (_url: URL, init?: RequestInit) =>
+        new Response(stream(terminalStream.replaceAll("deepseek-v4-flash", "qwen3.8-max")), {
+          status: 200,
+          headers: { "Content-Type": "text/event-stream" },
+        }),
+    );
+    const client = new FdEnterpriseAgentClient({ credentials: async () => credentials, fetch });
+    for await (const _event of client.streamTurn({
+      clientThreadId,
+      skillVersionId: 10004,
+      message: "hello",
+      model: "qwen3.8-max",
+      idempotencyKey: "turn_1234567890123457",
+    })) {
+      void _event;
+    }
+    const body = JSON.parse(String(fetch.mock.calls[0]![1]!.body));
+    expect(body.model).toBe("qwen3.8-max");
   });
 
   it("loads bounded server-authoritative Desktop history without reasoning or tool metadata", async () => {

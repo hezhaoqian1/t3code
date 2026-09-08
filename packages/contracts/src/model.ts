@@ -124,6 +124,18 @@ function canonicalSelectionsToLegacyObject(
 
 export const ModelCapabilities = Schema.Struct({
   optionDescriptors: Schema.optional(Schema.Array(ProviderOptionDescriptor)),
+  /** Whether the model accepts the product's native/local tool surface. */
+  supportsTools: Schema.optional(Schema.Boolean),
+  /** Whether attachments can be sent as native model input. */
+  supportsVision: Schema.optional(Schema.Boolean),
+  /** Whether reasoning effort/options are meaningful for this model. */
+  supportsReasoning: Schema.optional(Schema.Boolean),
+  /** Whether structured output can be requested safely. */
+  supportsStructuredOutput: Schema.optional(Schema.Boolean),
+  /** Whether the backend accepts forced/object tool_choice. */
+  supportsForcedToolChoice: Schema.optional(Schema.Boolean),
+  /** Whether the backend accepts parallel tool calls. */
+  supportsParallelToolCalls: Schema.optional(Schema.Boolean),
 });
 export type ModelCapabilities = typeof ModelCapabilities.Type;
 

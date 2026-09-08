@@ -4,10 +4,6 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
-import {
-  FD_RUNTIME_DEFAULT_MODEL,
-  isFdRuntimeSelectableModel,
-} from "@t3tools/contracts/fd/runtime-credentials";
 
 const FD_PROVIDER_INSTANCE_ID = "fd-deepseek";
 
@@ -19,18 +15,10 @@ export function resolveAppModelSelection(
 ): string {
   const models =
     providers.find((provider) => provider.instanceId === FD_PROVIDER_INSTANCE_ID)?.models ?? [];
-  if (
-    selectedModel &&
-    isFdRuntimeSelectableModel(selectedModel) &&
-    models.some((model) => model.slug === selectedModel)
-  ) {
+  if (selectedModel && models.some((model) => model.slug === selectedModel)) {
     return selectedModel;
   }
-  return (
-    models.find((model) => model.isDefault && model.slug === FD_RUNTIME_DEFAULT_MODEL)?.slug ??
-    models.find((model) => model.slug === FD_RUNTIME_DEFAULT_MODEL)?.slug ??
-    FD_RUNTIME_DEFAULT_MODEL
-  );
+  return models.find((model) => model.isDefault)?.slug ?? models[0]?.slug ?? "deepseek-v4-flash";
 }
 
 export function resolveAppModelSelectionForInstance(

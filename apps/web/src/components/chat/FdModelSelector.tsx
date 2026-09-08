@@ -1,49 +1,33 @@
 import type { ServerProviderModel } from "@t3tools/contracts";
-import {
-  FD_RUNTIME_DEFAULT_MODEL,
-  FD_RUNTIME_PRO_MODEL,
-  isFdRuntimeSelectableModel,
-  type FdRuntimeSelectableModel,
-} from "@t3tools/contracts/fd/runtime-credentials";
 
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 
-const MODEL_LABELS: Readonly<Record<FdRuntimeSelectableModel, string>> = {
-  [FD_RUNTIME_DEFAULT_MODEL]: "V4 Flash",
-  [FD_RUNTIME_PRO_MODEL]: "V4 Pro",
-};
-
-export function fdModelLabel(model: FdRuntimeSelectableModel): string {
-  return MODEL_LABELS[model];
+export function fdModelLabel(model: ServerProviderModel | string): string {
+  return typeof model === "string" ? model : (model.shortName ?? model.name);
 }
 
 export function resolveFdModelOptions(
   models: ReadonlyArray<ServerProviderModel>,
-): ReadonlyArray<FdRuntimeSelectableModel> {
-  return models.flatMap((model) => (isFdRuntimeSelectableModel(model.slug) ? [model.slug] : []));
+): ReadonlyArray<string> {
+  return models.map((model) => model.slug);
 }
 
 export function resolveFdModelChange(
   nextValue: string | null,
-  options: ReadonlyArray<FdRuntimeSelectableModel>,
-): FdRuntimeSelectableModel | null {
-  return nextValue && isFdRuntimeSelectableModel(nextValue) && options.includes(nextValue)
-    ? nextValue
-    : null;
+  options: ReadonlyArray<string>,
+): string | null {
+  return nextValue && options.includes(nextValue) ? nextValue : null;
 }
 
 export function FdModelSelector(props: {
   value: string;
   models: ReadonlyArray<ServerProviderModel>;
   disabled?: boolean;
-  onValueChange: (model: FdRuntimeSelectableModel) => void;
+  onValueChange: (model: string) => void;
 }) {
   const options = resolveFdModelOptions(props.models);
   if (options.length === 0) return null;
-  const value =
-    isFdRuntimeSelectableModel(props.value) && options.includes(props.value)
-      ? props.value
-      : (options[0] ?? FD_RUNTIME_DEFAULT_MODEL);
+  const value = options.includes(props.value) ? props.value : (options[0] ?? "");
 
   return (
     <Select
@@ -60,12 +44,14 @@ export function FdModelSelector(props: {
         data-fd-model-selector="true"
         className="h-8 w-24 min-w-24 shrink-0 border-border/70 bg-background/60 px-2 text-xs font-medium shadow-none"
       >
-        <SelectValue>{fdModelLabel(value)}</SelectValue>
+        <SelectValue>
+          {fdModelLabel(props.models.find((model) => model.slug === value) ?? value)}
+        </SelectValue>
       </SelectTrigger>
       <SelectPopup side="top" align="end" alignItemWithTrigger={false} matchTriggerWidth={false}>
         {options.map((model) => (
           <SelectItem key={model} value={model} className="min-w-32" hideIndicator>
-            {fdModelLabel(model)}
+            {fdModelLabel(props.models.find((candidate) => candidate.slug === model) ?? model)}
           </SelectItem>
         ))}
       </SelectPopup>

@@ -25,9 +25,6 @@ export function makeFdCodexChildEnvironment(input: {
   readonly connectorConfigDir?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
 }): NodeJS.ProcessEnv {
-  if (!isAbsolute(input.codexHome)) {
-    throw new Error("Managed CODEX_HOME must be absolute");
-  }
   if (
     input.runtimeApiKey.length === 0 ||
     input.runtimeApiKey.length > 65_536 ||
@@ -35,7 +32,39 @@ export function makeFdCodexChildEnvironment(input: {
   ) {
     throw new Error("FD runtime credential is invalid");
   }
+  const environment = makeBaseCodexChildEnvironment(input);
+  environment[FD_CODEX_API_KEY_ENV] = input.runtimeApiKey;
+  return environment;
+}
 
+export function makeResponsesCodexChildEnvironment(input: {
+  readonly codexHome: string;
+  readonly apiKeyEnv: string;
+  readonly apiKey: string;
+  readonly connectorBinPath?: string | undefined;
+  readonly connectorConfigDir?: string | undefined;
+  readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
+}): NodeJS.ProcessEnv {
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(input.apiKeyEnv)) {
+    throw new Error("Responses API key environment variable is invalid");
+  }
+  if (input.apiKey.length === 0 || input.apiKey.length > 65_536 || /[\0\r\n]/.test(input.apiKey)) {
+    throw new Error("Responses API credential is invalid");
+  }
+  const environment = makeBaseCodexChildEnvironment(input);
+  environment[input.apiKeyEnv] = input.apiKey;
+  return environment;
+}
+
+function makeBaseCodexChildEnvironment(input: {
+  readonly codexHome: string;
+  readonly connectorBinPath?: string | undefined;
+  readonly connectorConfigDir?: string | undefined;
+  readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
+}): NodeJS.ProcessEnv {
+  if (!isAbsolute(input.codexHome)) {
+    throw new Error("Managed CODEX_HOME must be absolute");
+  }
   const source = input.inheritedEnvironment ?? process.env;
   const environment: NodeJS.ProcessEnv = { CODEX_HOME: input.codexHome };
   for (const key of INHERITED_ENV_KEYS) {
@@ -54,6 +83,5 @@ export function makeFdCodexChildEnvironment(input: {
     }
     environment.LARKSUITE_CLI_CONFIG_DIR = input.connectorConfigDir;
   }
-  environment[FD_CODEX_API_KEY_ENV] = input.runtimeApiKey;
   return environment;
 }

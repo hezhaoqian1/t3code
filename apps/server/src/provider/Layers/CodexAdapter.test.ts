@@ -402,7 +402,13 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         skills: [
           {
             name: "weekly-report",
-            path: "/tmp/fd-project/.agents/skills/weekly-report/SKILL.md",
+            path: NodePath.join(
+              "/tmp/fd-project",
+              ".agents",
+              "skills",
+              "weekly-report",
+              "SKILL.md",
+            ),
           },
         ],
       });

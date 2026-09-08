@@ -625,7 +625,8 @@ const make = Effect.gen(function* () {
     });
 
     const startProviderSession = (input?: {
-      readonly resumeCursor?: unknown;
+      /** `null` explicitly clears persisted provider resume state. */
+      readonly resumeCursor?: unknown | null;
       readonly provider?: ProviderDriverKind;
     }) =>
       providerService.startSession(threadId, {
@@ -635,7 +636,7 @@ const make = Effect.gen(function* () {
         ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
         ...(project ? { projectWorkspaceRoot: project.workspaceRoot } : {}),
         modelSelection: desiredModelSelection,
-        ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+        ...(input && "resumeCursor" in input ? { resumeCursor: input.resumeCursor } : {}),
         runtimeMode: desiredRuntimeMode,
       });
 
@@ -687,7 +688,7 @@ const make = Effect.gen(function* () {
       }
 
       const resumeCursor = shouldRestartForModelChange
-        ? undefined
+        ? null
         : (activeSession?.resumeCursor ?? undefined);
       yield* Effect.logInfo("provider command reactor restarting provider session", {
         threadId,
@@ -705,10 +706,10 @@ const make = Effect.gen(function* () {
         modelChanged,
         instanceChanged,
         shouldRestartForModelChange,
-        hasResumeCursor: resumeCursor !== undefined,
+        hasResumeCursor: resumeCursor !== undefined && resumeCursor !== null,
       });
       const restartedSession = yield* startProviderSession(
-        resumeCursor !== undefined ? { resumeCursor } : undefined,
+        shouldRestartForModelChange || resumeCursor !== undefined ? { resumeCursor } : undefined,
       );
       yield* Effect.logInfo("provider command reactor restarted provider session", {
         threadId,
