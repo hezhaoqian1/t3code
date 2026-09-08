@@ -25,6 +25,7 @@ import {
   ThreadId,
   ProviderSendTurnInput,
   type ProviderSessionStartInput,
+  type ModelCapabilities,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
@@ -76,11 +77,16 @@ const PROVIDER = ProviderDriverKind.make("codex");
 export interface CodexAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
-  readonly resolveRuntime?: () => Effect.Effect<
+  /** Resolve per-model protocol capabilities without coupling this adapter to a provider catalog. */
+  readonly resolveModelCapabilities?: (model: string) => ModelCapabilities | undefined;
+  /** Resolve the runtime identity used to guard model changes across endpoints. */
+  readonly resolveModelRuntimeKey?: (model: string) => string | undefined;
+  readonly resolveRuntime?: (input: ProviderSessionStartInput) => Effect.Effect<
     {
       readonly environment: NodeJS.ProcessEnv;
       readonly homePath: string;
       readonly skillExtraRoots?: ReadonlyArray<string>;
+      readonly runtimeKey?: string;
     },
     ProviderAdapterRequestError
   >;
@@ -118,6 +124,7 @@ interface CodexAdapterSessionContext {
   readonly scope: Scope.Closeable;
   readonly runtime: CodexSessionRuntimeShape;
   readonly eventFiber: Fiber.Fiber<void, never>;
+  readonly runtimeKey: string | undefined;
   stopped: boolean;
 }
 
@@ -1680,11 +1687,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         }
 
         const resolvedRuntime = options?.resolveRuntime
-          ? yield* options.resolveRuntime()
+          ? yield* options.resolveRuntime(input)
           : undefined;
         const runtimeEnvironment = resolvedRuntime?.environment ?? options?.environment;
         const runtimeHomePath = resolvedRuntime?.homePath ?? codexConfig.homePath;
         const skillExtraRoots = resolvedRuntime?.skillExtraRoots;
+        const runtimeKey = resolvedRuntime?.runtimeKey;
         const sessionRuntime = options?.resolveSessionRuntime
           ? yield* options.resolveSessionRuntime(input)
           : undefined;
@@ -1796,6 +1804,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           scope: sessionScope,
           runtime,
           eventFiber,
+          runtimeKey,
           stopped: false,
         });
         sessionScopeTransferred = true;
@@ -1851,6 +1860,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
     const session = yield* requireSession(input.threadId);
+    const selectedModel =
+      input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection.model : undefined;
+    if (selectedModel !== undefined && options?.resolveModelRuntimeKey) {
+      const requestedRuntimeKey = options.resolveModelRuntimeKey(selectedModel);
+      if (
+        requestedRuntimeKey !== undefined &&
+        session.runtimeKey !== undefined &&
+        requestedRuntimeKey !== session.runtimeKey
+      ) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "turn/start",
+          detail:
+            "The selected model uses a different Responses endpoint; restart the session before continuing.",
+        });
+      }
+    }
     const codexSkills =
       input.input !== undefined && options?.resolveTurnSkills
         ? yield* options.resolveTurnSkills({
@@ -1859,10 +1885,14 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             ...(input.nativeSkillNames ? { nativeSkillNames: input.nativeSkillNames } : {}),
           })
         : [];
+    const modelCapabilities =
+      selectedModel !== undefined ? options?.resolveModelCapabilities?.(selectedModel) : undefined;
     const reasoningEffort =
-      input.modelSelection?.instanceId === boundInstanceId
-        ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
-        : undefined;
+      modelCapabilities?.supportsReasoning === false
+        ? undefined
+        : input.modelSelection?.instanceId === boundInstanceId
+          ? getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort")
+          : undefined;
     const serviceTier =
       input.modelSelection?.instanceId === boundInstanceId
         ? getCodexServiceTierOptionValue(input.modelSelection)

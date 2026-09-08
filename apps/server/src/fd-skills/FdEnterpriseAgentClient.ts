@@ -106,6 +106,8 @@ export interface FdEnterpriseAgentTurnInput {
   readonly clientThreadId: string;
   readonly skillVersionId: number;
   readonly message: string;
+  /** Model selected for this enterprise turn; legacy callers use the FD default. */
+  readonly model?: string;
   readonly modelInput?: string;
   readonly idempotencyKey: string;
   readonly signal?: AbortSignal;
@@ -188,7 +190,7 @@ export class FdEnterpriseAgentClient {
       },
       body: JSON.stringify({
         client_thread_id: input.clientThreadId,
-        model: FD_RESPONSES_MODEL,
+        model: input.model?.trim() || FD_RESPONSES_MODEL,
         token_id: credentials.runtimeTokenId,
         skill_version_ids: [input.skillVersionId],
         message: input.message,
@@ -274,12 +276,18 @@ export class FdSkillCatalog {
     this.#snapshot = await this.client.getCatalog(signal);
     return this.#snapshot;
   }
-  get authorized(): boolean {
-    const capability = this.#snapshot.modelCapabilities[FD_RESPONSES_MODEL];
+  supportsModel(model: string): boolean {
+    const capability = this.#snapshot.modelCapabilities[model.trim()];
     return capability?.fdSkills === true && capability.protocol === FD_ENTERPRISE_AGENT_PROTOCOL;
   }
-  findVersion(versionId: number): FdManagedSkillSummary | undefined {
-    return this.authorized
+  get authorized(): boolean {
+    return this.supportsModel(FD_RESPONSES_MODEL);
+  }
+  findVersion(
+    versionId: number,
+    model: string = FD_RESPONSES_MODEL,
+  ): FdManagedSkillSummary | undefined {
+    return this.supportsModel(model)
       ? this.#snapshot.skills.find((skill) => skill.versionId === versionId)
       : undefined;
   }

@@ -200,52 +200,54 @@ describe("FdDeepSeekAdapter", () => {
     }),
   );
 
-  it.effect("rejects arbitrary models and direct Pro FD Skill execution", () =>
-    Effect.gen(function* () {
-      const adapter = yield* makeFdDeepSeekAdapter({
-        kernel: new FdAgentKernel(streamer([completed])),
-      });
-      const invalidStart = yield* adapter
-        .startSession({
-          ...startInput,
-          modelSelection: { ...startInput.modelSelection, model: "other-model" },
-        })
-        .pipe(Effect.flip);
-      expect(invalidStart).toMatchObject({
-        issue: "Only FD-managed DeepSeek models are authorized.",
-      });
-      const visionStart = yield* adapter
-        .startSession({
-          ...startInput,
-          modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_VISION_MODEL },
-        })
-        .pipe(Effect.flip);
-      expect(visionStart).toMatchObject({
-        issue: "Only FD-managed DeepSeek models are authorized.",
-      });
+  it.effect(
+    "rejects arbitrary models and FD Skill models missing from the capability catalog",
+    () =>
+      Effect.gen(function* () {
+        const adapter = yield* makeFdDeepSeekAdapter({
+          kernel: new FdAgentKernel(streamer([completed])),
+        });
+        const invalidStart = yield* adapter
+          .startSession({
+            ...startInput,
+            modelSelection: { ...startInput.modelSelection, model: "other-model" },
+          })
+          .pipe(Effect.flip);
+        expect(invalidStart).toMatchObject({
+          issue: "The selected model is not advertised by this provider.",
+        });
+        const visionStart = yield* adapter
+          .startSession({
+            ...startInput,
+            modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_VISION_MODEL },
+          })
+          .pipe(Effect.flip);
+        expect(visionStart).toMatchObject({
+          issue: "The selected model is not advertised by this provider.",
+        });
 
-      yield* adapter.startSession({
-        ...startInput,
-        modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_PRO_MODEL },
-      });
-      const invalidSkillTurn = yield* adapter
-        .sendTurn({
-          threadId,
-          input: "Run enterprise skill",
-          fdSkillVersionId: 10004,
-          modelSelection: {
-            instanceId: FD_DEEPSEEK_INSTANCE_ID,
-            model: FD_RUNTIME_PRO_MODEL,
-          },
-        })
-        .pipe(Effect.flip);
-      expect(invalidSkillTurn).toMatchObject({
-        issue: "This FD Skill runtime currently requires V4 Flash.",
-      });
-    }),
+        yield* adapter.startSession({
+          ...startInput,
+          modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_PRO_MODEL },
+        });
+        const invalidSkillTurn = yield* adapter
+          .sendTurn({
+            threadId,
+            input: "Run enterprise skill",
+            fdSkillVersionId: 10004,
+            modelSelection: {
+              instanceId: FD_DEEPSEEK_INSTANCE_ID,
+              model: FD_RUNTIME_PRO_MODEL,
+            },
+          })
+          .pipe(Effect.flip);
+        expect(invalidSkillTurn).toMatchObject({
+          issue: "The selected model is not authorized for FD Skills.",
+        });
+      }),
   );
 
-  it.effect("routes an authorized FD Skill through Enterprise Agent exactly once", () =>
+  it.effect("routes an authorized non-default model through Enterprise Agent exactly once", () =>
     Effect.gen(function* () {
       const localStream = vi.fn(async function* () {
         for (const event of completed) yield event;
@@ -255,7 +257,7 @@ describe("FdDeepSeekAdapter", () => {
           type: "turn.started",
           turnId: enterpriseTurnId,
           conversationId: 0,
-          model: "deepseek-v4-flash",
+          model: "qwen3.8-max",
         },
         { type: "assistant.reasoning", turnId: enterpriseTurnId, delta: "正在核对授权范围" },
         {
@@ -295,6 +297,7 @@ describe("FdDeepSeekAdapter", () => {
           usage: { inputTokens: 20, outputTokens: 12 },
         },
       ];
+      const enterpriseRequests: Array<{ model?: string }> = [];
       const enterpriseClient = {
         getCatalog: async () => ({
           skills: [
@@ -309,10 +312,11 @@ describe("FdDeepSeekAdapter", () => {
             },
           ],
           modelCapabilities: {
-            "deepseek-v4-flash": { fdSkills: true, protocol: "enterprise-agent-v1" },
+            "qwen3.8-max": { fdSkills: true, protocol: "enterprise-agent-v1" },
           },
         }),
-        streamTurn: async function* () {
+        streamTurn: async function* (input: { model?: string }) {
+          enterpriseRequests.push(input);
           for (const event of enterpriseEvents) yield event;
         },
       } as unknown as FdEnterpriseAgentClient;
@@ -328,17 +332,27 @@ describe("FdDeepSeekAdapter", () => {
         Effect.sync(() => events.push(event)),
       ).pipe(Effect.forkChild);
       const enterpriseThreadId = ThreadId.make("550e8400-e29b-41d4-a716-446655440000");
-      yield* adapter.startSession({ ...startInput, threadId: enterpriseThreadId });
+      const qwenSelection = {
+        instanceId: FD_DEEPSEEK_INSTANCE_ID,
+        model: "qwen3.8-max",
+      };
+      yield* adapter.startSession({
+        ...startInput,
+        threadId: enterpriseThreadId,
+        modelSelection: qwenSelection,
+      });
       const turn = yield* adapter.sendTurn({
         threadId: enterpriseThreadId,
         input: "蔡梦晨客户的持仓存量",
         fdSkillVersionId: 10004,
+        modelSelection: qwenSelection,
       });
       yield* waitFor(() =>
         events.some((event) => event.type === "turn.completed" && event.turnId === turn.turnId),
       );
 
       expect(localStream).not.toHaveBeenCalled();
+      expect(enterpriseRequests).toEqual([expect.objectContaining({ model: "qwen3.8-max" })]);
       expect(
         events.filter((event) => event.type === "turn.completed" && event.turnId === turn.turnId),
       ).toHaveLength(1);
@@ -367,8 +381,14 @@ describe("FdDeepSeekAdapter", () => {
         streamTurn: enterpriseStream,
       } as unknown as FdEnterpriseAgentClient;
       const fdSkillCatalog = new FdSkillCatalog({
-        getCatalog: async () => ({ skills: [], modelCapabilities: {} }),
+        getCatalog: async () => ({
+          skills: [],
+          modelCapabilities: {
+            "deepseek-v4-flash": { fdSkills: true, protocol: "enterprise-agent-v1" },
+          },
+        }),
       } as unknown as FdEnterpriseAgentClient);
+      yield* Effect.promise(() => fdSkillCatalog.refresh());
       const adapter = yield* makeFdDeepSeekAdapter({
         kernel: new FdAgentKernel(streamer([completed])),
         fdSkillCatalog,

@@ -13,6 +13,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { imageBytesMatchMimeType } from "../../imageMime.ts";
 import { ServerConfig } from "../../config.ts";
 import { FdRuntimeCredentialStore } from "../../fd/FdRuntimeCredentialStore.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { makeFdCodexAdapter } from "../../fd-codex/FdCodexAdapter.ts";
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
 import { FdAgentKernel } from "../../fd-agent/FdAgentKernel.ts";
@@ -22,9 +23,12 @@ import { FdVisionService } from "../../fd-vision/FdVisionService.ts";
 import {
   FD_RESPONSES_LIMITS,
   FD_RESPONSES_MODEL,
-  FD_RESPONSES_MODELS,
   type FdResponsesInputImageContentPart,
 } from "../../fd-agent/FdResponsesProtocol.ts";
+import {
+  DASHSCOPE_API_KEY_SECRET_NAME,
+  FD_RESPONSES_MODEL_CATALOG,
+} from "../../fd-codex/ResponsesModelCatalog.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { makeFdDeepSeekTextGeneration } from "../../textGeneration/FdDeepSeekTextGeneration.ts";
 import {
@@ -196,6 +200,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
   create: ({ instanceId, displayName, accentColor, enabled }) =>
     Effect.gen(function* () {
       const credentials = yield* FdRuntimeCredentialStore;
+      const secretStore = yield* Effect.serviceOption(ServerSecretStore.ServerSecretStore);
       const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -302,7 +307,15 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
         credentialState: Option.Option<FdServerRuntimeCredentialProjection>,
       ) {
         const checkedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-        const authenticated = Option.isSome(credentialState);
+        const dashScopeConfigured = yield* Option.isSome(secretStore)
+          ? secretStore.value.get(DASHSCOPE_API_KEY_SECRET_NAME).pipe(
+              Effect.map(
+                (stored) => Option.isSome(stored) || Boolean(process.env.DASHSCOPE_API_KEY?.trim()),
+              ),
+              Effect.orElseSucceed(() => Boolean(process.env.DASHSCOPE_API_KEY?.trim())),
+            )
+          : Effect.succeed(Boolean(process.env.DASHSCOPE_API_KEY?.trim()));
+        const authenticated = Option.isSome(credentialState) || dashScopeConfigured;
         return {
           instanceId,
           driver: FD_DEEPSEEK_DRIVER_KIND,
@@ -323,14 +336,24 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
             : { status: "unauthenticated", type: "fd-account", label: "FD Account" },
           checkedAt,
           skillCatalogState: fdSkillCatalogState,
-          ...(!authenticated && enabled ? { message: "Sign in to FD to use DeepSeek." } : {}),
-          models: FD_RESPONSES_MODELS.map((model) => ({
-            slug: model,
-            name: model === FD_RESPONSES_MODEL ? "DeepSeek V4 Flash" : "DeepSeek V4 Pro",
-            shortName: model === FD_RESPONSES_MODEL ? "V4 Flash" : "V4 Pro",
+          ...(!authenticated && enabled
+            ? { message: "Sign in to FD or configure DASHSCOPE_API_KEY to use the model runtime." }
+            : {}),
+          models: FD_RESPONSES_MODEL_CATALOG.map((model) => ({
+            slug: model.slug,
+            name: model.name,
+            ...(model.shortName ? { shortName: model.shortName } : {}),
             isCustom: false,
-            isDefault: model === FD_RESPONSES_MODEL,
-            capabilities: { optionDescriptors: [] },
+            isDefault: model.slug === FD_RESPONSES_MODEL,
+            capabilities: {
+              optionDescriptors: [],
+              supportsTools: model.supportsTools,
+              supportsVision: model.supportsVision,
+              supportsReasoning: model.supportsReasoning,
+              supportsStructuredOutput: model.supportsStructuredOutput,
+              supportsForcedToolChoice: model.supportsForcedToolChoice,
+              supportsParallelToolCalls: model.supportsParallelToolCalls,
+            },
           })),
           slashCommands: [],
           skills: [

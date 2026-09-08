@@ -587,11 +587,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        // `null` is an explicit request to start a fresh provider thread. This
+        // is required when switching models for adapters whose session model
+        // switch mode is unsupported; an omitted cursor still resumes the
+        // persisted provider thread for normal recovery/restart flows.
         const effectiveResumeCursor =
-          input.resumeCursor ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? persistedBinding.resumeCursor
-            : undefined);
+          input.resumeCursor !== undefined
+            ? input.resumeCursor === null
+              ? undefined
+              : input.resumeCursor
+            : persistedBinding?.providerInstanceId === resolvedInstanceId
+              ? persistedBinding.resumeCursor
+              : undefined;
         const effectiveCwd =
           input.cwd ??
           (persistedBinding?.providerInstanceId === resolvedInstanceId

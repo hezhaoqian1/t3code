@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -52,7 +52,9 @@ describe("FD managed Codex runtime boundary", () => {
     expect(config).toContain("requires_openai_auth = false");
     expect(config).toContain('wire_api = "responses"');
     expect(config).not.toContain("runtime-secret-marker");
-    expect((await stat(configPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") {
+      expect((await stat(configPath)).mode & 0o777).toBe(0o600);
+    }
   });
 
   it("accepts HTTPS and loopback HTTP origins but rejects unsafe endpoints", () => {
@@ -97,7 +99,7 @@ describe("FD managed Codex runtime boundary", () => {
       inheritedEnvironment: { PATH: "/usr/bin" },
     });
 
-    expect(environment.PATH).toBe("/managed/connectors/feishu/bin:/usr/bin");
+    expect(environment.PATH).toBe(`/managed/connectors/feishu/bin${delimiter}/usr/bin`);
     expect(environment.LARKSUITE_CLI_CONFIG_DIR).toBe("/managed/connectors/feishu/config");
   });
 
@@ -149,6 +151,28 @@ describe("FD managed Codex runtime boundary", () => {
     );
   });
 
+  it("prepares a DashScope Responses home without persisting its API key", async () => {
+    const root = await mkdtemp(join(tmpdir(), "fd-codex-dashscope-"));
+    temporaryRoots.add(root);
+
+    const runtime = await prepareFdCodexRuntime({
+      stateDir: root,
+      model: "qwen3.8-flash",
+      dashScopeApiKey: "dashscope-secret-marker",
+      inheritedEnvironment: { PATH: "/usr/bin", FD_NEW_API_KEY: "must-not-leak" },
+    });
+
+    expect(runtime.homePath).toContain("codex-home-qwen3.8-flash");
+    expect(runtime.environment.DASHSCOPE_API_KEY).toBe("dashscope-secret-marker");
+    expect(runtime.environment).not.toHaveProperty("FD_NEW_API_KEY");
+    expect(await readFile(join(runtime.homePath, "config.toml"), "utf8")).not.toContain(
+      "dashscope-secret-marker",
+    );
+    expect(await readFile(join(runtime.homePath, "config.toml"), "utf8")).toContain(
+      'model_provider = "dashscope"',
+    );
+  });
+
   it("enables connector extra Skill roots only when the connector state is enabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "fd-codex-connector-"));
     temporaryRoots.add(root);
@@ -194,7 +218,7 @@ describe("FD managed Codex runtime boundary", () => {
       inheritedEnvironment: { PATH: "/usr/bin" },
     });
     expect(enabled.skillExtraRoots).toEqual(["/managed/connectors/skills/connector-feishu"]);
-    expect(enabled.environment.PATH).toBe("/managed/connectors/feishu/bin:/usr/bin");
+    expect(enabled.environment.PATH).toBe(`/managed/connectors/feishu/bin${delimiter}/usr/bin`);
     expect(enabled.environment.LARKSUITE_CLI_CONFIG_DIR).toBe("/managed/connectors/feishu/config");
   });
 
