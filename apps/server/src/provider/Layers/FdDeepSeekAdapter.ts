@@ -189,8 +189,6 @@ const uncertainEnterpriseCodes = new Set([
 const MAX_REPLAY_POLLS = 5;
 const REPLAY_POLL_DELAY_MS = 250;
 
-const DASH_SCOPE_PROVIDER_ID = "dashscope";
-
 const shouldReconcileEnterpriseError = (error: unknown): boolean => {
   if (error instanceof FdEnterpriseAgentError) {
     return (
@@ -993,12 +991,6 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         if (modelMetadata?.supportsVision === true) {
           // Native-capable models receive the original attachment. The ordinary
           // Codex adapter owns the conversion to a localImage turn input.
-        } else if (modelMetadata?.providerId === DASH_SCOPE_PROVIDER_ID) {
-          return yield* new ProviderAdapterRequestError({
-            provider: FD_DEEPSEEK_DRIVER_KIND,
-            method: "turn/start",
-            detail: "当前模型不支持图片输入，请切换到支持视觉的模型后重试。",
-          });
         } else {
           if (!options.resolveAttachments || !options.visionService) {
             return yield* new ProviderAdapterRequestError({

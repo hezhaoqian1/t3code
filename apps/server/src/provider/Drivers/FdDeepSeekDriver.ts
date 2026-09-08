@@ -13,7 +13,6 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { imageBytesMatchMimeType } from "../../imageMime.ts";
 import { ServerConfig } from "../../config.ts";
 import { FdRuntimeCredentialStore } from "../../fd/FdRuntimeCredentialStore.ts";
-import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import { makeFdCodexAdapter } from "../../fd-codex/FdCodexAdapter.ts";
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
 import { FdAgentKernel } from "../../fd-agent/FdAgentKernel.ts";
@@ -25,10 +24,7 @@ import {
   FD_RESPONSES_MODEL,
   type FdResponsesInputImageContentPart,
 } from "../../fd-agent/FdResponsesProtocol.ts";
-import {
-  DASHSCOPE_API_KEY_SECRET_NAME,
-  FD_RESPONSES_MODEL_CATALOG,
-} from "../../fd-codex/ResponsesModelCatalog.ts";
+import { FD_RESPONSES_MODEL_CATALOG } from "../../fd-codex/ResponsesModelCatalog.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { makeFdDeepSeekTextGeneration } from "../../textGeneration/FdDeepSeekTextGeneration.ts";
 import {
@@ -200,7 +196,6 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
   create: ({ instanceId, displayName, accentColor, enabled }) =>
     Effect.gen(function* () {
       const credentials = yield* FdRuntimeCredentialStore;
-      const secretStore = yield* Effect.serviceOption(ServerSecretStore.ServerSecretStore);
       const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -307,15 +302,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
         credentialState: Option.Option<FdServerRuntimeCredentialProjection>,
       ) {
         const checkedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-        const dashScopeConfigured = yield* Option.isSome(secretStore)
-          ? secretStore.value.get(DASHSCOPE_API_KEY_SECRET_NAME).pipe(
-              Effect.map(
-                (stored) => Option.isSome(stored) || Boolean(process.env.DASHSCOPE_API_KEY?.trim()),
-              ),
-              Effect.orElseSucceed(() => Boolean(process.env.DASHSCOPE_API_KEY?.trim())),
-            )
-          : Effect.succeed(Boolean(process.env.DASHSCOPE_API_KEY?.trim()));
-        const authenticated = Option.isSome(credentialState) || dashScopeConfigured;
+        const authenticated = Option.isSome(credentialState);
         return {
           instanceId,
           driver: FD_DEEPSEEK_DRIVER_KIND,
@@ -337,7 +324,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
           checkedAt,
           skillCatalogState: fdSkillCatalogState,
           ...(!authenticated && enabled
-            ? { message: "Sign in to FD or configure DASHSCOPE_API_KEY to use the model runtime." }
+            ? { message: "Sign in to FD to use the model runtime." }
             : {}),
           models: FD_RESPONSES_MODEL_CATALOG.map((model) => ({
             slug: model.slug,

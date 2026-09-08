@@ -9,9 +9,17 @@ const MAX_FD_RUNTIME_ORIGIN_LENGTH = 2_048;
 export const FD_RUNTIME_DEFAULT_MODEL = "deepseek-v4-flash" as const;
 export const FD_RUNTIME_PRO_MODEL = "deepseek-v4-pro" as const;
 export const FD_RUNTIME_VISION_MODEL = "deepseek-v4-flash-vision-exp" as const;
+export const FD_RUNTIME_QWEN_MAX_MODEL = "qwen3.8-max" as const;
+export const FD_RUNTIME_QWEN_FLASH_MODEL = "qwen3.8-flash" as const;
+export const FD_RUNTIME_GLM_MODEL = "glm-5.2" as const;
+export const FD_RUNTIME_KIMI_MODEL = "kimi-k3" as const;
 export const FD_RUNTIME_SELECTABLE_MODELS = [
   FD_RUNTIME_DEFAULT_MODEL,
   FD_RUNTIME_PRO_MODEL,
+  FD_RUNTIME_QWEN_MAX_MODEL,
+  FD_RUNTIME_QWEN_FLASH_MODEL,
+  FD_RUNTIME_GLM_MODEL,
+  FD_RUNTIME_KIMI_MODEL,
 ] as const;
 export const FD_RUNTIME_MODELS = [
   ...FD_RUNTIME_SELECTABLE_MODELS,
@@ -53,6 +61,15 @@ export const FdServerRuntimePolicyProjection = Schema.Struct({
       Schema.Tuple([
         Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
         Schema.Literal(FD_RUNTIME_PRO_MODEL),
+        Schema.Literal(FD_RUNTIME_VISION_MODEL),
+      ]),
+      Schema.Tuple([
+        Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
+        Schema.Literal(FD_RUNTIME_PRO_MODEL),
+        Schema.Literal(FD_RUNTIME_QWEN_MAX_MODEL),
+        Schema.Literal(FD_RUNTIME_QWEN_FLASH_MODEL),
+        Schema.Literal(FD_RUNTIME_GLM_MODEL),
+        Schema.Literal(FD_RUNTIME_KIMI_MODEL),
         Schema.Literal(FD_RUNTIME_VISION_MODEL),
       ]),
     ]),

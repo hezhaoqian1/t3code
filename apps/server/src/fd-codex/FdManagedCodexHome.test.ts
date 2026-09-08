@@ -151,25 +151,48 @@ describe("FD managed Codex runtime boundary", () => {
     );
   });
 
-  it("prepares a DashScope Responses home without persisting its API key", async () => {
+  it("prepares every selectable model through the managed FD Responses home", async () => {
     const root = await mkdtemp(join(tmpdir(), "fd-codex-dashscope-"));
     temporaryRoots.add(root);
 
     const runtime = await prepareFdCodexRuntime({
       stateDir: root,
       model: "qwen3.8-flash",
-      dashScopeApiKey: "dashscope-secret-marker",
-      inheritedEnvironment: { PATH: "/usr/bin", FD_NEW_API_KEY: "must-not-leak" },
+      credentials: {
+        userId: 7,
+        runtimeTokenId: 11,
+        newApiOrigin: "http://127.0.0.1:3001",
+        runtimeApiKey: "runtime-secret-marker",
+        accessToken: "access-secret-marker",
+        accessExpiresAt: 4_102_444_800,
+        policy: {
+          version: 1,
+          capability: "general_assistant",
+          model: "deepseek-v4-flash",
+          models: [
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "qwen3.8-max",
+            "qwen3.8-flash",
+            "glm-5.2",
+            "kimi-k3",
+            "deepseek-v4-flash-vision-exp",
+          ],
+          expiresAt: 4_102_444_800,
+        },
+        generation: 1,
+      },
+      inheritedEnvironment: { PATH: "/usr/bin", DASHSCOPE_API_KEY: "must-not-leak" },
     });
 
-    expect(runtime.homePath).toContain("codex-home-qwen3.8-flash");
-    expect(runtime.environment.DASHSCOPE_API_KEY).toBe("dashscope-secret-marker");
-    expect(runtime.environment).not.toHaveProperty("FD_NEW_API_KEY");
-    expect(await readFile(join(runtime.homePath, "config.toml"), "utf8")).not.toContain(
-      "dashscope-secret-marker",
+    expect(runtime.homePath).toContain("codex-home");
+    expect(runtime.environment.FD_NEW_API_KEY).toBe("runtime-secret-marker");
+    expect(runtime.environment).not.toHaveProperty("DASHSCOPE_API_KEY");
+    expect(await readFile(join(runtime.homePath, "config.toml"), "utf8")).toContain(
+      'model_provider = "fd_new_api"',
     );
     expect(await readFile(join(runtime.homePath, "config.toml"), "utf8")).toContain(
-      'model_provider = "dashscope"',
+      'wire_api = "responses"',
     );
   });
 

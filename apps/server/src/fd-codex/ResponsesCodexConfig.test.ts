@@ -1,16 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { prepareResponsesCodexHome, renderResponsesCodexConfig } from "./ResponsesCodexConfig.ts";
-import { DASHSCOPE_RESPONSES_PROVIDER } from "./ResponsesModelCatalog.ts";
+import { FD_RESPONSES_PROVIDER } from "./ResponsesModelCatalog.ts";
 
 describe("Responses-backed Codex configuration", () => {
   it("renders a provider config without embedding a secret", () => {
-    const config = renderResponsesCodexConfig(DASHSCOPE_RESPONSES_PROVIDER);
+    const config = renderResponsesCodexConfig(FD_RESPONSES_PROVIDER);
 
-    expect(config).toContain('model = "qwen3.8-flash"');
-    expect(config).toContain('model_provider = "dashscope"');
-    expect(config).toContain('base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"');
-    expect(config).toContain('env_key = "DASHSCOPE_API_KEY"');
+    expect(config).toContain('model = "deepseek-v4-flash"');
+    expect(config).toContain('model_provider = "fd_new_api"');
+    expect(config).toContain('env_key = "FD_NEW_API_KEY"');
     expect(config).toContain('wire_api = "responses"');
     expect(config).not.toContain("sk-");
   });
@@ -18,12 +17,12 @@ describe("Responses-backed Codex configuration", () => {
   it("rejects credentials in the endpoint and unknown defaults", () => {
     expect(() =>
       renderResponsesCodexConfig({
-        ...DASHSCOPE_RESPONSES_PROVIDER,
-        baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1?key=secret",
+        ...FD_RESPONSES_PROVIDER,
+        baseUrl: "https://api.fd.example/v1?key=secret",
       }),
     ).toThrow("invalid");
     expect(() =>
-      renderResponsesCodexConfig({ ...DASHSCOPE_RESPONSES_PROVIDER, defaultModel: "missing" }),
+      renderResponsesCodexConfig({ ...FD_RESPONSES_PROVIDER, defaultModel: "missing" }),
     ).toThrow("default model");
   });
 
@@ -35,9 +34,9 @@ describe("Responses-backed Codex configuration", () => {
     try {
       const configPath = await prepareResponsesCodexHome({
         codexHome: join(temp, "home"),
-        provider: DASHSCOPE_RESPONSES_PROVIDER,
+        provider: FD_RESPONSES_PROVIDER,
       });
-      expect(await readFile(configPath, "utf8")).toContain('model_provider = "dashscope"');
+      expect(await readFile(configPath, "utf8")).toContain('model_provider = "fd_new_api"');
     } finally {
       await rm(temp, { recursive: true, force: true });
     }

@@ -46,6 +46,12 @@ export function fdResponsesBaseUrl(newApiOrigin: string): string {
 }
 
 function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
+  const externalModels = [
+    ["qwen3.8-max", "Qwen 3.8 Max", "Qwen Max"],
+    ["qwen3.8-flash", "Qwen 3.8 Flash", "Qwen Flash"],
+    ["glm-5.2", "GLM 5.2", "GLM 5.2"],
+    ["kimi-k3", "Kimi K3", "Kimi K3"],
+  ] as const;
   return {
     providerId: FD_CODEX_PROVIDER,
     displayName: "FD New API",
@@ -75,6 +81,17 @@ function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
         supportsForcedToolChoice: true,
         supportsParallelToolCalls: true,
       },
+      ...externalModels.map(([slug, name, shortName]) => ({
+        slug,
+        name,
+        shortName,
+        supportsTools: true,
+        supportsVision: false,
+        supportsReasoning: true,
+        supportsStructuredOutput: true,
+        supportsForcedToolChoice: false,
+        supportsParallelToolCalls: false,
+      })),
     ],
   };
 }

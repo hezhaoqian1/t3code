@@ -7,7 +7,6 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { ServerConfig } from "../config.ts";
-import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { FdRuntimeCredentialStore } from "../fd/FdRuntimeCredentialStore.ts";
 import { ProviderAdapterRequestError } from "../provider/Errors.ts";
 import { makeCodexAdapter } from "../provider/Layers/CodexAdapter.ts";
@@ -17,18 +16,10 @@ import {
   FdEnterpriseCodexError,
 } from "../fd-skills/FdEnterpriseCodexClient.ts";
 import { NativeSkillCatalog, selectedNativeSkillNames } from "../fd-skills/NativeSkillCatalog.ts";
-import {
-  makeFdCodexChildEnvironment,
-  makeResponsesCodexChildEnvironment,
-} from "./FdCodexChildEnvironment.ts";
+import { makeFdCodexChildEnvironment } from "./FdCodexChildEnvironment.ts";
 import { prepareFdManagedCodexHome } from "./FdManagedCodexHome.ts";
-import {
-  DASHSCOPE_API_KEY_SECRET_NAME,
-  DASHSCOPE_RESPONSES_PROVIDER,
-  FD_RESPONSES_PROVIDERS,
-} from "./ResponsesModelCatalog.ts";
+import { FD_RESPONSES_PROVIDERS } from "./ResponsesModelCatalog.ts";
 import { findResponsesCodexModel } from "./ResponsesCodexConfig.ts";
-import { prepareResponsesCodexHome } from "./ResponsesCodexConfig.ts";
 
 export async function resolveFdCodexTurnSkills(input: {
   readonly cwd: string;
@@ -68,37 +59,19 @@ export async function prepareFdCodexRuntime(input: {
   readonly connectorStatePath?: string | undefined;
   readonly presentationSkillRoot?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
-  /** Optional server-resolved key. Environment remains a development fallback. */
-  readonly dashScopeApiKey?: string;
   readonly model?: string;
 }): Promise<{
   readonly environment: NodeJS.ProcessEnv;
   readonly homePath: string;
   readonly skillExtraRoots?: ReadonlyArray<string>;
 }> {
-  const selected = input.model
-    ? findResponsesCodexModel(FD_RESPONSES_PROVIDERS, input.model)
-    : undefined;
-  const isDashScope = selected?.provider.providerId === DASHSCOPE_RESPONSES_PROVIDER.providerId;
-  const codexHome = join(input.stateDir, isDashScope ? `codex-home-${input.model}` : "codex-home");
+  const codexHome = join(input.stateDir, "codex-home");
   const connectorEnabled = await readConnectorEnabled(input.connectorStatePath);
-  if (isDashScope) {
-    const apiKey =
-      input.dashScopeApiKey ??
-      input.inheritedEnvironment?.["DASHSCOPE_API_KEY"] ??
-      process.env.DASHSCOPE_API_KEY;
-    if (!apiKey) throw new Error("DASHSCOPE_API_KEY is required for the selected model");
-    await prepareResponsesCodexHome({
-      codexHome,
-      provider: DASHSCOPE_RESPONSES_PROVIDER,
-    });
-  } else {
-    if (!input.credentials) throw new Error("Sign in to FD before starting an Agent session.");
-    await prepareFdManagedCodexHome({
-      codexHome,
-      newApiOrigin: input.credentials.newApiOrigin,
-    });
-  }
+  if (!input.credentials) throw new Error("Sign in to FD before starting an Agent session.");
+  await prepareFdManagedCodexHome({
+    codexHome,
+    newApiOrigin: input.credentials.newApiOrigin,
+  });
   const skillExtraRoots = [
     ...(input.presentationSkillRoot ? [input.presentationSkillRoot] : []),
     ...(connectorEnabled && input.connectorSkillsRoot ? [input.connectorSkillsRoot] : []),
@@ -106,33 +79,13 @@ export async function prepareFdCodexRuntime(input: {
   return {
     homePath: codexHome,
     ...(skillExtraRoots.length > 0 ? { skillExtraRoots } : {}),
-    environment: isDashScope
-      ? makeResponsesCodexChildEnvironment({
-          codexHome,
-          apiKeyEnv: "DASHSCOPE_API_KEY",
-          apiKey:
-            input.dashScopeApiKey ??
-            input.inheritedEnvironment?.["DASHSCOPE_API_KEY"] ??
-            process.env.DASHSCOPE_API_KEY!,
-          connectorBinPath: connectorEnabled ? input.connectorBinPath : undefined,
-          connectorConfigDir: connectorEnabled ? input.connectorConfigDir : undefined,
-          ...(input.inheritedEnvironment
-            ? { inheritedEnvironment: input.inheritedEnvironment }
-            : {}),
-        })
-      : makeFdCodexChildEnvironment({
-          codexHome,
-          runtimeApiKey:
-            input.credentials?.runtimeApiKey ??
-            (() => {
-              throw new Error("FD runtime credential is unavailable");
-            })(),
-          connectorBinPath: connectorEnabled ? input.connectorBinPath : undefined,
-          connectorConfigDir: connectorEnabled ? input.connectorConfigDir : undefined,
-          ...(input.inheritedEnvironment
-            ? { inheritedEnvironment: input.inheritedEnvironment }
-            : {}),
-        }),
+    environment: makeFdCodexChildEnvironment({
+      codexHome,
+      runtimeApiKey: input.credentials.runtimeApiKey,
+      connectorBinPath: connectorEnabled ? input.connectorBinPath : undefined,
+      connectorConfigDir: connectorEnabled ? input.connectorConfigDir : undefined,
+      ...(input.inheritedEnvironment ? { inheritedEnvironment: input.inheritedEnvironment } : {}),
+    }),
   };
 }
 
@@ -141,7 +94,6 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
   readonly binaryPath?: string;
 }) {
   const credentials = yield* FdRuntimeCredentialStore;
-  const secretStore = yield* Effect.serviceOption(ServerSecretStore.ServerSecretStore);
   const serverConfig = yield* ServerConfig;
   const credentialsContext = yield* Effect.context<FdRuntimeCredentialStore>();
   const runCredentialPromise = Effect.runPromiseWith(credentialsContext);
@@ -163,11 +115,7 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
         Effect.gen(function* () {
           const current = yield* credentials.current;
           const requestedModel = session.modelSelection?.model;
-          const externalModel = requestedModel
-            ? findResponsesCodexModel(FD_RESPONSES_PROVIDERS, requestedModel)?.provider
-                .providerId === DASHSCOPE_RESPONSES_PROVIDER.providerId
-            : false;
-          if (Option.isNone(current) && !externalModel) {
+          if (Option.isNone(current)) {
             return yield* new ProviderAdapterRequestError({
               provider: FD_DEEPSEEK_DRIVER_KIND,
               method: "session/start",
@@ -184,23 +132,13 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
             presentationSkillRoot: serverConfig.fdPresentationSkillRoot,
             ...(session.modelSelection?.model ? { model: session.modelSelection.model } : {}),
           } as const;
-          const dashScopeApiKey = yield* readDashScopeApiKey(secretStore);
-          const runtimeKey =
-            (requestedModel
-              ? findResponsesCodexModel(FD_RESPONSES_PROVIDERS, requestedModel)?.provider.providerId
-              : undefined) ?? "fd_new_api";
+          const runtimeKey = "fd_new_api";
           return yield* Effect.tryPromise({
             try: () =>
-              Option.isSome(current)
-                ? prepareFdCodexRuntime({
-                    ...runtimeInput,
-                    credentials: current.value,
-                    ...(dashScopeApiKey ? { dashScopeApiKey } : {}),
-                  })
-                : prepareFdCodexRuntime({
-                    ...runtimeInput,
-                    ...(dashScopeApiKey ? { dashScopeApiKey } : {}),
-                  }),
+              prepareFdCodexRuntime({
+                ...runtimeInput,
+                credentials: current.value,
+              }),
             catch: () =>
               new ProviderAdapterRequestError({
                 provider: FD_DEEPSEEK_DRIVER_KIND,
@@ -304,25 +242,6 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
     },
   );
 });
-
-function readDashScopeApiKey(
-  secretStore: Option.Option<ServerSecretStore.ServerSecretStore["Service"]>,
-): Effect.Effect<string | undefined> {
-  const storedKey = Option.isSome(secretStore)
-    ? secretStore.value.get(DASHSCOPE_API_KEY_SECRET_NAME)
-    : Effect.succeed(Option.none<Uint8Array>());
-  return storedKey.pipe(
-    Effect.map((stored) => {
-      if (Option.isSome(stored)) {
-        const value = new TextDecoder().decode(stored.value).trim();
-        if (value.length > 0) return value;
-      }
-      const environmentValue = process.env.DASHSCOPE_API_KEY?.trim();
-      return environmentValue && environmentValue.length > 0 ? environmentValue : undefined;
-    }),
-    Effect.orElseSucceed(() => process.env.DASHSCOPE_API_KEY?.trim() || undefined),
-  );
-}
 
 export function fdEnterpriseToolFailureMessage(cause: unknown): string {
   if (cause instanceof FdEnterpriseCodexError) {
