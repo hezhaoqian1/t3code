@@ -1836,6 +1836,61 @@ describe("FdDeepSeekAdapter", () => {
     }),
   );
 
+  it.effect("rejects images for external models without a verified vision route", () =>
+    Effect.gen(function* () {
+      const ordinaryAdapter: ProviderAdapterShape<never> = {
+        provider: ProviderDriverKind.make("codex"),
+        capabilities: { sessionModelSwitch: "in-session" },
+        startSession: (input) =>
+          Effect.succeed({
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+            status: "ready" as const,
+            runtimeMode: input.runtimeMode,
+            model: "qwen3.8-max",
+            threadId: input.threadId,
+            createdAt: "2026-08-11T00:00:00.000Z",
+            updatedAt: "2026-08-11T00:00:00.000Z",
+          }),
+        sendTurn: () => Effect.die(new Error("should not send")),
+        interruptTurn: () => Effect.void,
+        respondToRequest: () => Effect.void,
+        respondToUserInput: () => Effect.void,
+        stopSession: () => Effect.void,
+        listSessions: () => Effect.succeed([]),
+        hasSession: () => Effect.succeed(false),
+        readThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        rollbackThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        stopAll: () => Effect.void,
+        streamEvents: Stream.empty,
+      };
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([])),
+        ordinaryAdapter,
+        resolveAttachments: () =>
+          Effect.succeed([{ type: "input_image", image_url: "data:image/png;base64,cG5n" }]),
+        visionService: new FdVisionService(streamer([])),
+      });
+      yield* adapter.startSession(startInput);
+      const result = yield* Effect.exit(
+        adapter.sendTurn({
+          threadId,
+          modelSelection: { instanceId: FD_DEEPSEEK_INSTANCE_ID, model: "qwen3.8-max" },
+          input: "请分析图片",
+          attachments: [
+            { type: "image", id: "img-1", name: "chart.png", mimeType: "image/png", sizeBytes: 5 },
+          ],
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(String(result.cause)).toContain("不支持图片输入");
+      }
+    }),
+  );
+
   it.effect("routes approval through canonical request events without private tool data", () =>
     Effect.gen(function* () {
       vi.clearAllMocks();

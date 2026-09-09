@@ -21,6 +21,8 @@ export interface ResponsesCodexModelConfig {
   readonly apiKeyEnv?: string;
   readonly supportsTools: boolean;
   readonly supportsVision: boolean;
+  /** Image handling route. This is server-side policy, not a provider claim. */
+  readonly visionRoute: "native" | "fd-preprocessor" | "unsupported";
   readonly supportsReasoning: boolean;
   readonly supportsStructuredOutput: boolean;
   readonly supportsForcedToolChoice: boolean;
