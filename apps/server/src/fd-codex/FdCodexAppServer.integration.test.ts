@@ -26,7 +26,7 @@ const shouldRun = process.env.FD_RUN_REAL_APP_SERVER === "1";
 const instanceId = ProviderInstanceId.make("fd-deepseek");
 
 describe.skipIf(!shouldRun)("FD Codex App Server integration", () => {
-  it("streams DeepSeek, executes a structured local Skill, and resumes the conversation", async () => {
+  it("streams DeepSeek, executes a local Skill, compacts, and resumes the conversation", async () => {
     const binaryPath = requiredEnvironment("FD_CODEX_BINARY");
     const runtimeApiKey = requiredEnvironment("FD_NEW_API_KEY");
     if (!isAbsolute(binaryPath)) throw new Error("FD_CODEX_BINARY must be absolute");
@@ -114,6 +114,17 @@ describe.skipIf(!shouldRun)("FD Codex App Server integration", () => {
             );
             expect(assistantText(events, skillTurn.turnId)).toBe("FD_LOCAL_SKILL_OK");
 
+            yield* adapter.compaction!.start(threadId);
+            yield* Effect.gen(function* () {
+              while (true) {
+                const event = yield* Queue.take(receipts);
+                if (event.type === "thread.state.changed" && event.payload.state === "compacted")
+                  return;
+                if (event.type === "runtime.error")
+                  return yield* Effect.die(new Error("Real compaction failed"));
+              }
+            }).pipe(Effect.timeout("180 seconds"));
+
             expect(skillTurn.resumeCursor).toEqual(
               expect.objectContaining({ threadId: expect.any(String) }),
             );
@@ -138,13 +149,42 @@ describe.skipIf(!shouldRun)("FD Codex App Server integration", () => {
               Effect.timeout("120 seconds"),
             );
             expect(assistantText(events, resumedTurn.turnId)).toBe("FD_RESUME_CONTEXT_7319");
+
+            const switchedTurn = yield* adapter.sendTurn({
+              threadId,
+              modelSelection: { instanceId, model: "kimi-k3" },
+              input: "What codeword did I ask you to remember? Reply with the codeword only.",
+            });
+            yield* waitForCompletedTurn(receipts, switchedTurn.turnId).pipe(
+              Effect.timeout("120 seconds"),
+            );
+            expect(switchedTurn.resumeCursor).toEqual(resumeCursor);
+            expect(assistantText(events, switchedTurn.turnId)).toBe("FD_RESUME_CONTEXT_7319");
+
+            yield* adapter.stopSession(threadId);
+            const missingCursor = { threadId: "00000000-0000-7000-8000-000000000001" };
+            const freshSession = yield* adapter.startSession({
+              threadId,
+              cwd: projectRoot,
+              runtimeMode: "approval-required",
+              resumeCursor: missingCursor,
+            });
+            expect(freshSession.resumeCursor).not.toEqual(missingCursor);
+            const freshTurn = yield* adapter.sendTurn({
+              threadId,
+              input: "Reply exactly FD_FRESH_CONTEXT_OK.",
+            });
+            yield* waitForCompletedTurn(receipts, freshTurn.turnId).pipe(
+              Effect.timeout("120 seconds"),
+            );
+            expect(assistantText(events, freshTurn.turnId)).toBe("FD_FRESH_CONTEXT_OK");
           }),
         ).pipe(Effect.provide(serverLayer)),
       );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 360_000);
+  }, 540_000);
 });
 
 function requiredEnvironment(name: "FD_CODEX_BINARY" | "FD_NEW_API_KEY"): string {

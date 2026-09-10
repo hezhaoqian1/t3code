@@ -92,6 +92,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     (_turnId?: TurnId): Promise<void> => Promise.resolve(undefined),
   );
 
+  public readonly compactThreadImpl = vi.fn((): Promise<void> => Promise.resolve(undefined));
+
   public readonly readThreadImpl = vi.fn(
     (): Promise<CodexThreadSnapshot> =>
       Promise.resolve({
@@ -139,6 +141,8 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   interruptTurn(turnId?: TurnId) {
     return Effect.promise(() => this.interruptTurnImpl(turnId));
   }
+
+  compactThread = Effect.promise(() => this.compactThreadImpl());
 
   readThread = Effect.promise(() => this.readThreadImpl());
 

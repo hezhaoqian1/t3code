@@ -406,6 +406,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   compact: boolean;
   activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>;
   activeThreadProviderDisplayName: string | null;
+  onCompactContext?: (() => void) | undefined;
+  compactDisabled?: boolean | undefined;
   isPreparingWorktree: boolean;
   pendingAction: {
     questionIndex: number;
@@ -433,6 +435,8 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
         <ContextWindowMeter
           usage={props.activeContextWindow}
           providerDisplayName={props.activeThreadProviderDisplayName}
+          onCompact={props.onCompactContext}
+          compactDisabled={props.compactDisabled}
         />
       ) : null}
       {props.isPreparingWorktree ? (
@@ -590,6 +594,7 @@ export interface ChatComposerProps {
 
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
+  onCompactContext?: (() => void) | undefined;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -924,7 +929,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       (p) => p.instanceId === activeThreadModelSelection.instanceId,
     );
     if (entry) {
-      return getProviderDisplayName(providerStatuses, entry.driver);
+      return (
+        entry.models.find((model) => model.slug === activeThreadModelSelection.model)?.name ??
+        getProviderDisplayName(providerStatuses, entry.driver)
+      );
     }
     return formatProviderDisplayName(activeThreadModelSelection.instanceId);
   }, [providerStatuses, activeThreadModelSelection]);
@@ -3315,6 +3323,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   compact={isComposerPrimaryActionsCompact}
                   activeContextWindow={activeContextWindow}
                   activeThreadProviderDisplayName={activeThreadProviderDisplayName}
+                  onCompactContext={props.onCompactContext}
+                  compactDisabled={
+                    phase === "running" ||
+                    isSendBusy ||
+                    isConnecting ||
+                    isPreparingWorktree ||
+                    Boolean(environmentUnavailable) ||
+                    Boolean(sendDisabledReason) ||
+                    noProviderAvailable ||
+                    pendingApprovals.length > 0 ||
+                    pendingUserInputs.length > 0 ||
+                    showPlanFollowUpPrompt ||
+                    prompt.trim().length > 0 ||
+                    composerSendState.hasSendableContent ||
+                    nativeSkillNames.length > 0 ||
+                    presentationOperation !== null
+                  }
                   pendingAction={pendingPrimaryAction}
                   isRunning={phase === "running"}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}

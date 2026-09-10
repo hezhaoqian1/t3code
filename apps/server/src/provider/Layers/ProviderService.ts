@@ -11,8 +11,11 @@
  */
 import {
   ModelSelection,
+  MessageId,
+  RuntimeRequestId,
   NonNegativeInt,
   ThreadId,
+  type TurnId,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
@@ -26,6 +29,7 @@ import {
 } from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -45,7 +49,11 @@ import {
   providerTurnMetricAttributes,
   withMetrics,
 } from "../../observability/Metrics.ts";
-import { type ProviderAdapterError, ProviderValidationError } from "../Errors.ts";
+import {
+  type ProviderAdapterError,
+  ProviderValidationError,
+  ProviderAdapterRequestError,
+} from "../Errors.ts";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 import * as ProviderAdapterRegistry from "../Services/ProviderAdapterRegistry.ts";
 import * as ProviderService from "../Services/ProviderService.ts";
@@ -230,6 +238,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry;
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+  const pendingCompactions = new Map<
+    ThreadId,
+    {
+      instanceId: ProviderInstanceId;
+      requestId: MessageId;
+      completion: Deferred.Deferred<string>;
+      turnId?: TurnId | undefined;
+      compacted: boolean;
+      turnCompleted: boolean;
+    }
+  >();
+  const uncertainCompactions = new Set<ThreadId>();
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
     McpSessionRegistry.issueActiveMcpCredential({ threadId, providerInstanceId }).pipe(
@@ -311,7 +331,69 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         increment(providerRuntimeEventsTotal, {
           provider: canonicalEvent.provider,
           eventType: canonicalEvent.type,
-        }).pipe(Effect.andThen(publishRuntimeEvent(canonicalEvent))),
+        }).pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const pending = pendingCompactions.get(canonicalEvent.threadId);
+              const compacted =
+                canonicalEvent.type === "thread.state.changed" &&
+                canonicalEvent.payload.state === "compacted";
+              const matches = pending?.instanceId === source.instanceId;
+              if (
+                matches &&
+                pending.turnId !== undefined &&
+                canonicalEvent.turnId !== undefined &&
+                canonicalEvent.turnId !== pending.turnId
+              ) {
+                yield* publishRuntimeEvent(canonicalEvent);
+                return;
+              }
+              if (matches && canonicalEvent.type === "turn.started") {
+                pending.turnId = canonicalEvent.turnId;
+                return;
+              }
+              if (matches && canonicalEvent.type === "session.state.changed") return;
+              if (
+                matches &&
+                (canonicalEvent.type === "item.started" ||
+                  canonicalEvent.type === "item.completed") &&
+                canonicalEvent.payload.itemType === "context_compaction"
+              )
+                return;
+              if (matches && canonicalEvent.type === "turn.completed") {
+                pending.turnCompleted = true;
+                if (canonicalEvent.payload.state !== "completed") {
+                  yield* Deferred.succeed(pending.completion, "failed");
+                } else if (pending.compacted) {
+                  yield* Deferred.succeed(pending.completion, "completed");
+                }
+                return;
+              }
+              if (matches && compacted) {
+                const { turnId: _turnId, itemId: _itemId, ...compactionEvent } = canonicalEvent;
+                yield* publishRuntimeEvent({
+                  ...compactionEvent,
+                  requestId: RuntimeRequestId.make(pending.requestId),
+                });
+              } else {
+                yield* publishRuntimeEvent(canonicalEvent);
+              }
+              if (!matches) return;
+              const failed =
+                canonicalEvent.type === "runtime.error" ||
+                canonicalEvent.type === "turn.aborted" ||
+                canonicalEvent.type === "session.exited";
+              // RPC acknowledgment and turn completion alone do not prove compaction.
+              if (compacted) pending.compacted = true;
+              if (
+                failed ||
+                (compacted && (pending.turnId === undefined || pending.turnCompleted))
+              ) {
+                yield* Deferred.succeed(pending.completion, failed ? "failed" : "completed");
+              }
+            }),
+          ),
+        ),
       ),
     );
 
@@ -646,6 +728,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           providerInstanceId: resolvedInstanceId,
         };
 
+        uncertainCompactions.delete(threadId);
+
         yield* stopStaleSessionsForThread({
           threadId,
           currentInstanceId: resolvedInstanceId,
@@ -693,6 +777,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   );
 
   const sendTurn: ProviderServiceMethod<"sendTurn"> = Effect.fn("sendTurn")(function* (rawInput) {
+    if (pendingCompactions.has(rawInput.threadId) || uncertainCompactions.has(rawInput.threadId)) {
+      return yield* toValidationError(
+        "ProviderService.sendTurn",
+        "上下文压缩尚未完成，请等待或重新打开会话后重试。",
+      );
+    }
     const parsed = yield* decodeInputOrValidationError({
       operation: "ProviderService.sendTurn",
       schema: ProviderSendTurnInput,
@@ -778,6 +868,72 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }),
     );
   });
+
+  const compactThread: ProviderServiceMethod<"compactThread"> = Effect.fn("compactThread")(
+    function* (input, requestId) {
+      const routed = yield* resolveRoutableSession({
+        threadId: input.threadId,
+        operation: "ProviderService.compactThread",
+        allowRecovery: true,
+      });
+      const compaction = routed.adapter.compaction;
+      if (!compaction)
+        return yield* toValidationError(
+          "ProviderService.compactThread",
+          "当前运行时不支持上下文压缩。",
+        );
+      const completion = yield* Deferred.make<string>();
+      const pending = {
+        instanceId: routed.instanceId,
+        requestId,
+        completion,
+        compacted: false,
+        turnCompleted: false,
+      };
+      const claimed = yield* Effect.sync(() => {
+        if (pendingCompactions.has(input.threadId) || uncertainCompactions.has(input.threadId))
+          return false;
+        pendingCompactions.set(input.threadId, pending);
+        return true;
+      });
+      if (!claimed)
+        return yield* toValidationError(
+          "ProviderService.compactThread",
+          "上下文压缩正在进行，请勿重复操作。",
+        );
+      yield* compaction.start(routed.threadId, input).pipe(
+        Effect.andThen(Deferred.await(completion)),
+        Effect.timeout("10 minutes"),
+        Effect.catchTag("TimeoutError", () => {
+          uncertainCompactions.add(input.threadId);
+          return Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: routed.adapter.provider,
+              method: "thread/compact/start",
+              detail: "上下文压缩超时，结果尚未确认。请停止并重启会话后重试。",
+            }),
+          );
+        }),
+        Effect.flatMap((result) =>
+          result === "completed"
+            ? Effect.void
+            : Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: routed.adapter.provider,
+                  method: "thread/compact/start",
+                  detail: "上下文压缩未完成，原会话已保留。",
+                }),
+              ),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (pendingCompactions.get(input.threadId) === pending)
+              pendingCompactions.delete(input.threadId);
+          }),
+        ),
+      );
+    },
+  );
 
   const interruptTurn: ProviderServiceMethod<"interruptTurn"> = Effect.fn("interruptTurn")(
     function* (rawInput) {
@@ -911,6 +1067,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
+        const pending = pendingCompactions.get(input.threadId);
+        if (pending) yield* Deferred.succeed(pending.completion, "stopped");
+        uncertainCompactions.delete(input.threadId);
         yield* clearMcpSession(input.threadId);
         yield* directory.upsert({
           threadId: input.threadId,
@@ -1092,6 +1251,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       ),
     ).pipe(Effect.asVoid);
     yield* Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll()).pipe(Effect.asVoid);
+    yield* Effect.forEach(pendingCompactions.values(), (pending) =>
+      Deferred.succeed(pending.completion, "stopped"),
+    );
+    uncertainCompactions.clear();
     yield* McpSessionRegistry.revokeAllActiveMcpCredentials();
     McpProviderSession.clearAllMcpProviderSessions();
     const bindings = yield* directory.listBindings().pipe(Effect.orElseSucceed(() => []));
@@ -1133,6 +1296,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   return {
     startSession,
     sendTurn,
+    compactThread,
     interruptTurn,
     respondToRequest,
     respondToUserInput,

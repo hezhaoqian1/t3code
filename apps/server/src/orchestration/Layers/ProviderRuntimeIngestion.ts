@@ -751,9 +751,10 @@ export function runtimeEventToActivities(
           createdAt: event.createdAt,
           tone: "info",
           kind: "context-compaction",
-          summary: "Context compacted",
+          summary: "上下文已压缩",
           payload: {
             state: event.payload.state,
+            ...(event.requestId !== undefined ? { requestId: event.requestId } : {}),
             ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,

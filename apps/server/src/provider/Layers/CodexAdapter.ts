@@ -8,6 +8,7 @@
  * @module CodexAdapterLive
  */
 import {
+  EventId,
   type CanonicalItemType,
   type CanonicalRequestType,
   ProviderDriverKind,
@@ -1154,6 +1155,17 @@ function mapToRuntimeEvents(
       ];
     }
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
+    if (completed && itemType === "context_compaction") {
+      return [
+        completed,
+        {
+          ...runtimeEventBase(event, canonicalThreadId),
+          eventId: EventId.make(`${event.id}:thread-compacted`),
+          type: "thread.state.changed",
+          payload: { state: "compacted" },
+        },
+      ];
+    }
     return completed ? [completed] : [];
   }
 
@@ -1937,6 +1949,16 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
+  const compactThread: NonNullable<CodexAdapterShape["compaction"]>["start"] = (threadId) =>
+    requireSession(threadId).pipe(
+      Effect.flatMap((session) => session.runtime.compactThread),
+      Effect.mapError((cause) =>
+        cause._tag === "ProviderAdapterSessionNotFoundError"
+          ? cause
+          : mapCodexRuntimeError(threadId, "thread/compact/start", cause),
+      ),
+    );
+
   const readThread: CodexAdapterShape["readThread"] = (threadId) =>
     requireSession(threadId).pipe(
       Effect.flatMap((session) => session.runtime.readThread),
@@ -2060,6 +2082,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     },
     startSession,
     sendTurn,
+    compaction: { type: "native", start: compactThread },
     interruptTurn,
     readThread,
     rollbackThread,

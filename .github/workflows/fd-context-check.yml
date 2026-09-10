@@ -1,0 +1,55 @@
+name: FD Desktop Context
+
+on:
+  pull_request:
+    paths:
+      - "apps/server/src/fd-codex/**"
+      - "apps/server/src/provider/**"
+      - "apps/server/src/orchestration/**"
+      - "apps/web/src/components/ChatView.tsx"
+      - "apps/web/src/components/chat/**"
+      - ".github/workflows/fd-context-check.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fd-context-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  context:
+    name: Context Regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Add workspace binaries
+        run: echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Typecheck local server and renderer
+        run: |
+          vp run --filter ./apps/server typecheck
+          vp run --filter ./apps/web typecheck
+      - name: Context regressions
+        run: >-
+          vp test run
+          apps/server/src/fd-codex/FdContextBinding.test.ts
+          apps/server/src/provider/Layers/CodexSessionRuntime.test.ts
+          apps/server/src/provider/Layers/CodexAdapter.test.ts
+          apps/server/src/provider/Layers/FdDeepSeekAdapter.test.ts
+          apps/server/src/provider/Layers/ProviderService.test.ts
+          apps/server/src/provider/Layers/ProviderSessionReaper.test.ts
+          apps/server/src/orchestration/Layers/ProviderCommandReactor.test.ts
+          apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.test.ts
+          apps/server/src/orchestration/Layers/ProjectionPipeline.test.ts
+          apps/server/src/orchestration/Layers/CheckpointReactor.test.ts
+          apps/web/src/lib/contextWindow.test.ts
+      - name: Build desktop
+        run: vp run build:desktop

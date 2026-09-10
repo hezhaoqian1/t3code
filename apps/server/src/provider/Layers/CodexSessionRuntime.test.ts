@@ -49,18 +49,24 @@ function makeThreadOpenResponse(
     modelProvider: "openai",
     approvalPolicy: "never",
     approvalsReviewer: "user",
-    sandbox: { type: "danger-full-access" },
+    sandbox: { type: "dangerFullAccess" },
     thread: {
       id: threadId,
-      createdAt: "2026-04-18T00:00:00.000Z",
-      source: { session: "cli" },
+      cliVersion: "0.0.0-test",
+      createdAt: 1_776_460_800,
+      updatedAt: 1_776_460_800,
+      cwd: "/tmp/project",
+      ephemeral: false,
+      modelProvider: "openai",
+      preview: "",
+      sessionId: threadId,
+      source: "appServer",
       turns: [],
       status: {
-        state: "idle",
-        activeFlags: [],
+        type: "idle",
       },
     },
-  } as unknown as CodexRpc.ClientRequestResponsesByMethod["thread/start"];
+  };
 }
 
 describe("buildTurnStartParams", () => {
@@ -402,6 +408,36 @@ describe("isRecoverableThreadResumeError", () => {
 });
 
 describe("openCodexThread", () => {
+  it.effect("resumes from metadata even when old history contains unknown item types", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: string; payload: unknown }> = [];
+      const opened = yield* openCodexThread({
+        client: {
+          request: () => Effect.die("resume must use raw metadata transport"),
+          raw: {
+            request: (method, payload) => {
+              calls.push({ method, payload });
+              return Effect.succeed({
+                cwd: "/tmp/project",
+                model: "deepseek-v4-flash",
+                thread: { id: "original", turns: [{ items: [{ type: "unknownHistoricalItem" }] }] },
+              });
+            },
+          },
+        },
+        threadId: ThreadId.make("product-thread"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "deepseek-v4-flash",
+        serviceTier: undefined,
+        resumeThreadId: "original",
+      });
+      NodeAssert.equal(opened.thread.id, "original");
+      NodeAssert.equal(calls[0]?.method, "thread/resume");
+      NodeAssert.ok(calls[0]);
+      NodeAssert.equal((calls[0].payload as { excludeTurns?: boolean }).excludeTurns, true);
+    }),
+  );
   it.effect(
     "sends documented experimental dynamic tools through the raw thread/start transport",
     () =>
@@ -482,7 +518,7 @@ describe("openCodexThread", () => {
       }),
   );
 
-  it.effect("falls back to thread/start when resume fails recoverably", () =>
+  it.effect("starts fresh without blocking when provider history no longer exists", () =>
     Effect.gen(function* () {
       const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
       const started = makeThreadOpenResponse("fresh-thread");
@@ -555,6 +591,54 @@ describe("openCodexThread", () => {
 
       NodeAssert.ok(isCodexAppServerRequestError(error));
       NodeAssert.equal(error.errorMessage, "timed out waiting for server");
+    }),
+  );
+  it.effect("preserves authorized Skill instructions and tools when raw resume starts fresh", () =>
+    Effect.gen(function* () {
+      const calls: Array<{ method: string; payload: unknown }> = [];
+      const tools = [
+        {
+          type: "function" as const,
+          name: "fd_authorized",
+          description: "Authorized tool",
+          inputSchema: { type: "object" },
+        },
+      ];
+      const opened = yield* openCodexThread({
+        client: {
+          request: () => Effect.die("Skill session must use raw transport"),
+          raw: {
+            request: (method, payload) => {
+              calls.push({ method, payload });
+              return method === "thread/resume"
+                ? Effect.fail(
+                    new CodexErrors.CodexAppServerRequestError({
+                      code: -32603,
+                      errorMessage: "thread not found",
+                    }),
+                  )
+                : Effect.succeed(makeThreadOpenResponse("fresh-skill-thread"));
+            },
+          },
+        },
+        threadId: ThreadId.make("skill-task"),
+        runtimeMode: "approval-required",
+        cwd: "/tmp/project",
+        requestedModel: "deepseek-v4-flash",
+        serviceTier: undefined,
+        resumeThreadId: "missing-skill-thread",
+        developerInstructions: "Authorized Skill instructions",
+        dynamicTools: tools,
+      });
+      NodeAssert.equal(opened.thread.id, "fresh-skill-thread");
+      NodeAssert.deepStrictEqual(
+        calls.map((call) => call.method),
+        ["thread/resume", "thread/start"],
+      );
+      NodeAssert.ok(calls[1]);
+      const payload = calls[1].payload as { developerInstructions: string; dynamicTools: unknown };
+      NodeAssert.equal(payload.developerInstructions, "Authorized Skill instructions");
+      NodeAssert.deepStrictEqual(payload.dynamicTools, tools);
     }),
   );
 });

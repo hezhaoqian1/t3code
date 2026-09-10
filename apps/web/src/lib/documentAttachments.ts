@@ -2,34 +2,9 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES,
 } from "@t3tools/contracts";
+import { DOCUMENT_EXTENSIONS, DOCUMENT_MIME_BY_EXTENSION } from "@t3tools/shared/documentFormats";
 
-export const DESKTOP_DOCUMENT_ACCEPT = [
-  ".pdf",
-  ".docx",
-  ".xlsx",
-  ".csv",
-  ".pptx",
-  ".txt",
-  ".md",
-  ".json",
-  ".xml",
-  ".html",
-  ".htm",
-].join(",");
-
-const DOCUMENT_MIME_BY_EXTENSION: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  ".csv": "text/csv",
-  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  ".txt": "text/plain",
-  ".md": "text/markdown",
-  ".json": "application/json",
-  ".xml": "application/xml",
-  ".html": "text/html",
-  ".htm": "text/html",
-};
+export const DESKTOP_DOCUMENT_ACCEPT = DOCUMENT_EXTENSIONS.join(",");
 
 export function documentExtension(name: string): string {
   const dot = name.lastIndexOf(".");
@@ -37,7 +12,7 @@ export function documentExtension(name: string): string {
 }
 
 export function isSupportedDocumentFile(file: File): boolean {
-  return documentExtension(file.name) in DOCUMENT_MIME_BY_EXTENSION;
+  return Object.hasOwn(DOCUMENT_MIME_BY_EXTENSION, documentExtension(file.name));
 }
 
 export function documentMimeType(file: File): string {

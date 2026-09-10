@@ -223,12 +223,19 @@ async function reencodeWithinBudget(file: File, budgetChars: number): Promise<Re
     // MAX_DIMENSION. Scaling a fixed ceiling instead would be a no-op for
     // images already smaller than that ceiling — the fallback passes would
     // all resolve to the source size and never actually reduce resolution.
-    const baseDimension = Math.min(MAX_DIMENSION, Math.max(bitmap.width, bitmap.height));
+    if (bitmap.width * bitmap.height > 64_000_000) return { ok: false, reason: "too-large" };
+    // Long reports are tiled by the server. Shrinking their longest edge here
+    // destroys text before that pipeline can read it.
+    const longImage =
+      Math.max(bitmap.width, bitmap.height) / Math.min(bitmap.width, bitmap.height) > 3;
+    const baseDimension = longImage
+      ? Math.max(bitmap.width, bitmap.height)
+      : Math.min(MAX_DIMENSION, Math.max(bitmap.width, bitmap.height));
     // Tracks whether the *last* attempt threw, so a run of encoder failures
     // is reported as unreadable while a run of merely-too-big results is
     // reported as too-large.
     let encodeFailed = false;
-    for (const dimensionScale of [1, ...FALLBACK_SCALE_STEPS]) {
+    for (const dimensionScale of longImage ? [1] : [1, ...FALLBACK_SCALE_STEPS]) {
       const targetDimension = Math.max(1, Math.round(baseDimension * dimensionScale));
       let encoded: { dataUrl: string; mimeType: string } | null;
       try {

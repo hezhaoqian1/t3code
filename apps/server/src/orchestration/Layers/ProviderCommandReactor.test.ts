@@ -247,6 +247,7 @@ describe("ProviderCommandReactor", () => {
         turnId: asTurnId("turn-1"),
       }),
     );
+    const compactThread = vi.fn<ProviderServiceShape["compactThread"]>(() => Effect.void);
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
     const respondToRequest = vi.fn<ProviderServiceShape["respondToRequest"]>(() => Effect.void);
     const respondToUserInput = vi.fn<ProviderServiceShape["respondToUserInput"]>(() => Effect.void);
@@ -321,6 +322,7 @@ describe("ProviderCommandReactor", () => {
 
     const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
     const service: ProviderServiceShape = {
+      compactThread,
       startSession: startSession as ProviderServiceShape["startSession"],
       sendTurn: sendTurn as ProviderServiceShape["sendTurn"],
       interruptTurn: interruptTurn as ProviderServiceShape["interruptTurn"],
@@ -517,6 +519,7 @@ describe("ProviderCommandReactor", () => {
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       startSession,
       sendTurn,
+      compactThread,
       interruptTurn,
       respondToRequest,
       respondToUserInput,
@@ -535,6 +538,49 @@ describe("ProviderCommandReactor", () => {
       },
     };
   }
+
+  it("routes /compact to the current FD Skill without creating an assistant turn", async () => {
+    const harness = await createHarness();
+    const ready = harness.runEffect(
+      harness.engine.streamDomainEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "thread.session-set" && event.payload.session.status === "ready",
+        ),
+        Stream.runHead,
+        Effect.timeout("10 seconds"),
+      ),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("compact-command"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("compact-message"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        fdSkillVersionId: 10004,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await ready;
+    await harness.drain();
+    expect(harness.compactThread).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: "thread-1", fdSkillVersionId: 10004 }),
+      "compact-message",
+    );
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+    const thread = (await harness.readModel()).threads[0];
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.messages.some((message) => message.role === "assistant")).toBe(false);
+    expect(thread?.latestTurn).toBeNull();
+  });
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();

@@ -44,7 +44,11 @@ const decodeV2ThreadStartResponse = Schema.decodeUnknownEffect(
   EffectCodexSchema.V2ThreadStartResponse,
 );
 const decodeV2ThreadResumeResponse = Schema.decodeUnknownEffect(
-  EffectCodexSchema.V2ThreadResumeResponse,
+  Schema.Struct({
+    cwd: Schema.String,
+    model: Schema.String,
+    thread: Schema.Struct({ id: Schema.String }),
+  }),
 );
 
 const PROVIDER = ProviderDriverKind.make("codex");
@@ -178,6 +182,7 @@ export interface CodexSessionRuntimeShape {
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
+  readonly compactThread: Effect.Effect<void, CodexSessionRuntimeError>;
   readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
   readonly rollbackThread: (
@@ -489,9 +494,11 @@ export function isRecoverableThreadResumeError(error: unknown): boolean {
   return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
 }
 
-type CodexThreadOpenResponse =
-  | CodexRpc.ClientRequestResponsesByMethod["thread/start"]
-  | CodexRpc.ClientRequestResponsesByMethod["thread/resume"];
+type CodexThreadOpenResponse = {
+  readonly cwd: string;
+  readonly model: string;
+  readonly thread: { readonly id: string };
+};
 
 type CodexThreadOpenMethod = "thread/start" | "thread/resume";
 
@@ -546,31 +553,22 @@ export const openCodexThread = (input: {
     ...(input.dynamicTools ? { dynamicTools: input.dynamicTools } : {}),
   });
 
-  if (resumeThreadId === undefined) {
+  const startFresh = () => {
     if (startParams.dynamicTools !== undefined) {
       return input.client
         .raw!.request("thread/start", startParams)
         .pipe(Effect.flatMap((response) => decodeThreadOpenResponse("thread/start", response)));
     }
     return input.client.request("thread/start", startParams);
-  }
+  };
+  if (resumeThreadId === undefined) return startFresh();
 
-  if (startParams.dynamicTools !== undefined) {
-    const resumeParams = { threadId: resumeThreadId, ...startParams };
+  if (input.client.raw) {
+    // Resume needs metadata only; older historical item formats must not prevent recovery.
+    const resumeParams = { threadId: resumeThreadId, ...startParams, excludeTurns: true };
     return input.client.raw!.request("thread/resume", resumeParams).pipe(
       Effect.flatMap((response) => decodeThreadOpenResponse("thread/resume", response)),
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error,
-        }).pipe(
-          Effect.andThen(input.client.raw!.request("thread/start", startParams)),
-          Effect.flatMap((response) => decodeThreadOpenResponse("thread/start", response)),
-        ),
-      ),
+      Effect.catchIf(isRecoverableThreadResumeError, startFresh),
     );
   }
 
@@ -579,17 +577,7 @@ export const openCodexThread = (input: {
       threadId: resumeThreadId,
       ...startParams,
     })
-    .pipe(
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
-      ),
-    );
+    .pipe(Effect.catchIf(isRecoverableThreadResumeError, startFresh));
 };
 
 function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
@@ -1858,6 +1846,11 @@ export const makeCodexSessionRuntime = (
       return providerThreadId;
     });
 
+    const compactThread = Effect.gen(function* () {
+      const providerThreadId = yield* readProviderThreadId;
+      yield* client.request("thread/compact/start", { threadId: providerThreadId });
+    });
+
     const close = Effect.gen(function* () {
       const alreadyClosed = yield* Ref.getAndSet(closedRef, true);
       if (alreadyClosed) {
@@ -1882,6 +1875,7 @@ export const makeCodexSessionRuntime = (
     return {
       start,
       getSession: Ref.get(sessionRef),
+      compactThread,
       sendTurn: (input) =>
         Effect.gen(function* () {
           const providerThreadId = yield* readProviderThreadId;

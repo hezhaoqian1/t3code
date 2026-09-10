@@ -25,6 +25,15 @@ import type * as Stream from "effect/Stream";
 
 export type ProviderSessionModelSwitchMode = "in-session" | "unsupported";
 
+/** Provider-native manual context compaction. */
+export type ProviderCompaction<TError> = {
+  readonly type: "native";
+  readonly start: (
+    threadId: ThreadId,
+    input?: ProviderSendTurnInput,
+  ) => Effect.Effect<void, TError>;
+};
+
 export interface ProviderAdapterCapabilities {
   /**
    * Declares whether changing the model on an existing session is supported.
@@ -62,6 +71,9 @@ export interface ProviderAdapterShape<TError> {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
+
+  /** Omitted when this adapter cannot compact its provider-native thread. */
+  readonly compaction?: ProviderCompaction<TError>;
 
   /**
    * Interrupt an active turn.

@@ -1,5 +1,6 @@
 // @effect-diagnostics runEffectInsideEffect:off
 import type { ProviderSessionStartInput, RuntimeMode, ServerProvider } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -19,6 +20,7 @@ import { FdAgentKernel } from "../../fd-agent/FdAgentKernel.ts";
 import { makeFdLocalTools, type FdLocalToolProfile } from "../../fd-agent/FdLocalTools.ts";
 import { FdResponsesClient } from "../../fd-agent/FdResponsesClient.ts";
 import { FdVisionService } from "../../fd-vision/FdVisionService.ts";
+import { prepareAttachments } from "../../fileAnalysis/PrepareAttachments.ts";
 import {
   FD_RESPONSES_LIMITS,
   FD_RESPONSES_MODEL,
@@ -196,6 +198,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
   create: ({ instanceId, displayName, accentColor, enabled }) =>
     Effect.gen(function* () {
       const credentials = yield* FdRuntimeCredentialStore;
+      const platform = yield* HostProcessPlatform;
       const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -279,6 +282,16 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
             Effect.provideService(ServerConfig, serverConfig),
           ),
         visionService,
+        prepareAttachments: (turn, model, signal, onProgress) =>
+          prepareAttachments({
+            platform,
+            turn,
+            model,
+            signal,
+            onProgress,
+            attachmentsDir: serverConfig.attachmentsDir,
+            vision: visionService,
+          }),
         nativeSkillCatalogForSession: async (input) => {
           const catalog = new NativeSkillCatalog(input.cwd ? { projectRoot: input.cwd } : {});
           await catalog.refresh();
@@ -342,7 +355,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
               supportsParallelToolCalls: model.supportsParallelToolCalls,
             },
           })),
-          slashCommands: [],
+          slashCommands: [{ name: "compact", description: "压缩当前任务上下文" }],
           skills: [
             ...userSkillCatalog.snapshot.skills.map((skill) => ({
               name: skill.name,

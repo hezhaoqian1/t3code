@@ -12,6 +12,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   ApprovalRequestId,
+  MessageId,
   EventId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -23,6 +24,7 @@ import { createModelSelection } from "@t3tools/shared/model";
 import { it, assert, vi } from "@effect/vitest";
 
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -844,6 +846,247 @@ it.effect(
       NodeFS.rmSync(tempDir, { recursive: true, force: true });
     }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+const compactionRouting = makeProviderServiceLayer();
+compactionRouting.layer("ProviderServiceLive compaction", (it) => {
+  it.effect("waits for native compaction evidence and blocks overlapping turns", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = ThreadId.make("compact-thread");
+      const requested = yield* Deferred.make<void>();
+      Object.assign(compactionRouting.codex.adapter, {
+        compaction: {
+          type: "native",
+          start: () => Deferred.succeed(requested, undefined).pipe(Effect.asVoid),
+        },
+      });
+      yield* provider.startSession(threadId, {
+        threadId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      const completion = yield* provider
+        .compactThread({ threadId }, MessageId.make("compact-request"))
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(requested);
+      const duplicate = yield* provider
+        .compactThread({ threadId }, MessageId.make("duplicate"))
+        .pipe(Effect.exit);
+      assert.equal(Exit.isFailure(duplicate), true);
+      const overlapping = yield* provider
+        .sendTurn({ threadId, input: "new turn" })
+        .pipe(Effect.exit);
+      assert.equal(Exit.isFailure(overlapping), true);
+      const eventFiber = yield* Stream.runHead(
+        provider.streamEvents.pipe(
+          Stream.filter(
+            (event) => event.threadId === threadId && event.type === "thread.state.changed",
+          ),
+        ),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
+      compactionRouting.codex.emit({
+        eventId: EventId.make("compact-completed"),
+        provider: CODEX_DRIVER,
+        threadId,
+        createdAt: "2026-09-10T00:00:00.000Z",
+        type: "thread.state.changed",
+        payload: { state: "compacted" },
+      });
+      yield* Fiber.join(completion);
+      const event = yield* Fiber.join(eventFiber);
+      assert.equal(Option.getOrUndefined(event)?.requestId, "compact-request");
+      yield* provider.sendTurn({ threadId, input: "continue" });
+    }),
+  );
+
+  it.effect("fails a pending compaction when the session is stopped", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = ThreadId.make("compact-stop");
+      const requested = yield* Deferred.make<void>();
+      Object.assign(compactionRouting.codex.adapter, {
+        compaction: {
+          type: "native",
+          start: () => Deferred.succeed(requested, undefined).pipe(Effect.asVoid),
+        },
+      });
+      yield* provider.startSession(threadId, {
+        threadId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      const completion = yield* provider
+        .compactThread({ threadId }, MessageId.make("stop-request"))
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Deferred.await(requested);
+      yield* provider.stopSession({ threadId });
+      assert.equal(Exit.isFailure(yield* Fiber.join(completion)), true);
+      yield* provider.sendTurn({ threadId, input: "resume after stopping" });
+    }),
+  );
+
+  it.effect("requires compaction evidence and consumes its internal turn lifecycle", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = ThreadId.make("compact-internal-turn");
+      const turnId = TurnId.make("native-compaction-turn");
+      const requested = yield* Deferred.make<void>();
+      Object.assign(compactionRouting.codex.adapter, {
+        compaction: {
+          type: "native",
+          start: () => Deferred.succeed(requested, undefined).pipe(Effect.asVoid),
+        },
+      });
+      yield* provider.startSession(threadId, {
+        threadId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      const events: ProviderRuntimeEvent[] = [];
+      yield* Stream.runForEach(provider.streamEvents, (event) =>
+        Effect.sync(() => {
+          events.push(event);
+        }),
+      ).pipe(Effect.forkChild({ startImmediately: true }));
+      const completion = yield* provider
+        .compactThread({ threadId }, MessageId.make("internal-request"))
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(requested);
+      const base = {
+        provider: CODEX_DRIVER,
+        threadId,
+        turnId,
+        createdAt: "2026-09-10T00:00:00.000Z",
+      };
+      compactionRouting.codex.emit({
+        ...base,
+        eventId: EventId.make("compact-start"),
+        type: "turn.started",
+        payload: {},
+      });
+      compactionRouting.codex.emit({
+        ...base,
+        eventId: EventId.make("compact-item"),
+        type: "item.completed",
+        payload: { itemType: "context_compaction", status: "completed" },
+      });
+      compactionRouting.codex.emit({
+        ...base,
+        eventId: EventId.make("compact-turn-completed"),
+        type: "turn.completed",
+        payload: { state: "completed" },
+      });
+      assert.equal(
+        Exit.isFailure(
+          yield* provider
+            .sendTurn({ threadId, input: "no compaction evidence yet" })
+            .pipe(Effect.exit),
+        ),
+        true,
+      );
+      compactionRouting.codex.emit({
+        ...base,
+        eventId: EventId.make("compact-evidence"),
+        type: "thread.state.changed",
+        payload: { state: "compacted" },
+      });
+      yield* Fiber.join(completion);
+      assert.equal(
+        events.some(
+          (event) =>
+            event.type === "turn.started" ||
+            event.type === "turn.completed" ||
+            event.type === "item.completed",
+        ),
+        false,
+      );
+      assert.equal(
+        events.find((event) => event.type === "thread.state.changed")?.turnId,
+        undefined,
+      );
+      yield* provider.sendTurn({ threadId, input: "continue" });
+    }),
+  );
+
+  it.effect("keeps turns blocked after a timeout until the session restarts", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = ThreadId.make("compact-timeout");
+      const requested = yield* Deferred.make<void>();
+      Object.assign(compactionRouting.codex.adapter, {
+        compaction: {
+          type: "native",
+          start: () => Deferred.succeed(requested, undefined).pipe(Effect.asVoid),
+        },
+      });
+      yield* provider.startSession(threadId, {
+        threadId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      const completion = yield* provider
+        .compactThread({ threadId }, MessageId.make("timeout-request"))
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Deferred.await(requested);
+      yield* TestClock.adjust("11 minutes");
+      assert.equal(Exit.isFailure(yield* Fiber.join(completion)), true);
+      const lateEvent = yield* provider.streamEvents.pipe(
+        Stream.filter((event) => event.eventId === "late-compact-evidence"),
+        Stream.runHead,
+        Effect.forkChild({ startImmediately: true }),
+      );
+      compactionRouting.codex.emit({
+        provider: CODEX_DRIVER,
+        threadId,
+        eventId: EventId.make("late-compact-evidence"),
+        createdAt: "2026-09-10T00:00:00.000Z",
+        type: "thread.state.changed",
+        payload: { state: "compacted" },
+      });
+      yield* Fiber.join(lateEvent);
+      assert.equal(
+        Exit.isFailure(
+          yield* provider.sendTurn({ threadId, input: "still blocked" }).pipe(Effect.exit),
+        ),
+        true,
+      );
+      yield* provider.stopSession({ threadId });
+      yield* provider.sendTurn({ threadId, input: "resume" });
+    }),
+  );
+  it.effect("releases a failed compaction so the original thread can continue", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = ThreadId.make("compact-failed");
+      const requested = yield* Deferred.make<void>();
+      Object.assign(compactionRouting.codex.adapter, {
+        compaction: {
+          type: "native",
+          start: () => Deferred.succeed(requested, undefined).pipe(Effect.asVoid),
+        },
+      });
+      yield* provider.startSession(threadId, {
+        threadId,
+        providerInstanceId: codexInstanceId,
+        runtimeMode: "full-access",
+      });
+      const completion = yield* provider
+        .compactThread({ threadId }, MessageId.make("failed-request"))
+        .pipe(Effect.exit, Effect.forkChild);
+      yield* Deferred.await(requested);
+      compactionRouting.codex.emit({
+        provider: CODEX_DRIVER,
+        threadId,
+        eventId: EventId.make("compact-error"),
+        createdAt: "2026-09-10T00:00:00.000Z",
+        type: "runtime.error",
+        payload: { message: "Upstream unavailable", class: "provider_error" },
+      });
+      assert.equal(Exit.isFailure(yield* Fiber.join(completion)), true);
+      yield* provider.sendTurn({ threadId, input: "continue original context" });
+    }),
+  );
+});
 
 routing.layer("ProviderServiceLive routing", (it) => {
   it.effect("routes provider operations and rollback conversation", () =>

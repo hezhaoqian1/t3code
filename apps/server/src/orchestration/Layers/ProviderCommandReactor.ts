@@ -16,6 +16,7 @@ import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shar
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
@@ -44,10 +45,6 @@ import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import { FD_DEEPSEEK_MODEL_SELECTION } from "../../fd-agent/FdModelPolicy.ts";
 import { FdEnterpriseThreadRuntime } from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
-import { ServerConfig } from "../../config.ts";
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
-import { formatDocumentContext } from "../../fileAnalysis/DocumentContext.ts";
-import { parseDocumentAttachment } from "../../fileAnalysis/DocumentParser.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 
@@ -325,7 +322,6 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
-  const serverConfig = yield* ServerConfig;
   const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
@@ -344,6 +340,8 @@ const make = Effect.gen(function* () {
     );
 
   const threadModelSelections = new Map<string, ModelSelection>();
+  const compactingThreadIds = new Set<ThreadId>();
+  const stoppingThreadIds = new Set<ThreadId>();
 
   const appendProviderFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -751,40 +749,7 @@ const make = Effect.gen(function* () {
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
-    const documentAttachments = normalizedAttachments.filter(
-      (attachment) => attachment.type === "document",
-    );
-    const documentContexts = yield* Effect.forEach(documentAttachments, (attachment) => {
-      const attachmentPath = resolveAttachmentPath({
-        attachmentsDir: serverConfig.attachmentsDir,
-        attachment,
-      });
-      if (!attachmentPath) {
-        return Effect.fail(
-          new ProviderAdapterRequestError({
-            provider: ProviderDriverKind.make("fd-deepseek"),
-            method: "thread.turn.start",
-            detail: `文件 '${attachment.name}' 的本地引用无效。`,
-          }),
-        );
-      }
-      return Effect.tryPromise({
-        try: () => parseDocumentAttachment({ attachment, path: attachmentPath }),
-        catch: (cause) =>
-          new ProviderAdapterRequestError({
-            provider: ProviderDriverKind.make("fd-deepseek"),
-            method: "thread.turn.start",
-            detail: cause instanceof Error ? cause.message : `文件 '${attachment.name}' 解析失败。`,
-            cause,
-          }),
-      });
-    });
-    const documentPrompt = formatDocumentContext(documentContexts);
-    const inputWithDocuments = [normalizedInput, documentPrompt].filter(Boolean).join("\n\n");
-
-    // Validate and parse local files before touching provider session state. A
-    // bad attachment or an enterprise-skill policy rejection must not create a
-    // provider session that the user cannot use.
+    // The provider owns model-dependent document and image preparation.
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
@@ -793,9 +758,7 @@ const make = Effect.gen(function* () {
       threadModelSelections.set(input.threadId, input.modelSelection);
     }
 
-    const providerAttachments = normalizedAttachments.filter(
-      (attachment) => attachment.type === "image",
-    );
+    const providerAttachments = normalizedAttachments;
     const activeSession = yield* providerService
       .listSessions()
       .pipe(
@@ -830,7 +793,7 @@ const make = Effect.gen(function* () {
       ...(input.nativeSkillNames !== undefined ? { nativeSkillNames: input.nativeSkillNames } : {}),
       ...(input.presentation !== undefined ? { presentation: input.presentation } : {}),
       ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
-      ...(inputWithDocuments ? { input: inputWithDocuments } : {}),
+      ...(normalizedInput ? { input: normalizedInput } : {}),
       ...(providerAttachments.length > 0 ? { attachments: providerAttachments } : {}),
       ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
@@ -1132,6 +1095,7 @@ const make = Effect.gen(function* () {
     }
 
     const isFirstUserMessageTurn =
+      message.text.trim().toLowerCase() !== "/compact" &&
       event.payload.fdSkillVersionId === undefined &&
       thread.messages.filter((entry) => entry.role === "user").length === 1;
     if (isFirstUserMessageTurn) {
@@ -1180,6 +1144,7 @@ const make = Effect.gen(function* () {
             summary: "Provider turn start failed",
             detail,
             turnId: null,
+            requestId: event.payload.messageId,
             createdAt: event.payload.createdAt,
           }),
         ),
@@ -1198,6 +1163,99 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+
+    const clearStaged =
+      event.payload.fdSkillVersionId !== undefined && Option.isSome(enterpriseRuntime)
+        ? enterpriseRuntime.value.clearStagedTurn(event.payload.threadId, event.payload.messageId)
+        : Effect.void;
+    if (compactingThreadIds.has(thread.id)) {
+      yield* appendProviderFailureActivity({
+        threadId: thread.id,
+        kind: "provider.turn.start.failed",
+        summary: "请等待上下文压缩完成",
+        detail: "上下文压缩期间不能发送新消息。",
+        turnId: null,
+        requestId: event.payload.messageId,
+        createdAt: event.payload.createdAt,
+      });
+      yield* clearStaged;
+      return;
+    }
+    if (
+      message.text.trim().toLowerCase() === "/compact" &&
+      !message.attachments?.length &&
+      !event.payload.presentation &&
+      !event.payload.nativeSkillNames?.length
+    ) {
+      if (thread.session?.status === "running" || thread.session?.status === "starting") {
+        yield* appendProviderFailureActivity({
+          threadId: thread.id,
+          kind: "provider.turn.start.failed",
+          summary: "当前无法压缩上下文",
+          detail: "请等待当前任务完成后再压缩。",
+          turnId: null,
+          requestId: event.payload.messageId,
+          createdAt: event.payload.createdAt,
+        });
+        yield* clearStaged;
+        return;
+      }
+      compactingThreadIds.add(thread.id);
+      yield* Effect.gen(function* () {
+        yield* ensureSessionForThread(thread.id, event.payload.createdAt, {
+          pendingTurnStart: true,
+          ...(event.payload.modelSelection ? { modelSelection: event.payload.modelSelection } : {}),
+        });
+        yield* providerService.compactThread(
+          {
+            threadId: thread.id,
+            ...(event.payload.fdSkillVersionId !== undefined
+              ? { fdSkillVersionId: event.payload.fdSkillVersionId }
+              : {}),
+            ...(event.payload.modelSelection
+              ? { modelSelection: event.payload.modelSelection }
+              : {}),
+          },
+          event.payload.messageId,
+        );
+        const current = yield* resolveThread(thread.id);
+        if (
+          current?.session &&
+          current.session.status !== "stopped" &&
+          !stoppingThreadIds.has(thread.id)
+        ) {
+          const now = DateTime.formatIso(yield* DateTime.now);
+          yield* setThreadSession({
+            threadId: thread.id,
+            session: {
+              ...current.session,
+              status: "ready",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: now,
+            },
+            createdAt: now,
+          });
+        }
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            const current = yield* resolveThread(thread.id);
+            if (!stoppingThreadIds.has(thread.id) && current?.session?.status !== "stopped") {
+              yield* recoverTurnStartFailure(cause);
+            }
+          }),
+        ),
+        Effect.ensuring(clearStaged),
+        Effect.ensuring(
+          Effect.sync(() => {
+            compactingThreadIds.delete(thread.id);
+          }),
+        ),
+        Effect.forkScoped,
+      );
+      return;
+    }
 
     const sendTurnRequest = yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
@@ -1265,6 +1323,32 @@ const make = Effect.gen(function* () {
       });
     }
 
+    if (compactingThreadIds.has(thread.id)) {
+      stoppingThreadIds.add(thread.id);
+      yield* providerService.stopSession({ threadId: thread.id }).pipe(
+        Effect.onError(() =>
+          Effect.sync(() => {
+            stoppingThreadIds.delete(thread.id);
+          }),
+        ),
+      );
+      const current = yield* resolveThread(thread.id);
+      if (current?.session) {
+        yield* setThreadSession({
+          threadId: thread.id,
+          session: {
+            ...current.session,
+            status: "stopped",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: event.payload.createdAt,
+          },
+          createdAt: event.payload.createdAt,
+        });
+      }
+      stoppingThreadIds.delete(thread.id);
+      return;
+    }
     // Orchestration turn ids are not provider turn ids, so interrupt by session.
     yield* providerService.interruptTurn({ threadId: event.payload.threadId });
   });
@@ -1366,8 +1450,15 @@ const make = Effect.gen(function* () {
     }
 
     const now = event.payload.createdAt;
+    stoppingThreadIds.add(thread.id);
     if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+      yield* providerService.stopSession({ threadId: thread.id }).pipe(
+        Effect.onError(() =>
+          Effect.sync(() => {
+            stoppingThreadIds.delete(thread.id);
+          }),
+        ),
+      );
     }
 
     yield* setThreadSession({
@@ -1386,6 +1477,7 @@ const make = Effect.gen(function* () {
       },
       createdAt: now,
     });
+    stoppingThreadIds.delete(thread.id);
   });
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (

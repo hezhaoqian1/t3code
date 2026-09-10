@@ -1429,9 +1429,11 @@ describe("FdDeepSeekAdapter", () => {
       const startedInputs: Array<Record<string, unknown>> = [];
       const sentInputs: Array<Record<string, unknown>> = [];
       const stopSession = vi.fn(() => Effect.void);
+      const compact = vi.fn(() => Effect.void);
       let sessionIndex = 0;
       const ordinaryAdapter: ProviderAdapterShape<never> = {
         provider: codexProvider,
+        compaction: { type: "native", start: compact },
         capabilities: { sessionModelSwitch: "in-session" },
         startSession: (input) => {
           startedInputs.push(input);
@@ -1493,6 +1495,17 @@ describe("FdDeepSeekAdapter", () => {
       expect(startedInputs[2]).not.toHaveProperty("fdSkillVersionId");
       expect(sentInputs).toHaveLength(3);
       expect(stopSession).toHaveBeenCalledTimes(2);
+      const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+      yield* adapter.stopSession(threadId);
+      yield* adapter.startSession({ ...startInput, resumeCursor: structuredClone(cursor) });
+      yield* adapter.compaction!.start(threadId, { threadId, fdSkillVersionId: 10004 });
+      expect(startedInputs[3]).toMatchObject({
+        fdSkillVersionId: 10004,
+        resumeCursor: { threadId: "codex-profile-2" },
+      });
+      expect(compact).toHaveBeenCalledOnce();
+      expect(sentInputs).toHaveLength(3);
+      expect(adapter.capabilities.sessionModelSwitch).toBe("in-session");
     }),
   );
 
@@ -1600,7 +1613,10 @@ describe("FdDeepSeekAdapter", () => {
         });
 
         expect(turn.turnId).toBe(codexTurnId);
-        expect(turn.resumeCursor).toEqual({ threadId: "codex-provider-thread" });
+        expect(turn.resumeCursor).toMatchObject({
+          threadId: "codex-provider-thread",
+          fdContext: { activeProfile: "local" },
+        });
         expect(sentInputs).toEqual([
           expect.objectContaining({
             modelSelection: expect.objectContaining({ model: FD_RUNTIME_PRO_MODEL }),

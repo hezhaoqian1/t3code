@@ -6020,6 +6020,24 @@ function ChatViewContent(props: ChatViewProps) {
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
+                            onCompactContext={() => {
+                              const context = composerRef.current?.getSendContext();
+                              if (
+                                !context ||
+                                promptRef.current.trim() ||
+                                context.images.length ||
+                                context.documents.length ||
+                                context.terminalContexts.length ||
+                                context.elementContexts.length ||
+                                context.previewAnnotations.length ||
+                                context.reviewComments.length ||
+                                context.nativeSkillNames.length ||
+                                context.presentation ||
+                                isWorking
+                              )
+                                return;
+                              void onSend(undefined, undefined, "/compact");
+                            }}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}

@@ -1,8 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeUtil from "node:util";
 
 import type { ChatDocumentAttachment } from "@t3tools/contracts";
+import { DOCUMENT_EXTENSIONS } from "@t3tools/shared/documentFormats";
 import { OfficeParser, type SupportedFileType } from "officeparser";
 import * as XLSX from "xlsx";
 
@@ -14,21 +16,20 @@ import {
   DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS,
 } from "./DocumentContext.ts";
 
-const SUPPORTED_EXTENSIONS = new Set([
-  "pdf",
-  "docx",
-  "xlsx",
-  "csv",
-  "pptx",
+const SUPPORTED_EXTENSIONS = new Set(DOCUMENT_EXTENSIONS.map((extension) => extension.slice(1)));
+
+const SUPPORTED_TEXT_EXTENSIONS = new Set([
   "txt",
   "md",
   "json",
+  "jsonl",
   "xml",
-  "html",
-  "htm",
+  "csv",
+  "tsv",
+  "yaml",
+  "yml",
+  "log",
 ]);
-
-const SUPPORTED_TEXT_EXTENSIONS = new Set(["txt", "md", "json", "xml", "html", "htm", "csv"]);
 
 export class DocumentParseError extends Error {
   readonly code: "unsupported" | "invalid_mime" | "empty" | "encrypted" | "parser_failed";
@@ -49,7 +50,7 @@ export async function parseDocumentAttachment(input: {
     throw new DocumentParseError("unsupported", `暂不支持 .${extension || "unknown"} 文件。`);
   }
 
-  const bytes = await NodeFS.readFile(input.path);
+  const bytes = await NodeFSP.readFile(input.path);
   if (bytes.byteLength === 0) {
     throw new DocumentParseError("empty", "文件为空，无法分析。 ");
   }
@@ -59,14 +60,31 @@ export async function parseDocumentAttachment(input: {
   validateMagicBytes(bytes, extension, input.attachment.mimeType);
 
   try {
-    if (extension === "xlsx") {
+    if (extension === "doc" || extension === "ppt") {
+      // The worker client owns conversion so cancellation can stop LibreOffice.
+      throw new DocumentParseError("unsupported", "旧版 DOC/PPT 需要先转换为 DOCX/PPTX。");
+    }
+    if (["xlsx", "xls", "xlsm", "xlsb", "ods"].includes(extension)) {
       return parseWorkbookAttachment(input.attachment, bytes);
     }
     if (SUPPORTED_TEXT_EXTENSIONS.has(extension)) {
-      const text = bytes
-        .toString("utf8")
-        .replace(/^\uFEFF/, "")
-        .trim();
+      const encoding =
+        bytes[0] === 0xff && bytes[1] === 0xfe
+          ? "utf-16le"
+          : bytes[0] === 0xfe && bytes[1] === 0xff
+            ? "utf-16be"
+            : "utf-8";
+      let text: string;
+      try {
+        text = new NodeUtil.TextDecoder(encoding, { fatal: true }).decode(bytes).trim();
+      } catch {
+        throw new DocumentParseError(
+          "parser_failed",
+          "文本编码无法识别，请另存为 UTF-8 或带 BOM 的 UTF-16 后重试。",
+        );
+      }
+      if (text.includes("\0"))
+        throw new DocumentParseError("invalid_mime", "文件包含二进制内容，不能作为文本读取。");
       if (!text) {
         throw new DocumentParseError("empty", "没有提取到可分析的文字。");
       }
@@ -90,19 +108,15 @@ export async function parseDocumentAttachment(input: {
       };
     }
     const ast = await OfficeParser.parseOffice(bytes, {
-      fileType: extension as SupportedFileType,
+      fileType: (extension === "htm" ? "html" : extension) as SupportedFileType,
       ocr: false,
       extractAttachments: false,
+      decompressionLimits: { maxUncompressedBytes: 128 * 1024 * 1024, maxZipEntries: 4000 },
     });
     const sections = collectSections(ast as unknown as OfficeAst);
     const extractedCharacters = sections.reduce((total, section) => total + section.text.length, 0);
     if (extractedCharacters === 0) {
-      throw new DocumentParseError(
-        "empty",
-        extension === "pdf"
-          ? "没有提取到文字，扫描版 PDF 暂不支持 OCR。"
-          : "没有提取到可分析的文字。",
-      );
+      throw new DocumentParseError("empty", "没有提取到可分析的文字。图片型文档需要使用视觉识别。");
     }
     const warnings: DocumentWarning[] = [];
     if (extractedCharacters > DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS) {
@@ -134,16 +148,19 @@ function parseWorkbookAttachment(
   attachment: ChatDocumentAttachment,
   bytes: Buffer,
 ): DocumentContext {
-  const workbook = XLSX.read(bytes, { type: "buffer", cellDates: true });
+  const workbook = XLSX.read(bytes, { type: "buffer", cellDates: true, sheetRows: 5_001 });
   const sections: DocumentSection[] = [];
+  let omittedRows = false;
   for (const [index, sheetName] of workbook.SheetNames.entries()) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
+    if (sheet["!fullref"] && sheet["!fullref"] !== sheet["!ref"]) omittedRows = true;
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
       header: 1,
       raw: false,
       blankrows: false,
     });
+    if (rows.length > 5_000) omittedRows = true;
     const text = rows
       .slice(0, 5_000)
       .map((row) =>
@@ -169,14 +186,23 @@ function parseWorkbookAttachment(
   if (extractedCharacters === 0) {
     throw new DocumentParseError("empty", "没有提取到可分析的文字。");
   }
-  const truncated = sections.some(
-    (section) => section.text.length > DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS,
-  );
+  const truncated =
+    omittedRows ||
+    sections.some(
+      (section) => section.text.length > DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS,
+    );
   return {
     attachment,
     parser: "xlsx@0.18.5",
     sections,
-    warnings: truncated ? [{ code: "truncated", message: "内容较长，本轮只使用受控范围。" }] : [],
+    warnings: truncated
+      ? [
+          {
+            code: "truncated",
+            message: "表格内容已截取，每个工作表最多读取前 5000 行；回答必须说明未覆盖全部数据。",
+          },
+        ]
+      : [],
     extractedCharacters,
     truncated,
     ocrUsed: false,
@@ -302,14 +328,34 @@ function extensionOf(name: string): string {
   return index >= 0 ? name.slice(index + 1).toLowerCase() : "";
 }
 
-function validateMagicBytes(bytes: Buffer, extension: string, mimeType: string): void {
+export function validateMagicBytes(bytes: Buffer, extension: string, mimeType: string): void {
   const isPdf = bytes.subarray(0, 5).toString("ascii") === "%PDF-";
   const isZip = bytes.subarray(0, 2).toString("ascii") === "PK";
   const isText = SUPPORTED_TEXT_EXTENSIONS.has(extension);
+  const isOle = bytes
+    .subarray(0, 8)
+    .equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
+  if (["doc", "ppt", "xls"].includes(extension)) {
+    if (!isOle)
+      throw new DocumentParseError(
+        "invalid_mime",
+        "文件不是有效的旧版 Office 文件，请另存为现代 Office 格式。",
+      );
+    return;
+  }
+  if (extension === "rtf") {
+    if (!bytes.subarray(0, 5).equals(Buffer.from("{\\rtf")))
+      throw new DocumentParseError("invalid_mime", "文件不是有效的 RTF。");
+    return;
+  }
+  if (extension === "html" || extension === "htm") return;
   if (extension === "pdf" && !isPdf) {
     throw new DocumentParseError("invalid_mime", "文件不是有效的 PDF。 ");
   }
-  if (["docx", "xlsx", "pptx"].includes(extension) && !isZip) {
+  if (
+    ["docx", "xlsx", "pptx", "xlsm", "xlsb", "odt", "ods", "odp", "epub"].includes(extension) &&
+    !isZip
+  ) {
     throw new DocumentParseError("invalid_mime", "文件内容与扩展名不匹配。 ");
   }
   if (!isText && !isPdf && !isZip) {

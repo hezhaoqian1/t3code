@@ -106,6 +106,7 @@ function createProviderServiceHarness() {
 
   const unsupported = () => Effect.die(new Error("Unsupported provider call in test")) as never;
   const service: ProviderServiceShape = {
+    compactThread: () => Effect.void,
     startSession: () => unsupported(),
     sendTurn: () => unsupported(),
     interruptTurn: () => unsupported(),
@@ -3364,7 +3365,7 @@ describe("ProviderRuntimeIngestion", () => {
     const activity = thread.activities.find(
       (candidate: ProviderRuntimeTestActivity) => candidate.kind === "context-compaction",
     );
-    expect(activity?.summary).toBe("Context compacted");
+    expect(activity?.summary).toBe("上下文已压缩");
     expect(activity?.tone).toBe("info");
   });
 

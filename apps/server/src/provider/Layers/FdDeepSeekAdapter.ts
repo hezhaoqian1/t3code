@@ -10,6 +10,7 @@ import {
   type ProviderSessionStartInput,
   RuntimeItemId,
   RuntimeRequestId,
+  RuntimeTaskId,
   ThreadId,
   TurnId,
   type PresentationTurnSelection,
@@ -38,6 +39,11 @@ import {
 } from "../../fd-agent/FdResponsesProtocol.ts";
 import { FD_RESPONSES_MODEL_CATALOG } from "../../fd-codex/ResponsesModelCatalog.ts";
 import {
+  encodeFdContextBinding,
+  restoreFdContextBinding,
+  type FdExecutionProfile,
+} from "../../fd-codex/FdContextBinding.ts";
+import {
   FdEnterpriseAgentClient,
   FdEnterpriseAgentError,
   type FdEnterpriseAgentEvent,
@@ -47,7 +53,7 @@ import {
   NativeSkillCatalog,
   selectedNativeSkillNames,
 } from "../../fd-skills/NativeSkillCatalog.ts";
-import { FdVisionService } from "../../fd-vision/FdVisionService.ts";
+import { FdVisionService, visionFailureMessage } from "../../fd-vision/FdVisionService.ts";
 import {
   type ProviderAdapterError,
   ProviderAdapterRequestError,
@@ -90,8 +96,6 @@ interface ActiveTurn {
   settled: boolean;
 }
 
-type FdExecutionProfile = "local" | `enterprise:${number}`;
-
 interface FdSessionContext {
   session: ProviderSession;
   readonly startInput: ProviderSessionStartInput;
@@ -128,6 +132,12 @@ interface EnterpriseToolGrounding {
 }
 
 export interface FdDeepSeekAdapterOptions {
+  readonly prepareAttachments?: (
+    input: ProviderSendTurnInput,
+    model: string,
+    signal: AbortSignal,
+    onProgress: (message: string) => Promise<void>,
+  ) => Promise<ProviderSendTurnInput>;
   readonly instanceId?: ProviderInstanceId;
   readonly kernel: FdAgentKernel;
   readonly ordinaryAdapter?: ProviderAdapterShape<ProviderAdapterError>;
@@ -335,6 +345,26 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     yield* Stream.runForEach(options.ordinaryAdapter.streamEvents, (event) =>
       Effect.gen(function* () {
         const context = sessions.get(event.threadId);
+        if (
+          context &&
+          event.type === "session.started" &&
+          event.payload.resume !== undefined &&
+          context.ordinaryExecutionProfile
+        ) {
+          context.ordinaryResumeCursors.set(context.ordinaryExecutionProfile, event.payload.resume);
+          const resume = encodeFdContextBinding(
+            context.ordinaryExecutionProfile,
+            context.ordinaryResumeCursors,
+          );
+          context.session = { ...context.session, resumeCursor: resume };
+          yield* Queue.offer(events, {
+            ...event,
+            provider: FD_DEEPSEEK_DRIVER_KIND,
+            providerInstanceId: instanceId,
+            payload: { ...event.payload, resume },
+          });
+          return;
+        }
         if (event.type === "turn.completed" && event.turnId && context) {
           const presentation =
             context.pendingPresentations.get(event.turnId) ?? context.pendingPresentation;
@@ -805,6 +835,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     context: FdSessionContext,
   ) {
     if (context.stopped) return;
+    preparations.get(context.session.threadId)?.abort();
     context.stopped = true;
     sessions.delete(context.session.threadId);
     const active = context.activeTurn;
@@ -888,16 +919,17 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       ...(input.cwd ? { cwd: input.cwd } : {}),
       model: selectedModel,
       threadId: input.threadId,
-      resumeCursor: { schemaVersion: 1, sessionId: input.threadId },
+      resumeCursor: input.resumeCursor ?? { schemaVersion: 1, sessionId: input.threadId },
       createdAt,
       updatedAt: createdAt,
     };
+    const binding = restoreFdContextBinding(input.resumeCursor);
     sessions.set(input.threadId, {
       session,
       startInput: input,
       ordinarySessionStarted: false,
       ordinaryExecutionProfile: undefined,
-      ordinaryResumeCursors: new Map(),
+      ordinaryResumeCursors: binding.profiles,
       history: [],
       turns: [],
       tools,
@@ -928,7 +960,49 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     return session;
   });
 
-  const sendTurn: ProviderAdapterShape<FdAdapterError>["sendTurn"] = Effect.fn(
+  const ensureOrdinarySession = Effect.fn("ensureFdCodexSession")(function* (
+    context: FdSessionContext,
+    input: ProviderSendTurnInput,
+  ) {
+    const adapter = options.ordinaryAdapter!;
+    const profile = executionProfileFor(input.fdSkillVersionId);
+    if (context.ordinarySessionStarted && context.ordinaryExecutionProfile !== profile) {
+      yield* adapter.stopSession(input.threadId);
+      context.ordinarySessionStarted = false;
+    }
+    if (!context.ordinarySessionStarted) {
+      const { provider: _provider, resumeCursor: _resume, ...base } = context.startInput;
+      const resumeCursor = context.ordinaryResumeCursors.get(profile);
+      const startInput = {
+        ...base,
+        ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+        ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+      };
+      const resolved = options.ordinarySessionInput
+        ? yield* options.ordinarySessionInput(startInput)
+        : startInput;
+      context.ordinaryExecutionProfile = profile;
+      const started = yield* adapter.startSession({
+        ...resolved,
+        ...(input.fdSkillVersionId !== undefined
+          ? { fdSkillVersionId: input.fdSkillVersionId }
+          : {}),
+      });
+      if (started.resumeCursor !== undefined)
+        context.ordinaryResumeCursors.set(profile, started.resumeCursor);
+      context.ordinarySessionStarted = true;
+      context.session = {
+        ...started,
+        provider: FD_DEEPSEEK_DRIVER_KIND,
+        providerInstanceId: instanceId,
+        resumeCursor: encodeFdContextBinding(profile, context.ordinaryResumeCursors),
+      };
+    }
+    return profile;
+  });
+
+  const preparations = new Map<ThreadId, AbortController>();
+  const sendPreparedTurn: ProviderAdapterShape<FdAdapterError>["sendTurn"] = Effect.fn(
     "sendFdDeepSeekTurn",
   )(function* (input: ProviderSendTurnInput) {
     const context = yield* requireSession(input.threadId);
@@ -1010,8 +1084,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
               new ProviderAdapterRequestError({
                 provider: FD_DEEPSEEK_DRIVER_KIND,
                 method: "turn/start",
-                detail:
-                  "DeepSeek 图片视觉预处理失败，请稍后重试；如果持续失败，请联系管理员检查视觉模型配置。",
+                detail: visionFailureMessage(cause),
                 cause,
               }),
           });
@@ -1030,56 +1103,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
           });
         }
       }
-      const requestedProfile = executionProfileFor(input.fdSkillVersionId);
-      if (context.ordinarySessionStarted && context.ordinaryExecutionProfile !== requestedProfile) {
-        if (
-          context.ordinaryExecutionProfile !== undefined &&
-          context.session.resumeCursor !== undefined
-        ) {
-          context.ordinaryResumeCursors.set(
-            context.ordinaryExecutionProfile,
-            context.session.resumeCursor,
-          );
-        }
-        yield* options.ordinaryAdapter.stopSession(input.threadId).pipe(Effect.ignore);
-        context.ordinarySessionStarted = false;
-        context.ordinaryExecutionProfile = undefined;
-      }
-      if (!context.ordinarySessionStarted) {
-        const {
-          provider: _provider,
-          resumeCursor: initialResumeCursor,
-          ...ordinaryStartInput
-        } = context.startInput;
-        const profileResumeCursor = context.ordinaryResumeCursors.get(requestedProfile);
-        const resumeCursor =
-          profileResumeCursor ?? (requestedProfile === "local" ? initialResumeCursor : undefined);
-        const routedStartInput = options.ordinarySessionInput
-          ? yield* options.ordinarySessionInput({
-              ...ordinaryStartInput,
-              ...(resumeCursor !== undefined ? { resumeCursor } : {}),
-            })
-          : {
-              ...ordinaryStartInput,
-              ...(resumeCursor !== undefined ? { resumeCursor } : {}),
-            };
-        const ordinarySession = yield* options.ordinaryAdapter.startSession({
-          ...routedStartInput,
-          ...(input.fdSkillVersionId !== undefined
-            ? { fdSkillVersionId: input.fdSkillVersionId }
-            : {}),
-        });
-        context.ordinarySessionStarted = true;
-        context.ordinaryExecutionProfile = requestedProfile;
-        if (ordinarySession.resumeCursor !== undefined) {
-          context.ordinaryResumeCursors.set(requestedProfile, ordinarySession.resumeCursor);
-        }
-        context.session = {
-          ...ordinarySession,
-          provider: FD_DEEPSEEK_DRIVER_KIND,
-          providerInstanceId: instanceId,
-        };
-      }
+      const requestedProfile = yield* ensureOrdinarySession(context, input);
       const result = yield* options.ordinaryAdapter.sendTurn(ordinaryInput).pipe(
         Effect.tapError(() =>
           Effect.sync(() => {
@@ -1096,9 +1120,12 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       context.session = { ...context.session, model: selectedModel };
       if (result.resumeCursor !== undefined) {
         context.ordinaryResumeCursors.set(requestedProfile, result.resumeCursor);
-        context.session = { ...context.session, resumeCursor: result.resumeCursor };
+        context.session = {
+          ...context.session,
+          resumeCursor: encodeFdContextBinding(requestedProfile, context.ordinaryResumeCursors),
+        };
       }
-      return result;
+      return { ...result, resumeCursor: context.session.resumeCursor };
     }
     const imageParts =
       attachments.length === 0
@@ -1199,9 +1226,103 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     return { threadId: input.threadId, turnId, resumeCursor: context.session.resumeCursor };
   });
 
+  const sendTurn: ProviderAdapterShape<FdAdapterError>["sendTurn"] = Effect.fn("prepareFdTurn")(
+    function* (input) {
+      const context = yield* requireSession(input.threadId);
+      if (preparations.has(input.threadId) || (context.activeTurn && !context.activeTurn.settled)) {
+        return yield* new ProviderAdapterRequestError({
+          provider: FD_DEEPSEEK_DRIVER_KIND,
+          method: "turn/start",
+          detail: "当前任务仍在处理，请等待完成后重试。",
+        });
+      }
+      if (!options.prepareAttachments || !input.attachments?.length)
+        return yield* sendPreparedTurn(input);
+      const model = input.modelSelection?.model ?? context.session.model ?? FD_RESPONSES_MODEL;
+      if (
+        !isSupportedResponsesModel(model) ||
+        (input.modelSelection && input.modelSelection.instanceId !== instanceId)
+      ) {
+        return yield* new ProviderAdapterValidationError({
+          provider: FD_DEEPSEEK_DRIVER_KIND,
+          operation: "sendTurn",
+          issue: "The selected model is not advertised by this provider.",
+        });
+      }
+      const controller = new AbortController();
+      preparations.set(input.threadId, controller);
+      const taskId = RuntimeTaskId.make(`attachments-${randomId()}`);
+      yield* publish({
+        ...eventBase(input.threadId),
+        type: "task.started",
+        payload: { taskId, description: "正在处理附件" },
+      });
+      let preparationSucceeded = false;
+      return yield* Effect.tryPromise({
+        try: async (signal) => {
+          const prepared = await options.prepareAttachments!(
+            input,
+            model,
+            AbortSignal.any([signal, controller.signal, AbortSignal.timeout(600_000)]),
+            (description) =>
+              publishFromPromise({
+                ...eventBase(input.threadId),
+                type: "task.progress",
+                payload: { taskId, description },
+              }),
+          );
+          preparationSucceeded = true;
+          return prepared;
+        },
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: FD_DEEPSEEK_DRIVER_KIND,
+            method: "turn/start",
+            detail: cause instanceof Error ? cause.message : "附件处理失败。",
+            cause,
+          }),
+      }).pipe(
+        Effect.flatMap((prepared) =>
+          controller.signal.aborted
+            ? Effect.fail(
+                new ProviderAdapterRequestError({
+                  provider: FD_DEEPSEEK_DRIVER_KIND,
+                  method: "turn/start",
+                  detail: "附件处理已取消。",
+                }),
+              )
+            : sendPreparedTurn(prepared),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            controller.abort();
+            preparations.delete(input.threadId);
+          }),
+        ),
+        Effect.ensuring(
+          Effect.suspend(() =>
+            publish({
+              ...eventBase(input.threadId),
+              type: "task.completed",
+              payload: {
+                taskId,
+                status: preparationSucceeded ? "completed" : "failed",
+                summary: preparationSucceeded ? "附件处理完成" : "附件处理未完成",
+              },
+            }),
+          ),
+        ),
+      );
+    },
+  );
+
   const interruptTurn: ProviderAdapterShape<FdAdapterError>["interruptTurn"] = (threadId, turnId) =>
     Effect.gen(function* () {
       const context = yield* requireSession(threadId);
+      if (preparations.has(threadId)) {
+        preparations.get(threadId)!.abort();
+        return;
+      }
       if (context.ordinarySessionStarted && options.ordinaryAdapter) {
         return yield* options.ordinaryAdapter.interruptTurn(threadId, turnId);
       }
@@ -1293,14 +1414,21 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
 
   const stopSession: ProviderAdapterShape<FdAdapterError>["stopSession"] = (threadId) =>
     Effect.gen(function* () {
+      preparations.get(threadId)?.abort();
       const context = sessions.get(threadId);
       if (context) yield* stopSessionInternal(context);
     });
   const stopAll: ProviderAdapterShape<FdAdapterError>["stopAll"] = () =>
-    Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
-      concurrency: 1,
-      discard: true,
-    });
+    Effect.sync(() => {
+      for (const controller of preparations.values()) controller.abort();
+    }).pipe(
+      Effect.andThen(
+        Effect.forEach(Array.from(sessions.values()), stopSessionInternal, {
+          concurrency: 1,
+          discard: true,
+        }),
+      ),
+    );
 
   yield* Effect.acquireRelease(Effect.void, () =>
     stopAll().pipe(
@@ -1312,15 +1440,34 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
 
   return {
     provider: FD_DEEPSEEK_DRIVER_KIND,
-    // This compatibility adapter can route both FD New API and DashScope.
-    // Those endpoints have independent CODEX_HOME/config/credentials, so a
-    // model change must restart the provider session. The restart is handled
-    // by ProviderCommandReactor and keeps the desktop thread UX unchanged.
     capabilities: {
-      sessionModelSwitch: "unsupported",
+      // All advertised FD models now share the same managed Responses runtime.
+      sessionModelSwitch: options.ordinaryAdapter ? "in-session" : "unsupported",
     },
     startSession,
     sendTurn,
+    ...(options.ordinaryAdapter?.compaction
+      ? {
+          compaction: {
+            type: "native" as const,
+            start: (threadId: ThreadId, input?: ProviderSendTurnInput) =>
+              Effect.gen(function* () {
+                const context = yield* requireSession(threadId);
+                const requestedInput = input ?? { threadId };
+                const profile = executionProfileFor(requestedInput.fdSkillVersionId);
+                if (!context.ordinaryResumeCursors.has(profile)) {
+                  return yield* new ProviderAdapterRequestError({
+                    provider: FD_DEEPSEEK_DRIVER_KIND,
+                    method: "thread/compact/start",
+                    detail: "当前任务尚无可压缩的模型上下文，请先发送一条消息。",
+                  });
+                }
+                yield* ensureOrdinarySession(context, requestedInput);
+                yield* options.ordinaryAdapter!.compaction!.start(threadId, requestedInput);
+              }),
+          },
+        }
+      : {}),
     interruptTurn,
     respondToRequest,
     respondToUserInput: (threadId, requestId, answers) =>

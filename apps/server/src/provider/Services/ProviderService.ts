@@ -23,6 +23,7 @@ import type {
   ProviderStopSessionInput,
   ThreadId,
   ProviderTurnStartResult,
+  MessageId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -36,6 +37,10 @@ import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
 export interface ProviderServiceShape {
+  readonly compactThread: (
+    input: ProviderSendTurnInput,
+    requestId: MessageId,
+  ) => Effect.Effect<void, ProviderServiceError>;
   /**
    * Start a provider session.
    */

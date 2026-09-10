@@ -1,4 +1,6 @@
 import { cn } from "~/lib/utils";
+import { Minimize2Icon } from "lucide-react";
+import { Button } from "../ui/button";
 import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
@@ -15,6 +17,8 @@ function formatPercentage(value: number | null): string | null {
 export function ContextWindowMeter(props: {
   usage: ContextWindowSnapshot;
   providerDisplayName?: string | null;
+  onCompact?: (() => void) | undefined;
+  compactDisabled?: boolean | undefined;
 }) {
   const { usage, providerDisplayName } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
@@ -89,7 +93,7 @@ export function ContextWindowMeter(props: {
       >
         <div className="flex flex-col gap-2 p-[var(--floating-content-inset)]">
           <div className="flex items-center justify-between gap-3">
-            <div className="font-medium text-muted-foreground text-xs">Context Window</div>
+            <div className="font-medium text-muted-foreground text-xs">运行时上下文</div>
             {usage.maxTokens !== null && usedPercentage ? (
               <div className="text-secondary-label text-[11px] tabular-nums">
                 <span>{usedPercentage}</span>
@@ -122,7 +126,7 @@ export function ContextWindowMeter(props: {
           ) : null}
           {showTotalProcessed ? (
             <div className="flex items-center justify-between gap-3 text-[11px] leading-4">
-              <span className="text-secondary-label">Total processed</span>
+              <span className="text-secondary-label">累计处理</span>
               <span className="font-medium tabular-nums text-secondary-label">
                 {formatContextWindowTokens(totalProcessedTokens)}
               </span>
@@ -130,8 +134,22 @@ export function ContextWindowMeter(props: {
           ) : null}
           {usage.compactsAutomatically ? (
             <div className="mt-1 text-pretty text-secondary-label text-[11px] font-medium">
-              {providerDisplayName ?? "It"} automatically compacts its context when needed.
+              {providerDisplayName ?? "当前运行时"} · 自动压缩
             </div>
+          ) : null}
+          {props.onCompact ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={props.compactDisabled}
+              onClick={props.onCompact}
+              title="压缩当前上下文"
+              className="w-full"
+            >
+              <Minimize2Icon aria-hidden="true" />
+              压缩上下文
+            </Button>
           ) : null}
         </div>
       </PopoverPopup>

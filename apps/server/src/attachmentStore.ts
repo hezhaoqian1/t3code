@@ -3,6 +3,7 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 
 import type { ChatAttachment } from "@t3tools/contracts";
+import { DOCUMENT_EXTENSIONS } from "@t3tools/shared/documentFormats";
 
 import {
   normalizeAttachmentRelativePath,
@@ -10,21 +11,7 @@ import {
 } from "./attachmentPaths.ts";
 import { inferImageExtension, SAFE_IMAGE_FILE_EXTENSIONS } from "./imageMime.ts";
 
-const SAFE_DOCUMENT_FILE_EXTENSIONS = [
-  ".pdf",
-  ".doc",
-  ".docx",
-  ".xls",
-  ".xlsx",
-  ".csv",
-  ".pptx",
-  ".txt",
-  ".md",
-  ".json",
-  ".xml",
-  ".html",
-  ".htm",
-];
+const SAFE_DOCUMENT_FILE_EXTENSIONS = DOCUMENT_EXTENSIONS;
 const ALL_ATTACHMENT_FILENAME_EXTENSIONS = [
   ...SAFE_IMAGE_FILE_EXTENSIONS,
   ...SAFE_DOCUMENT_FILE_EXTENSIONS,

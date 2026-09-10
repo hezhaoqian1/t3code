@@ -69,6 +69,28 @@ afterEach(() => {
 });
 
 describe("compressImageForStash", () => {
+  it("preserves long-report width for server-side tiling", async () => {
+    stubCanvasPipeline(() => 100);
+    vi.stubGlobal(
+      "createImageBitmap",
+      vi.fn(async () => ({ width: 1000, height: 20000, close: vi.fn() })),
+    );
+    const sizes: number[][] = [];
+    const Canvas = globalThis.OffscreenCanvas;
+    vi.stubGlobal(
+      "OffscreenCanvas",
+      class extends Canvas {
+        constructor(width: number, height: number) {
+          super(width, height);
+          sizes.push([width, height]);
+        }
+      },
+    );
+    const result = await compressImageToByteLimit(makeFile(2000), 1000);
+    expect(result.ok).toBe(true);
+    expect(sizes).toContainEqual([1000, 20000]);
+    expect(sizes).not.toContainEqual([102, 2048]);
+  });
   it("stores a small image verbatim without re-encoding", async () => {
     const bitmapSpy = vi.fn();
     vi.stubGlobal("createImageBitmap", bitmapSpy);

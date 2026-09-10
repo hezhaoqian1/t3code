@@ -32,10 +32,14 @@ export const DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS = 16_000;
 export function formatDocumentContext(contexts: ReadonlyArray<DocumentContext>): string {
   const sections: string[] = [];
   let remaining = DOCUMENT_CONTEXT_MAX_CHARACTERS;
+  let omitted = false;
 
   for (const [attachmentIndex, context] of contexts.entries()) {
     for (const section of context.sections) {
-      if (remaining <= 0) break;
+      if (remaining <= 0) {
+        omitted = true;
+        break;
+      }
       const location =
         section.index === null
           ? "文档"
@@ -54,7 +58,10 @@ export function formatDocumentContext(contexts: ReadonlyArray<DocumentContext>):
         0,
         Math.min(remaining - header.length - 20, DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS),
       );
-      if (bodyBudget <= 0) break;
+      if (bodyBudget <= 0) {
+        omitted = true;
+        break;
+      }
       const body = section.text.slice(0, bodyBudget);
       const sectionText = `${header}\n内容：\n${body}${body.length < section.text.length ? "\n[本段内容已截断]" : ""}`;
       sections.push(sectionText);
@@ -62,10 +69,11 @@ export function formatDocumentContext(contexts: ReadonlyArray<DocumentContext>):
     }
   }
 
-  if (sections.length === 0) return "";
   const warnings = contexts.flatMap((context) =>
     context.warnings.map((warning) => `附件 ${context.attachment.name}：${warning.message}`),
   );
+  if (omitted) warnings.push("附件总文本超过本轮容量，部分内容未提供，不能声称已完整阅读。");
+  if (sections.length === 0 && warnings.length === 0) return "";
   return [
     "以下是用户本轮上传文件的可读内容。请引用页码、幻灯片或工作表来源；如果内容已截断或来自扫描件，请明确说明。",
     sections.join("\n\n---\n\n"),

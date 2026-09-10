@@ -25,7 +25,7 @@ export default mergeConfig(
       },
     },
     pack: {
-      entry: ["src/bin.ts"],
+      entry: ["src/bin.ts", "src/attachmentWorker.ts"],
       outDir: "dist",
       sourcemap: process.env.T3CODE_SERVER_SOURCEMAP === "1",
       clean: true,
