@@ -89,7 +89,7 @@ function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
         shortName,
         supportsTools: true,
         supportsVision: shortName === "Kimi K3",
-        visionRoute: shortName === "Kimi K3" ? "native" : ("unsupported" as const),
+        visionRoute: shortName === "Kimi K3" ? ("native" as const) : ("unsupported" as const),
         supportsReasoning: true,
         supportsStructuredOutput: true,
         supportsForcedToolChoice: false,
