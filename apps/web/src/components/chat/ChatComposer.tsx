@@ -123,6 +123,7 @@ import {
   DESKTOP_DOCUMENT_ACCEPT,
   attachmentCapacity,
   documentMimeType,
+  normalizeDocumentFile,
   validateDesktopDocumentFile,
 } from "../../lib/documentAttachments";
 
@@ -2388,7 +2389,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         name: file.name,
         mimeType: documentMimeType(file),
         sizeBytes: file.size,
-        file,
+        file: normalizeDocumentFile(file),
       });
     }
     if (nextDocuments.length > 0) {

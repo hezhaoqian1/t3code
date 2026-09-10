@@ -17,7 +17,14 @@ export function isSupportedDocumentFile(file: File): boolean {
 
 export function documentMimeType(file: File): string {
   const inferred = DOCUMENT_MIME_BY_EXTENSION[documentExtension(file.name)];
-  return inferred ?? (file.type || "application/octet-stream");
+  return (inferred ?? (file.type || "application/octet-stream")).toLowerCase();
+}
+
+export function normalizeDocumentFile(file: File): File {
+  const type = documentMimeType(file);
+  return file.type === type
+    ? file
+    : new File([file], file.name, { type, lastModified: file.lastModified });
 }
 
 export function validateDesktopDocumentFile(file: File): string | null {

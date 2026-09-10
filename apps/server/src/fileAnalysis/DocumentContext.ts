@@ -26,8 +26,8 @@ export interface DocumentContext {
   readonly ocrUsed: boolean;
 }
 
-export const DOCUMENT_CONTEXT_MAX_CHARACTERS = 40_000;
-export const DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS = 16_000;
+export const DOCUMENT_CONTEXT_MAX_CHARACTERS = 160_000;
+export const DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS = DOCUMENT_CONTEXT_MAX_CHARACTERS;
 
 export function formatDocumentContext(contexts: ReadonlyArray<DocumentContext>): string {
   const sections: string[] = [];
