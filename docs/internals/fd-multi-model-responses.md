@@ -140,6 +140,20 @@ the FD policy that explicitly authorizes it. External models that support
 vision should receive their own image input through the same Responses/Codex
 transport; they should not silently receive a DeepSeek-generated description.
 
+The production alias `deepseek-v4-flash-vision-exp` is a private
+implementation model, not a selectable desktop model. Its upstream mapping
+must point to the approved DeepSeek vision deployment. It must never be mapped
+to `kimi-k3`: Kimi is the separate native route and receives the original
+`input_image`. If the private alias is unavailable or returns a non-Responses
+stream, the server must fail the image turn and preserve the upstream error in
+server logs; it must not report a misleading file-format error or silently
+downgrade to text-only.
+
+Before publishing a release, verify that the runtime credential authorizes the
+private alias, a direct `/v1/responses` smoke returns a text delta and
+`response.completed`, and PNG turns succeed for both Flash and Pro. A Kimi
+vision turn must send the original image exactly once to the Kimi endpoint.
+
 ## Rollout
 
 1. Complete the Codex App Server -> DashScope matrix: text streaming,

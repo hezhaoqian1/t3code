@@ -1017,7 +1017,8 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
               new ProviderAdapterRequestError({
                 provider: FD_DEEPSEEK_DRIVER_KIND,
                 method: "turn/start",
-                detail: "图片分析失败，请确认图片格式后重试。",
+                detail:
+                  "DeepSeek 图片视觉预处理失败，请稍后重试；如果持续失败，请联系管理员检查视觉模型配置。",
                 cause,
               }),
           });
