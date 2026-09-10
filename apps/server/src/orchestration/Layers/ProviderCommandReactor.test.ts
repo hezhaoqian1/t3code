@@ -596,43 +596,41 @@ describe("ProviderCommandReactor", () => {
     expect(JSON.stringify(Array.from(persisted))).toContain("hello reactor");
   });
 
-  it("rejects FD Skill document attachments before starting a provider session", async () => {
+  it("allows FD Skill document attachments through the document analysis pipeline", async () => {
     const harness = await createHarness();
 
-    await expect(
-      Effect.runPromise(
-        harness.engine.dispatch({
-          type: "thread.turn.start",
-          commandId: CommandId.make("cmd-fd-skill-document-attachment"),
-          threadId: ThreadId.make("thread-1"),
-          message: {
-            messageId: asMessageId("user-message-fd-skill-document-attachment"),
-            role: "user",
-            text: "分析这个文件",
-            attachments: [
-              {
-                type: "document",
-                id: "document-attachment-1",
-                name: "sales.xlsx",
-                mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                sizeBytes: 128,
-              },
-            ],
-          },
-          fdSkillVersionId: 10004,
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "approval-required",
-          createdAt: "2026-01-01T00:00:00.000Z",
-        }),
-      ),
-    ).rejects.toThrow("FD Skill 暂不支持文档附件");
-
-    expect(harness.startSession).not.toHaveBeenCalled();
-    expect(harness.sendTurn).not.toHaveBeenCalled();
-    const readModel = await harness.readModel();
-    expect(readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.session).toBe(
-      null,
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-fd-skill-document-attachment"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-fd-skill-document-attachment"),
+          role: "user",
+          text: "分析这个文件",
+          attachments: [
+            {
+              type: "document",
+              id: "document-attachment-1",
+              name: "sales.xlsx",
+              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              sizeBytes: 128,
+            },
+          ],
+        },
+        fdSkillVersionId: 10004,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
     );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      fdSkillVersionId: 10004,
+      input: "分析这个文件",
+    });
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>

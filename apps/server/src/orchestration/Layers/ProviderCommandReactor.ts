@@ -754,13 +754,6 @@ const make = Effect.gen(function* () {
     const documentAttachments = normalizedAttachments.filter(
       (attachment) => attachment.type === "document",
     );
-    if (input.fdSkillVersionId !== undefined && documentAttachments.length > 0) {
-      return yield* new ProviderAdapterRequestError({
-        provider: ProviderDriverKind.make("fd-deepseek"),
-        method: "thread.turn.start",
-        detail: "FD Skill 暂不支持文档附件，请移除文件后重试。",
-      });
-    }
     const documentContexts = yield* Effect.forEach(documentAttachments, (attachment) => {
       const attachmentPath = resolveAttachmentPath({
         attachmentsDir: serverConfig.attachmentsDir,
