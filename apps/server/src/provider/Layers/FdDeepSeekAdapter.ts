@@ -963,13 +963,6 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         detail: "A turn is already active.",
       });
     }
-    if (input.fdSkillVersionId !== undefined && attachments.length > 0) {
-      return yield* new ProviderAdapterValidationError({
-        provider: FD_DEEPSEEK_DRIVER_KIND,
-        operation: "sendTurn",
-        issue: "FD-managed Skills do not accept image attachments.",
-      });
-    }
     if (
       input.fdSkillVersionId !== undefined &&
       !options.ordinaryAdapter &&
