@@ -103,12 +103,55 @@ export async function processAttachment(work: AttachmentWork): Promise<Processed
       tile.width,
       tile.height,
     );
-    const output = await canvas.encode("jpeg", 90);
+    // Move cuts to blank rows inside the overlap so OCR does not invent the
+    // missing half of an edge-clipped line. Neighbouring tiles retain it.
+    const overlap = Math.min(VISUAL_LIMITS.overlap, tile.height - 1);
+    let top = 0;
+    let bottom = tile.height;
+    const blankRow = (pixels: Uint8ClampedArray, row: number) => {
+      const start = row * tile.width * 4;
+      for (let x = 1; x < tile.width; x++) {
+        const offset = start + x * 4;
+        for (let channel = 0; channel < 4; channel++) {
+          if (Math.abs(pixels[offset + channel]! - pixels[start + channel]!) > 6) return false;
+        }
+      }
+      return true;
+    };
+    if (tile.y > 0 && overlap > 0) {
+      const strip = context.getImageData(0, 0, tile.width, overlap).data;
+      if (!blankRow(strip, 0)) {
+        for (let row = 1; row < overlap; row++) {
+          if (blankRow(strip, row)) {
+            top = row;
+            break;
+          }
+        }
+      }
+    }
+    if (tile.y + tile.height < dimensions.height && overlap > 0) {
+      const strip = context.getImageData(0, tile.height - overlap, tile.width, overlap).data;
+      if (!blankRow(strip, overlap - 1)) {
+        for (let row = overlap - 2; row >= 0; row--) {
+          if (blankRow(strip, row)) {
+            bottom = tile.height - overlap + row + 1;
+            break;
+          }
+        }
+      }
+    }
+    const cropped =
+      top === 0 && bottom === tile.height ? canvas : createCanvas(tile.width, bottom - top);
+    if (cropped !== canvas)
+      cropped
+        .getContext("2d")
+        .drawImage(canvas, 0, top, tile.width, bottom - top, 0, 0, tile.width, bottom - top);
+    const output = await cropped.encode("jpeg", 90);
     totalBytes += output.length;
     if (totalBytes > VISUAL_LIMITS.maxOutputBytes)
       throw new Error("图片分段后的体积过大，请分批上传。");
     images.push({
-      label: `${attachment.name}：分段 ${index + 1}/${tiles.length}，像素区域 (${tile.x},${tile.y}) ${tile.width}×${tile.height}，相邻分段有重叠`,
+      label: `${attachment.name}：分段 ${index + 1}/${tiles.length}，像素区域 (${tile.x},${tile.y + top}) ${tile.width}×${bottom - top}，相邻分段有重叠`,
       bytes: output,
     });
   }

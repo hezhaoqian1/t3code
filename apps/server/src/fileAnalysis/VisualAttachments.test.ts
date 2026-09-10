@@ -49,6 +49,32 @@ async function mixedPdf() {
 }
 
 describe("visual attachments", () => {
+  it("keeps an overlap-boundary text line whole in the neighbouring long-image tile", async () => {
+    const canvas = createCanvas(800, 6000);
+    const context = canvas.getContext("2d");
+    context.fillStyle = "white";
+    context.fillRect(0, 0, 800, 6000);
+    context.fillStyle = "black";
+    context.font = "32px Arial";
+    context.fillText("PROOF_IMAGE_BOTTOM_2058", 30, 5900);
+    await fixture("edge.png", await canvas.encode("png"), async (work) => {
+      const result = await processAttachment(work);
+      expect(result.images).toHaveLength(4);
+      const partial = await loadImage(Buffer.from(result.images[2]!.bytes));
+      const whole = await loadImage(Buffer.from(result.images[3]!.bytes));
+      const countInk = (image: typeof partial) => {
+        const target = createCanvas(image.width, image.height);
+        const ctx = target.getContext("2d");
+        ctx.drawImage(image, 0, 0);
+        const pixels = ctx.getImageData(0, 0, image.width, image.height).data;
+        let count = 0;
+        for (let i = 0; i < pixels.length; i += 4) if (pixels[i]! < 128) count++;
+        return count;
+      };
+      expect(countInk(partial)).toBe(0);
+      expect(countInk(whole)).toBeGreaterThan(100);
+    });
+  });
   it("covers every long-image pixel with ordered overlapping tiles", () => {
     const tiles = imageTiles(1000, 20000);
     expect(tiles.length).toBeGreaterThan(8);

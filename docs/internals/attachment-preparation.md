@@ -16,6 +16,10 @@ PDF.js extracts text page by page. For a visual model, every page is rendered,
 including pages with both text and charts. Large pages and long images use 2048px
 tiles with 128px overlap in reading order. Text-only routes reject pages without
 text or containing raster images and warn that chart/layout analysis was omitted.
+For long raster images, a cut through visible content is moved to a uniform
+background row within the overlap when one exists. Neighbouring tiles retain
+the complete line; dense regions without a blank row keep their original bounds.
+Visual extraction marks clipped edge characters as incomplete instead of guessing.
 The shared format map controls the renderer picker and server attachment paths.
 
 Ordinary small images retain their native input route. PDF pages and large image
