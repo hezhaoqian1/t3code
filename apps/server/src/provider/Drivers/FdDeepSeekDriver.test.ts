@@ -109,6 +109,42 @@ afterEach(() => {
 });
 
 describe("FdDeepSeekDriver", () => {
+  it.effect("preserves task and selected workspace paths in every runtime mode", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "fd-project-cwd-" });
+      const officeRoot = `${root}/office-workspace`;
+      const projectRoot = `${root}/selected-project`;
+      const taskRoot = `${root}/task`;
+      const worktreeRoot = `${root}/worktree`;
+      for (const directory of [officeRoot, projectRoot, taskRoot, worktreeRoot]) {
+        yield* fileSystem.makeDirectory(directory);
+      }
+      for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto", "full-access"] as const) {
+        for (const [cwd, projectWorkspaceRoot] of [
+          [projectRoot, projectRoot],
+          [taskRoot, taskRoot],
+          [worktreeRoot, projectRoot],
+        ] as const) {
+          const session = yield* resolveFdOrdinarySessionInput({
+            session: {
+              provider: FD_DEEPSEEK_DRIVER_KIND,
+              providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+              threadId: ThreadId.make("fd-project-path"),
+              cwd,
+              projectWorkspaceRoot,
+              runtimeMode,
+            },
+            officeWorkspaceRoot: officeRoot,
+            officeModeEnabled: true,
+          });
+          expect(session.cwd).toBe(cwd);
+          expect(session.runtimeMode).toBe(runtimeMode);
+        }
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("uses canonical office identity and fails closed when it cannot be resolved", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
