@@ -84,26 +84,22 @@ export const resolveFdLocalToolContext = Effect.fn("resolveFdLocalToolContext")(
     () => input.officeWorkspaceRoot,
   );
 
-  // Office mode keeps the workspace path canonicalized, but only the
-  // supervised access mode stays on the read-only tool set.
-  if (input.runtimeMode !== "approval-required") {
-    return { cwd: safeOfficeWorkspaceRoot, profile: "project" };
-  }
+  const officeProfile = input.runtimeMode === "approval-required" ? "office-read-only" : "project";
 
-  // Missing project provenance is not enough authority to grant write/command
-  // tools. This also keeps legacy persisted sessions fail-closed.
+  // Missing project provenance stays in the default workspace. Supervised
+  // sessions retain the restricted office tool profile.
   if (!input.projectWorkspaceRoot) {
-    return { cwd: safeOfficeWorkspaceRoot, profile: "office-read-only" };
+    return { cwd: safeOfficeWorkspaceRoot, profile: officeProfile };
   }
 
   const canonicalProjectWorkspaceRoot = yield* fileSystem
     .realPath(input.projectWorkspaceRoot)
     .pipe(Effect.option);
   if (Option.isNone(canonicalProjectWorkspaceRoot) || Option.isNone(canonicalOfficeWorkspaceRoot)) {
-    return { cwd: safeOfficeWorkspaceRoot, profile: "office-read-only" };
+    return { cwd: safeOfficeWorkspaceRoot, profile: officeProfile };
   }
   return canonicalProjectWorkspaceRoot.value === canonicalOfficeWorkspaceRoot.value
-    ? { cwd: canonicalOfficeWorkspaceRoot.value, profile: "office-read-only" }
+    ? { cwd: canonicalOfficeWorkspaceRoot.value, profile: officeProfile }
     : { cwd: input.cwd, profile: "project" };
 });
 
