@@ -2361,18 +2361,16 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
   // stalled agents read as working; only settled states differentiate.
   const working = running + waiting;
   const dotClass = live ? "bg-info" : failed > 0 ? "bg-destructive" : "bg-success";
-  const lead = live
-    ? `Kicked off ${agentCount} subagent${agentCount === 1 ? "" : "s"}`
-    : `Ran ${agentCount} subagent${agentCount === 1 ? "" : "s"}`;
+  const lead = live ? `已启动 ${agentCount} 个子 Agent` : `已运行 ${agentCount} 个子 Agent`;
   const status = live
     ? livePhase
-      ? `${livePhase.title} · ${livePhase.activeCount} working`
+      ? `${livePhase.title} · ${livePhase.activeCount} 个正在工作`
       : working > 0
-        ? `${working} working`
-        : "working"
+        ? `${working} 个正在工作`
+        : "工作中"
     : failed > 0
-      ? `${failed} failed`
-      : "✓ completed";
+      ? `${failed} 个失败`
+      : "✓ 已完成";
 
   return (
     <button
@@ -2391,7 +2389,7 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: { workEntry: Time
         {totalTokens > 0 ? (
           <span className="tabular-nums">Σ {formatSubagentTokenCount(totalTokens)}</span>
         ) : null}
-        <span className="text-info-foreground">{live ? "Open Agents ▸" : "View ▸"}</span>
+        <span className="text-info-foreground">{live ? "打开 Agent ▸" : "查看 ▸"}</span>
       </span>
     </button>
   );
