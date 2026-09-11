@@ -124,6 +124,7 @@ export function WorkspacePicker({
                 scopeProjectRef(entry.targetProject.environmentId, entry.targetProject.id),
                 {
                   replace: true,
+                  preserveComposer: true,
                 },
               );
             }}
