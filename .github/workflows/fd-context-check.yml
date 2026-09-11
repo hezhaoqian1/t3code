@@ -10,9 +10,17 @@ on:
       - "apps/web/src/components/chat/**"
       - ".github/workflows/fd-context-check.yml"
   workflow_dispatch:
+    inputs:
+      artifact_run_id:
+        description: Existing release run to verify on macOS
+        type: string
+      version:
+        description: Release version
+        type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: fd-context-${{ github.event.pull_request.number || github.ref }}
@@ -20,6 +28,7 @@ concurrency:
 
 jobs:
   context:
+    if: ${{ !inputs.artifact_run_id }}
     name: Context Regression
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -53,3 +62,37 @@ jobs:
           apps/web/src/lib/contextWindow.test.ts
       - name: Build desktop
         run: vp run build:desktop
+  verify-mac-release:
+    if: ${{ inputs.artifact_run_id }}
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.artifact_run_id }}
+          name: fd-desktop-release-${{ inputs.version }}
+          path: assets
+      - name: Verify immutable artifact hashes and macOS structures
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          cd assets
+          shasum -a 256 -c SHA256SUMS
+          mkdir unpacked mount
+          ditto -x -k "FD-Enterprise-AI-$VERSION-mac-arm64.zip" unpacked
+          hdiutil attach -readonly -nobrowse -mountpoint "$PWD/mount" "FD-Enterprise-AI-$VERSION-mac-arm64.dmg"
+          trap 'hdiutil detach "$PWD/mount"' EXIT
+          for app in "unpacked/Fangde AI.app" "mount/Fangde AI.app"; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = com.fdsure.enterprise-ai
+            test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
+            exe=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
+            test "$(lipo -archs "$app/Contents/MacOS/$exe")" = arm64
+            shasum -a 256 "$app/Contents/MacOS/$exe"
+          done
+          cmp "unpacked/Fangde AI.app/Contents/MacOS/$exe" "mount/Fangde AI.app/Contents/MacOS/$exe"
+          echo "Verified release $VERSION: hashes, signatures, identifiers, versions, arm64, DMG/ZIP equivalence"
