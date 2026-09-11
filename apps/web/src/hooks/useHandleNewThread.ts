@@ -73,6 +73,7 @@ export function useNewThreadHandler() {
         startFromOrigin?: boolean;
         taskArea?: boolean;
         replace?: boolean;
+        preserveComposer?: boolean;
       },
     ): Promise<void> => {
       if (primaryEnvironmentId === null || projectRef.environmentId !== primaryEnvironmentId) {
@@ -87,6 +88,7 @@ export function useNewThreadHandler() {
         setDraftThreadContext,
         setLogicalProjectDraftThreadId,
         setModelSelection,
+        setPrompt,
       } = useComposerDraftStore.getState();
       const currentRouteTarget = getCurrentRouteTarget();
       // A new thread carries the user's *working mode* from the thread being
@@ -352,6 +354,11 @@ export function useNewThreadHandler() {
           ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
           ...(taskArea ? { taskArea: true } : {}),
         });
+        // Switching workspaces creates a new draft identity, but must not
+        // discard text the user has already entered in the composer.
+        if (options?.preserveComposer && carrySourceComposer?.prompt) {
+          setPrompt(draftId, carrySourceComposer.prompt);
+        }
         applyStickyState(draftId);
         if (carryModelSelection) {
           // After sticky state so the viewed thread's exact selection
