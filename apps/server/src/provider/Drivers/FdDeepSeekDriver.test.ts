@@ -120,7 +120,12 @@ describe("FdDeepSeekDriver", () => {
       for (const directory of [officeRoot, projectRoot, taskRoot, worktreeRoot]) {
         yield* fileSystem.makeDirectory(directory);
       }
-      for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto", "full-access"] as const) {
+      for (const runtimeMode of [
+        "approval-required",
+        "auto-accept-edits",
+        "auto",
+        "full-access",
+      ] as const) {
         for (const [cwd, projectWorkspaceRoot] of [
           [projectRoot, projectRoot],
           [taskRoot, taskRoot],
