@@ -84,11 +84,10 @@ export const resolveFdLocalToolContext = Effect.fn("resolveFdLocalToolContext")(
     () => input.officeWorkspaceRoot,
   );
 
-  const officeProfile =
-    input.runtimeMode === "approval-required" ? "office-read-only" : "project";
+  const officeProfile = input.runtimeMode === "approval-required" ? "office-read-only" : "project";
 
-  // Missing project provenance is not enough authority to grant write/command
-  // tools. This also keeps legacy persisted sessions fail-closed.
+  // Missing project provenance stays in the default workspace. Supervised
+  // sessions retain the restricted office tool profile.
   if (!input.projectWorkspaceRoot) {
     return { cwd: safeOfficeWorkspaceRoot, profile: officeProfile };
   }
