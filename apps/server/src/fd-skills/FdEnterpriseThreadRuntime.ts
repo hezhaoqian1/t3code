@@ -77,6 +77,10 @@ export interface FdEnterpriseThreadRuntimeShape {
   readonly restoreHistory: (history: FdEnterpriseHistory) => Effect.Effect<void>;
   readonly ensureHistory: (threadId: ThreadId) => Effect.Effect<void>;
   readonly getSnapshot: (threadId: ThreadId) => Effect.Effect<OrchestrationVolatileThreadOverlay>;
+  readonly releaseDurableMessages: (
+    threadId: ThreadId,
+    messages: ReadonlyArray<OrchestrationMessage>,
+  ) => Effect.Effect<void>;
   readonly stream: (threadId: ThreadId) => Stream.Stream<OrchestrationEvent>;
   readonly resetStream: Stream.Stream<OrchestrationVolatileThreadOverlay>;
   readonly setHistoryLoader: (loader: HistoryLoader) => Effect.Effect<void>;
@@ -103,6 +107,7 @@ export function withoutDurableEnterpriseHistory(
   for (let index = overlay.messages.length - 1; index >= 0; index -= 1) {
     const message = overlay.messages[index]!;
     const keep = (() => {
+      if (message.streaming) return true;
       if (durableIds.has(message.id)) return false;
       if (!message.id.startsWith(FD_ENTERPRISE_HISTORY_MESSAGE_PREFIX)) return true;
       const signature = `${message.role}\u0000${message.text}`;
@@ -535,6 +540,22 @@ const make = Effect.gen(function* () {
     restoreHistory,
     ensureHistory,
     getSnapshot: (threadId) => Effect.sync(() => snapshotFor(threadId)),
+    releaseDurableMessages: (threadId, messages) =>
+      Effect.gen(function* () {
+        const state = states.get(threadId);
+        if (!state) return;
+        const remaining = withoutDurableEnterpriseHistory(snapshotFor(threadId), messages).messages;
+        if (remaining.length === state.messages.length) return;
+        const retainedIds = new Set(remaining.map((message) => message.id));
+        for (const message of state.messages) {
+          if (retainedIds.has(message.id)) continue;
+          state.liveMessageIds.delete(message.id);
+          state.stagedTurns.delete(message.id);
+        }
+        state.messages = [...remaining];
+        state.volatileRevision = nextVolatileRevision();
+        yield* PubSub.publish(resets, snapshotFor(threadId));
+      }),
     stream: (threadId) =>
       Stream.fromPubSub(events).pipe(Stream.filter((event) => event.aggregateId === threadId)),
     resetStream: Stream.fromPubSub(resets),

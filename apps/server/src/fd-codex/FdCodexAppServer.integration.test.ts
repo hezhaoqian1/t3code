@@ -21,11 +21,137 @@ import * as ServerConfig from "../config.ts";
 import { FdRuntimeCredentialStore, makeStore } from "../fd/FdRuntimeCredentialStore.ts";
 import { makeFdCodexAdapter } from "./FdCodexAdapter.ts";
 import { FD_CODEX_MODEL } from "./FdManagedCodexHome.ts";
+import { makeFdDeepSeekAdapter } from "../provider/Layers/FdDeepSeekAdapter.ts";
+import { FdAgentKernel } from "../fd-agent/FdAgentKernel.ts";
+import { FdResponsesClient } from "../fd-agent/FdResponsesClient.ts";
 
 const shouldRun = process.env.FD_RUN_REAL_APP_SERVER === "1";
 const instanceId = ProviderInstanceId.make("fd-deepseek");
 
 describe.skipIf(!shouldRun)("FD Codex App Server integration", () => {
+  it.skipIf(!process.env.FD_ENTERPRISE_SKILL_VERSION_ID)(
+    "retains a managed Kimi Skill answer across follow-up turns and session restart",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "fd-enterprise-context-"));
+      const credentials: FdServerRuntimeCredentialProjection = {
+        userId: Number(process.env.FD_TEST_USER_ID),
+        runtimeTokenId: Number(process.env.FD_TEST_TOKEN_ID),
+        newApiOrigin: process.env.FD_NEW_API_ORIGIN!,
+        runtimeApiKey: requiredEnvironment("FD_NEW_API_KEY"),
+        accessToken: process.env.FD_TEST_ACCESS_TOKEN!,
+        accessExpiresAt: 4_102_444_800,
+        policy: {
+          version: 1,
+          capability: "general_assistant",
+          model: FD_CODEX_MODEL,
+          expiresAt: 4_102_444_800,
+        },
+        generation: 1,
+      };
+      const layer = ServerConfig.layerTest(root, root).pipe(Layer.provideMerge(NodeServices.layer));
+      try {
+        await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const store = yield* makeStore();
+              yield* store.apply({ version: 1, type: "set", credentials });
+              const ordinaryAdapter = yield* makeFdCodexAdapter({
+                instanceId,
+                binaryPath: requiredEnvironment("FD_CODEX_BINARY"),
+              }).pipe(Effect.provideService(FdRuntimeCredentialStore, store.service));
+              const adapter = yield* makeFdDeepSeekAdapter({
+                ordinaryAdapter,
+                kernel: new FdAgentKernel(new FdResponsesClient(store.service)),
+              });
+              const events: ProviderRuntimeEvent[] = [];
+              const receipts = yield* Queue.unbounded<ProviderRuntimeEvent>();
+              yield* Stream.runForEach(adapter.streamEvents, (event) =>
+                Effect.sync(() => events.push(event)).pipe(
+                  Effect.andThen(Queue.offer(receipts, event)),
+                ),
+              ).pipe(Effect.forkScoped);
+              const threadId = ThreadId.make("fd-enterprise-context-proof");
+              const modelSelection = { instanceId, model: "kimi-k3" };
+              const sessionInput = {
+                threadId,
+                cwd: root,
+                runtimeMode: "approval-required" as const,
+                modelSelection,
+              };
+              const fdSkillVersionId = Number(process.env.FD_ENTERPRISE_SKILL_VERSION_ID);
+              yield* adapter.startSession(sessionInput);
+              const first = yield* adapter.sendTurn({
+                threadId,
+                modelSelection,
+                fdSkillVersionId,
+                input:
+                  "这是上下文恢复测试，不查询企业数据、不调用工具。假设筛选得到394只候选，规则编号FD_RULE_8371。仅回复：可以导出394只候选，规则FD_RULE_8371。",
+              });
+              yield* waitForCompletedTurn(receipts, first.turnId).pipe(
+                Effect.timeout("180 seconds"),
+              );
+              expect(assistantText(events, first.turnId)).toContain("FD_RULE_8371");
+              expect(
+                events.find(
+                  (event) =>
+                    event.turnId === first.turnId &&
+                    event.type === "item.completed" &&
+                    event.payload.itemType === "assistant_message",
+                )?.persistence,
+              ).toBe("memory-only");
+              const followUp = yield* adapter.sendTurn({
+                threadId,
+                modelSelection,
+                fdSkillVersionId,
+                input:
+                  "你上一条回答承诺导出多少只候选，用哪个规则编号？只复述数量和编号，不调用工具。",
+              });
+              yield* waitForCompletedTurn(receipts, followUp.turnId).pipe(
+                Effect.timeout("180 seconds"),
+              );
+              expect(followUp.resumeCursor).toEqual(first.resumeCursor);
+              expect(assistantText(events, followUp.turnId)).toContain("394");
+              expect(assistantText(events, followUp.turnId)).toContain("FD_RULE_8371");
+              yield* adapter.stopSession(threadId);
+              yield* adapter.startSession({ ...sessionInput, resumeCursor: followUp.resumeCursor });
+              const resumed = yield* adapter.sendTurn({
+                threadId,
+                modelSelection,
+                fdSkillVersionId,
+                input: "继续刚才的对话：候选数量和规则编号是什么？只复述，不调用工具。",
+              });
+              yield* waitForCompletedTurn(receipts, resumed.turnId).pipe(
+                Effect.timeout("180 seconds"),
+              );
+              expect(resumed.resumeCursor).toEqual(first.resumeCursor);
+              expect(assistantText(events, resumed.turnId)).toContain("394");
+              expect(assistantText(events, resumed.turnId)).toContain("FD_RULE_8371");
+              const switched = yield* adapter.sendTurn({
+                threadId,
+                fdSkillVersionId,
+                modelSelection: { instanceId, model: "deepseek-v4-flash" },
+                input: "上轮的候选数量和规则编号是什么？只复述，不调用工具。",
+              });
+              yield* waitForCompletedTurn(receipts, switched.turnId).pipe(
+                Effect.timeout("180 seconds"),
+              );
+              expect(switched.resumeCursor).toEqual(first.resumeCursor);
+              expect(assistantText(events, switched.turnId)).toContain("FD_RULE_8371");
+              expect(
+                (yield* adapter.readThread(threadId)).turns.every(
+                  (turn) => turn.items.length === 0,
+                ),
+              ).toBe(true);
+            }),
+          ).pipe(Effect.provide(layer)),
+        );
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    600_000,
+  );
+
   it("streams DeepSeek, executes a local Skill, compacts, and resumes the conversation", async () => {
     const binaryPath = requiredEnvironment("FD_CODEX_BINARY");
     const runtimeApiKey = requiredEnvironment("FD_NEW_API_KEY");
@@ -225,5 +351,12 @@ function assistantText(
       event.turnId === turnId &&
       event.payload.itemType === "assistant_message",
   );
-  return event?.type === "item.completed" ? event.payload.detail : undefined;
+  if (event?.type !== "item.completed") return undefined;
+  const data = event.payload.data;
+  return typeof data === "object" &&
+    data !== null &&
+    "finalText" in data &&
+    typeof data.finalText === "string"
+    ? data.finalText
+    : event.payload.detail;
 }

@@ -54,6 +54,7 @@ import {
   selectedNativeSkillNames,
 } from "../../fd-skills/NativeSkillCatalog.ts";
 import { FdVisionService, visionFailureMessage } from "../../fd-vision/FdVisionService.ts";
+import { projectFdEnterpriseEvent } from "../../fd-skills/FdEnterpriseEventPolicy.ts";
 import {
   type ProviderAdapterError,
   ProviderAdapterRequestError,
@@ -101,6 +102,7 @@ interface FdSessionContext {
   readonly startInput: ProviderSessionStartInput;
   ordinarySessionStarted: boolean;
   ordinaryExecutionProfile: FdExecutionProfile | undefined;
+  ordinaryEnterpriseGeneration: number;
   readonly ordinaryResumeCursors: Map<FdExecutionProfile, unknown>;
   history: ReadonlyArray<FdResponsesInputItem>;
   readonly turns: Array<FdTurnRecord>;
@@ -386,8 +388,11 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         ) {
           return;
         }
+        const projected = context?.ordinaryExecutionProfile?.startsWith("enterprise:")
+          ? projectFdEnterpriseEvent(event, context.ordinaryEnterpriseGeneration)
+          : event;
         yield* Queue.offer(events, {
-          ...event,
+          ...projected,
           provider: FD_DEEPSEEK_DRIVER_KIND,
           providerInstanceId: instanceId,
         });
@@ -930,6 +935,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       ordinarySessionStarted: false,
       ordinaryExecutionProfile: undefined,
       ordinaryResumeCursors: binding.profiles,
+      ordinaryEnterpriseGeneration: options.enterpriseGeneration?.() ?? 0,
       history: [],
       turns: [],
       tools,
@@ -982,6 +988,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         ? yield* options.ordinarySessionInput(startInput)
         : startInput;
       context.ordinaryExecutionProfile = profile;
+      context.ordinaryEnterpriseGeneration = options.enterpriseGeneration?.() ?? 0;
       const started = yield* adapter.startSession({
         ...resolved,
         ...(input.fdSkillVersionId !== undefined
@@ -1379,7 +1386,16 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     requireSession(threadId).pipe(
       Effect.flatMap((context) =>
         context.ordinarySessionStarted && options.ordinaryAdapter
-          ? options.ordinaryAdapter.readThread(threadId)
+          ? options.ordinaryAdapter.readThread(threadId).pipe(
+              Effect.map((snapshot) =>
+                context.ordinaryExecutionProfile?.startsWith("enterprise:")
+                  ? {
+                      ...snapshot,
+                      turns: snapshot.turns.map((turn) => ({ id: turn.id, items: [] })),
+                    }
+                  : snapshot,
+              ),
+            )
           : Effect.succeed<ProviderThreadSnapshot>({
               threadId,
               turns: context.turns.map((turn) => ({ id: turn.id, items: [] })),
@@ -1394,7 +1410,10 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     Effect.gen(function* () {
       const context = yield* requireSession(threadId);
       if (context.ordinarySessionStarted && options.ordinaryAdapter) {
-        return yield* options.ordinaryAdapter.rollbackThread(threadId, numTurns);
+        const snapshot = yield* options.ordinaryAdapter.rollbackThread(threadId, numTurns);
+        return context.ordinaryExecutionProfile?.startsWith("enterprise:")
+          ? { ...snapshot, turns: snapshot.turns.map((turn) => ({ id: turn.id, items: [] })) }
+          : snapshot;
       }
       if (!Number.isInteger(numTurns) || numTurns < 1 || numTurns > context.turns.length) {
         return yield* new ProviderAdapterValidationError({

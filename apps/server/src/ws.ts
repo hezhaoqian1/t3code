@@ -1399,13 +1399,20 @@ const makeWsRpcLayer = (
                     );
                     if (refreshedRead._tag === "success") thread = refreshedRead.thread;
                   }
-                  return withoutDurableEnterpriseHistory(overlay, [
+                  const persistedMessages = [
                     ...Option.match(thread, {
                       onNone: () => durableMessages,
                       onSome: (value) => value.messages,
                     }),
                     ...backfilledMessages,
-                  ]);
+                  ];
+                  if (Option.isSome(enterpriseThreadRuntime)) {
+                    yield* enterpriseThreadRuntime.value.releaseDurableMessages(
+                      input.threadId,
+                      persistedMessages,
+                    );
+                  }
+                  return withoutDurableEnterpriseHistory(overlay, persistedMessages);
                 });
 
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
@@ -1442,18 +1449,20 @@ const makeWsRpcLayer = (
                 volatileStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
               );
               const bufferedLiveStream = Stream.fromQueue(liveBuffer);
-              const volatileSnapshotStream = Option.isSome(enterpriseThreadRuntime)
-                ? yield* enterpriseThreadRuntime.value.ensureHistory(input.threadId).pipe(
-                    Effect.andThen(enterpriseThreadRuntime.value.getSnapshot(input.threadId)),
-                    Effect.flatMap(reconcileEnterpriseOverlay),
-                    Effect.map((overlay) =>
-                      Stream.make({
-                        kind: "volatile-snapshot" as const,
-                        overlay,
-                      }),
-                    ),
-                  )
-                : Stream.empty;
+              if (Option.isSome(enterpriseThreadRuntime)) {
+                // Remote legacy history must not gate local snapshots or live delivery.
+                yield* enterpriseThreadRuntime.value.ensureHistory(input.threadId).pipe(
+                  Effect.andThen(enterpriseThreadRuntime.value.getSnapshot(input.threadId)),
+                  Effect.flatMap(reconcileEnterpriseOverlay),
+                  Effect.flatMap((overlay) =>
+                    Queue.offer(liveBuffer, {
+                      kind: "volatile-snapshot" as const,
+                      overlay,
+                    }),
+                  ),
+                  Effect.forkScoped,
+                );
+              }
 
               // When the client already loaded the snapshot over HTTP it passes
               // that snapshot's sequence, and we resume the live subscription by
@@ -1507,10 +1516,7 @@ const makeWsRpcLayer = (
                           bufferedLiveStream,
                         )
                       : bufferedLiveStream;
-                  return Stream.concat(
-                    catchUpStream,
-                    Stream.concat(volatileSnapshotStream, afterCatchUp),
-                  );
+                  return Stream.concat(catchUpStream, afterCatchUp);
                 }
                 // Gap too large (or cursor ahead of authoritative state): fall
                 // through to the snapshot path so the client converges from a
@@ -1553,13 +1559,10 @@ const makeWsRpcLayer = (
                     )
                   : bufferedLiveStream;
               return Stream.concat(
-                Stream.concat(
-                  Stream.make({
-                    kind: "snapshot" as const,
-                    snapshot: projectThreadDetailSnapshot(snapshot.value),
-                  }),
-                  volatileSnapshotStream,
-                ),
+                Stream.make({
+                  kind: "snapshot" as const,
+                  snapshot: projectThreadDetailSnapshot(snapshot.value),
+                }),
                 afterSnapshot,
               );
             }),

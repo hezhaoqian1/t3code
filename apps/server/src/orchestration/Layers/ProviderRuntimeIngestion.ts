@@ -1488,6 +1488,7 @@ const make = Effect.gen(function* () {
               existing.streaming === false &&
               existing.turnId === durableMessage.turnId
             ) {
+              yield* enterpriseRuntime.value.releaseDurableMessages(event.threadId, [existing]);
               return;
             }
             yield* orchestrationEngine.dispatch({
@@ -1499,6 +1500,14 @@ const make = Effect.gen(function* () {
               ...(durableMessage.turnId ? { turnId: durableMessage.turnId } : {}),
               createdAt: durableMessage.createdAt,
             });
+            yield* enterpriseRuntime.value.releaseDurableMessages(event.threadId, [
+              {
+                ...durableMessage,
+                role: "assistant",
+                streaming: false,
+                updatedAt: durableMessage.createdAt,
+              },
+            ]);
           }
         }
         return;
