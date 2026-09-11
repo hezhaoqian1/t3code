@@ -48,22 +48,29 @@ const normalizeCommitHash = (value: string): Option.Option<string> => {
 export const resolveUserDataPath = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
-  const legacyPath = environment.path.join(
-    environment.appDataDirectory,
-    environment.legacyUserDataDirName,
+  const candidateNames = Array.from(
+    new Set([
+      environment.legacyUserDataDirName,
+      environment.userDataDirName,
+      // Older Windows installers used the lowercase product id. Keep these
+      // paths discoverable so an app update cannot silently open a new DB.
+      "fangde-ai",
+    ]),
   );
-  const legacyPathExists = yield* fileSystem.exists(legacyPath).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DesktopUserDataPathResolutionError({
-          legacyPath,
-          cause,
-        }),
-    ),
-  );
-  return legacyPathExists
-    ? legacyPath
-    : environment.path.join(environment.appDataDirectory, environment.userDataDirName);
+  for (const name of candidateNames) {
+    const candidate = environment.path.join(environment.appDataDirectory, name);
+    const exists = yield* fileSystem.exists(candidate).pipe(
+      Effect.mapError(
+        (cause) =>
+          new DesktopUserDataPathResolutionError({
+            legacyPath: candidate,
+            cause,
+          }),
+      ),
+    );
+    if (exists) return candidate;
+  }
+  return environment.path.join(environment.appDataDirectory, environment.userDataDirName);
 }).pipe(Effect.withSpan("desktop.appIdentity.resolveUserDataPath"));
 
 export const make = Effect.gen(function* () {

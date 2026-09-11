@@ -51,6 +51,32 @@ const message = (
 });
 
 describe("FdEnterpriseThreadRuntime", () => {
+  effectIt.effect("releases only acknowledged durable content and keeps active streams", () =>
+    Effect.gen(function* () {
+      const runtime = yield* FdEnterpriseThreadRuntime;
+      const itemId = RuntimeItemId.make("final-answer");
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId,
+        type: "content.delta",
+        payload: { streamKind: "assistant_text", delta: "partial" },
+      });
+      yield* runtime.releaseDurableMessages(threadId, [message(itemId, "assistant", "old")]);
+      expect((yield* runtime.getSnapshot(threadId)).messages).toHaveLength(1);
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId,
+        type: "item.completed",
+        payload: { itemType: "assistant_message", data: { finalText: "complete" } },
+      });
+      // Failed writes do not acknowledge anything, so the completed answer remains retryable.
+      yield* runtime.releaseDurableMessages(threadId, []);
+      expect((yield* runtime.getSnapshot(threadId)).messages).toHaveLength(1);
+      yield* runtime.releaseDurableMessages(threadId, [message(itemId, "assistant", "complete")]);
+      expect((yield* runtime.getSnapshot(threadId)).messages).toEqual([]);
+    }).pipe(Effect.provide(FdEnterpriseThreadRuntimeLive)),
+  );
+
   it("removes restored history already persisted under the same stable ID", () => {
     const persisted = message("fd-enterprise-history:7:11", "assistant", "已持久化回答");
     const overlay = {

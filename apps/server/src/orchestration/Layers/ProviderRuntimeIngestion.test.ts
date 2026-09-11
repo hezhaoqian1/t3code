@@ -497,14 +497,7 @@ describe("ProviderRuntimeIngestion", () => {
     expect(durableAssistantEvents[0]).toMatchObject({
       payload: { text: "客户敏感最终回答", streaming: false },
     });
-    expect(overlay.messages).toEqual([
-      expect.objectContaining({
-        id: assistantItemId,
-        role: "assistant",
-        text: "客户敏感最终回答",
-        streaming: false,
-      }),
-    ]);
+    expect(overlay.messages).toEqual([]);
     expect(overlay.activities).toEqual([
       expect.objectContaining({
         kind: "tool.completed",
