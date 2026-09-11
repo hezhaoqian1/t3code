@@ -17,6 +17,9 @@ on:
       version:
         description: Release version
         type: string
+      source_ref:
+        description: Source ref for focused path checks
+        type: string
 
 permissions:
   contents: read
@@ -28,7 +31,7 @@ concurrency:
 
 jobs:
   context:
-    if: ${{ !inputs.artifact_run_id }}
+    if: ${{ !inputs.artifact_run_id && !inputs.source_ref }}
     name: Context Regression
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -96,3 +99,21 @@ jobs:
           done
           cmp "unpacked/Fangde AI.app/Contents/MacOS/$exe" "mount/Fangde AI.app/Contents/MacOS/$exe"
           echo "Verified release $VERSION: hashes, signatures, identifiers, versions, arm64, DMG/ZIP equivalence"
+  verify-paths:
+    if: ${{ inputs.source_ref }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Format and path regression checks
+        run: |
+          pnpm exec vp fmt apps/server/src/provider/Drivers/FdDeepSeekDriver.ts apps/server/src/provider/Drivers/FdDeepSeekDriver.test.ts docs/operations/releases/0.2.28.md
+          git diff --exit-code
+          pnpm exec vp test run apps/server/src/provider/Drivers/FdDeepSeekDriver.test.ts
