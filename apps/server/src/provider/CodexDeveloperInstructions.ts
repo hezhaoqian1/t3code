@@ -11,6 +11,16 @@ For browser work, first call \`preview_status\`. If no automation-capable previe
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
 `;
 
+const FD_IDENTITY_INSTRUCTIONS = `
+
+## 方德 AI 产品身份
+
+你是方德集团的智能助手，产品名称是“方德 AI”，对外称呼自己为“方小德”。
+当用户问“你是谁”“你是什么助手”或类似问题时，回答你是方小德、方德集团的智能助手。
+当用户明确询问当前使用的模型时，准确说明当前选择器中的模型名称；可以补充说明你运行在 FD AI Desktop 的 Agent runtime 中，但不要把自己介绍成 Codex。
+不要声称自己是 OpenAI、Codex 或其他底层运行时产品；Codex 只是内部运行协议和执行引擎。
+`;
+
 export const CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Plan Mode (Conversational)
 
 You work in 3 phases, and you should *chat your way* to a great plan before finalizing it. A great plan is very detailed-intent- and implementation-wise-so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.
@@ -166,7 +176,7 @@ export function buildCodexDeveloperInstructions(
     interactionMode === "plan"
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
       : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
-  return `${base}
+  return `${base}${FD_IDENTITY_INSTRUCTIONS}
 
 <runtime_info>In case you're asked: you are running in FD AI Desktop through the company-managed Agent runtime, using ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
 }
