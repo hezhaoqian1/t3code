@@ -121,6 +121,28 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
         expect(result.truncated).toBe(false);
       }),
     );
+
+    it.effect("falls back to a direct walk when the native index is unavailable", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir();
+        yield* writeTextFile(cwd, "少女感头像/真人氛围感/真人少女感-01.jpg");
+        vi.spyOn(FileFinder, "create").mockReturnValueOnce({
+          ok: false,
+          error: "native index unavailable",
+        });
+
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const result = yield* workspaceEntries.list({ cwd });
+
+        expect(result.entries).toEqual(
+          expect.arrayContaining([
+            { path: "少女感头像", kind: "directory" },
+            { path: "少女感头像/真人氛围感", kind: "directory" },
+            { path: "少女感头像/真人氛围感/真人少女感-01.jpg", kind: "file" },
+          ]),
+        );
+      }),
+    );
   });
 
   describe("search", () => {

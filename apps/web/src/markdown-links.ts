@@ -5,8 +5,11 @@ const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 const WINDOWS_UNC_PATH_PATTERN = /^\\\\/;
 const EXTERNAL_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/;
 const RELATIVE_PATH_PREFIX_PATTERN = /^(~\/|\.{1,2}\/)/;
-const RELATIVE_FILE_PATH_PATTERN = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+){0,2}$/;
-const RELATIVE_FILE_NAME_PATTERN = /^[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+(?::\d+){0,2}$/;
+// Relative workspace paths may contain Unicode names (for example Chinese
+// output folders). Keep separators, whitespace and control characters out of
+// this shape check while allowing normal filename punctuation.
+const RELATIVE_FILE_PATH_PATTERN = /^[^\s\\/:]+(?:\/[^\s\\/:]+)+(?::\d+){0,2}$/u;
+const RELATIVE_FILE_NAME_PATTERN = /^[^\s\\/:]+\.[^\s\\/:]+(?::\d+){0,2}$/u;
 const POSITION_SUFFIX_PATTERN = /:\d+(?::\d+)?$/;
 const POSITION_ONLY_PATTERN = /^\d+(?::\d+)?$/;
 // Standard OS and dev-container roots; deliberately excludes app-route-ish
@@ -316,6 +319,9 @@ export function resolveInlineCodeFileLinkMeta(
 ): MarkdownFileLinkMeta | null {
   const trimmed = codeText.trim();
   if (trimmed.length === 0 || INLINE_CODE_DISQUALIFIER_PATTERN.test(trimmed)) return null;
+  // Globs and shell expressions are commands/search patterns, not one file
+  // target. Avoid turning `src/**/*.ts` into a misleading file chip.
+  if (/[\*?\[\]{}]/.test(trimmed)) return null;
 
   // Windows drive/UNC paths keep their backslashes; any other backslashes are
   // relative Windows-style paths, which neither the shape checks nor the
