@@ -139,6 +139,19 @@ describe("resolveInlineCodeFileLinkMeta", () => {
     });
   });
 
+  it("links Unicode relative paths with Windows separators", () => {
+    expect(
+      resolveInlineCodeFileLinkMeta(
+        "少女感头像\\真人氛围感\\真人少女感-01.jpg",
+        "C:/Users/hezha/FangdeAI/Tasks/2026-09-11-18-12-46",
+      ),
+    ).toMatchObject({
+      targetPath:
+        "C:/Users/hezha/FangdeAI/Tasks/2026-09-11-18-12-46\\少女感头像\\真人氛围感\\真人少女感-01.jpg",
+      basename: "真人少女感-01.jpg",
+    });
+  });
+
   it("links absolute posix paths", () => {
     expect(resolveInlineCodeFileLinkMeta("/Users/julius/project/AGENTS.md")).toMatchObject({
       targetPath: "/Users/julius/project/AGENTS.md",

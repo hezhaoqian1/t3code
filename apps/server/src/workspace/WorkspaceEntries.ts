@@ -3,6 +3,7 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -12,6 +13,7 @@ import * as Schema from "effect/Schema";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  ProjectEntry,
   ProjectListEntriesInput,
   ProjectListEntriesResult,
   ProjectSearchContentsInput,
@@ -25,6 +27,9 @@ import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 
 import * as WorkspacePaths from "./WorkspacePaths.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
+
+const DIRECT_LIST_MAX_ENTRIES = 25_000;
+const DIRECT_LIST_PAGE_SIZE = DIRECT_LIST_MAX_ENTRIES + 2;
 
 export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedErrorClass<WorkspaceEntriesWindowsPathUnsupportedError>()(
   "WorkspaceEntriesWindowsPathUnsupportedError",
@@ -147,6 +152,49 @@ export const make = Effect.gen(function* () {
     cwd: string,
   ): Effect.fn.Return<string, WorkspaceEntriesError> {
     return yield* workspacePaths.normalizeWorkspaceRoot(cwd);
+  });
+
+  // The native index is normally the fastest path, but a packaged desktop
+  // can briefly fail to initialize it while a task directory is being filled
+  // with generated media. Keep the file browser usable with a bounded direct
+  // walk instead of making every file chip and sidebar view unusable.
+  const listDirectFilesystem = Effect.fn("WorkspaceEntries.listDirectFilesystem")(function* (
+    cwd: string,
+  ): Effect.fn.Return<ProjectListEntriesResult, WorkspaceEntriesError> {
+    const entries: ProjectEntry[] = [];
+    const pending = [cwd];
+    while (pending.length > 0 && entries.length < DIRECT_LIST_MAX_ENTRIES) {
+      const current = pending.pop();
+      if (!current) break;
+      const dirents = yield* Effect.tryPromise({
+        try: () => NodeFSP.readdir(current, { withFileTypes: true }),
+        catch: (cause) =>
+          new WorkspaceSearchIndex.WorkspaceSearchIndexSearchFailed({
+            cwd,
+            queryLength: 0,
+            pageSize: DIRECT_LIST_PAGE_SIZE,
+            reason: "Direct workspace listing failed.",
+            cause,
+          }),
+      });
+      for (const dirent of dirents) {
+        if (dirent.name.startsWith(".") || dirent.isSymbolicLink()) continue;
+        const absolute = path.join(current, dirent.name);
+        const relative = path.relative(cwd, absolute).replaceAll("\\", "/");
+        if (!relative) continue;
+        if (dirent.isDirectory()) {
+          if (dirent.name !== "node_modules") pending.push(absolute);
+          entries.push({ path: relative, kind: "directory" });
+        } else if (dirent.isFile()) {
+          entries.push({ path: relative, kind: "file" });
+        }
+        if (entries.length >= DIRECT_LIST_MAX_ENTRIES) break;
+      }
+    }
+    return {
+      entries: entries.toSorted((left, right) => left.path.localeCompare(right.path)),
+      truncated: entries.length >= DIRECT_LIST_MAX_ENTRIES,
+    };
   });
 
   const refresh: WorkspaceEntries["Service"]["refresh"] = Effect.fn("WorkspaceEntries.refresh")(
@@ -275,13 +323,19 @@ export const make = Effect.gen(function* () {
   const list: WorkspaceEntries["Service"]["list"] = Effect.fn("WorkspaceEntries.list")(
     function* (input) {
       const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
-      return yield* Effect.gen(function* () {
+      const indexed = Effect.gen(function* () {
         const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
         return yield* searchIndex.list();
-      }).pipe(
+      });
+      return yield* indexed.pipe(
         Effect.provide(
           workspaceSearchIndexes.get(
             WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, "paths"),
+          ),
+        ),
+        Effect.catchCause((cause: Cause.Cause<WorkspaceEntriesError>) =>
+          listDirectFilesystem(normalizedCwd).pipe(
+            Effect.catchCause(() => Effect.failCause(cause)),
           ),
         ),
       );
