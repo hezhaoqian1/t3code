@@ -191,7 +191,6 @@ export function FdSkillPicker(props: {
     if (versionId !== null && versionId === selectedVersionId) {
       versionId = null;
     }
-    if (versionId === null) clearEnterpriseComposerDraft(props.threadId);
     useFdSkillSelectionStore.getState().select(props.threadId, versionId);
     if (versionId !== null) excludeEnterpriseComposerDraftFromPersistence(props.threadId);
     setRevokedNotice(false);

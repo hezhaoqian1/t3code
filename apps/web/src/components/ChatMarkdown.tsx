@@ -155,6 +155,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
 const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkNormalizeListItemIndentation,
+  remarkLinkifyFilePaths,
   remarkPreserveCodeMeta,
   remarkTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -163,6 +164,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkGfm,
   remarkNormalizeListItemIndentation,
   remarkBreaks,
+  remarkLinkifyFilePaths,
   remarkPreserveCodeMeta,
   remarkTagInlineCode,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
@@ -211,6 +213,9 @@ function extractPreCodeMeta(node: unknown): string | undefined {
 
 type MarkdownAstNode = {
   type?: string;
+  value?: string;
+  title?: string | null;
+  url?: string;
   meta?: unknown;
   data?: {
     hProperties?: Record<string, unknown>;
@@ -261,6 +266,57 @@ function remarkTagInlineCode() {
     };
 
     visit(tree, false);
+  };
+}
+
+const PLAIN_FILE_PATH_PATTERN =
+  /(?:[^\s\\/:]+[\\/])+[^\s\\/:]+\.[A-Za-z0-9_-]+(?::\d+(?::\d+)?)?/gu;
+
+/** Turn model output such as `assets\\icons\\logo.png` into the same file
+ * link used by explicit Markdown links. Code blocks and existing links are
+ * deliberately left alone so commands and URLs keep their original text. */
+function remarkLinkifyFilePaths() {
+  return (tree: MarkdownAstNode) => {
+    const visit = (node: MarkdownAstNode, parentType?: string) => {
+      if (node.type === "text" && typeof node.value === "string" && parentType !== "link") {
+        const value = node.value;
+        const children: MarkdownAstNode[] = [];
+        let cursor = 0;
+        for (const match of value.matchAll(PLAIN_FILE_PATH_PATTERN)) {
+          const start = match.index ?? 0;
+          const path = match[0];
+          if (!path || start < cursor) continue;
+          if (start > cursor) children.push({ type: "text", value: value.slice(cursor, start) });
+          children.push({
+            type: "link",
+            title: null,
+            url: path.replaceAll("\\", "/"),
+            children: [{ type: "text", value: path }],
+          });
+          cursor = start + path.length;
+        }
+        if (children.length > 0) {
+          if (cursor < value.length) children.push({ type: "text", value: value.slice(cursor) });
+          Object.assign(node, { type: "root-fragment", children });
+        }
+        return;
+      }
+      node.children?.forEach((child) => visit(child, node.type));
+    };
+    visit(tree);
+    const replaceFragments = (node: MarkdownAstNode) => {
+      if (!node.children) return;
+      const next: MarkdownAstNode[] = [];
+      for (const child of node.children) {
+        if (child.type === "root-fragment" && child.children) next.push(...child.children);
+        else {
+          replaceFragments(child);
+          next.push(child);
+        }
+      }
+      node.children = next;
+    };
+    replaceFragments(tree);
   };
 }
 
@@ -1457,7 +1513,10 @@ function ChatMarkdown({
       },
       a({ node, href, children, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
-        const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
+        const fileLinkMeta = normalizedHref
+          ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
+            resolveMarkdownFileLinkMeta(normalizedHref, cwd))
+          : null;
         if (!fileLinkMeta) {
           const faviconHost = resolveExternalWebLinkHost(href);
           const isSameDocumentLink = href?.startsWith("#") ?? false;

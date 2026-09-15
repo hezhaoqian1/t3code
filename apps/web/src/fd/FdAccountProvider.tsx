@@ -13,6 +13,7 @@ import { createFdAccountController } from "./accountController";
 import { browserDevAccountBridge } from "./browserDevAccount";
 import { clearAllEnterpriseComposerDrafts } from "../composerDraftStore";
 import { clearAllFdSkillSelections } from "../fdSkillSelectionStore";
+import { useSendQueueStore } from "../sendQueueStore";
 
 interface FdAccountContextValue {
   readonly state: FdAccountState;
@@ -34,6 +35,7 @@ export function createFdAccountStatePublisher(publish: (state: FdAccountState) =
     if (authenticatedUserId !== null && authenticatedUserId !== nextUserId) {
       clearAllEnterpriseComposerDrafts();
       clearAllFdSkillSelections();
+      useSendQueueStore.getState().clearAll();
     }
     authenticatedUserId = nextUserId;
     publish(nextState);
