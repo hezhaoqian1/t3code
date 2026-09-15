@@ -1,4 +1,5 @@
 // @effect-diagnostics runEffectInsideEffect:off
+// @effect-diagnostics globalFetch:off
 import type { ProviderSessionStartInput, RuntimeMode, ServerProvider } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Crypto from "effect/Crypto";
@@ -27,6 +28,7 @@ import {
   type FdResponsesInputImageContentPart,
 } from "../../fd-agent/FdResponsesProtocol.ts";
 import { FD_RESPONSES_MODEL_CATALOG } from "../../fd-codex/ResponsesModelCatalog.ts";
+import type { ResponsesCodexModelConfig } from "../../fd-codex/ResponsesCodexConfig.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { makeFdDeepSeekTextGeneration } from "../../textGeneration/FdDeepSeekTextGeneration.ts";
 import {
@@ -61,6 +63,46 @@ export type FdDeepSeekDriverEnv =
   | WorkspaceFileSystem.WorkspaceFileSystem;
 
 const FD_IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
+
+async function fetchFdUserModelSlugs(
+  credentials: FdServerRuntimeCredentialProjection,
+): Promise<ReadonlyArray<string>> {
+  try {
+    const fetchImpl = (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch;
+    const response = await fetchImpl(`${credentials.newApiOrigin}/api/user/models`, {
+      headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!response.ok) return [];
+    const body = (await response.json()) as { data?: unknown };
+    return Array.isArray(body.data)
+      ? body.data.filter(
+          (value): value is string => typeof value === "string" && value.trim().length > 0,
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function modelConfigForSlug(slug: string): ResponsesCodexModelConfig {
+  const known = FD_RESPONSES_MODEL_CATALOG.find((model) => model.slug === slug);
+  if (known) return known;
+  const lower = slug.toLowerCase();
+  const supportsVision = /vision|vl|image|omni|kimi/.test(lower);
+  return {
+    slug,
+    name: slug,
+    shortName: slug,
+    supportsTools: true,
+    supportsVision,
+    visionRoute: supportsVision ? "native" : "unsupported",
+    supportsReasoning: true,
+    supportsStructuredOutput: true,
+    supportsForcedToolChoice: false,
+    supportsParallelToolCalls: false,
+  };
+}
 
 export const resolveFdLocalToolContext = Effect.fn("resolveFdLocalToolContext")(function* (input: {
   readonly cwd: string;
@@ -243,8 +285,12 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       }
       const userSkillCatalog = new NativeSkillCatalog();
       yield* Effect.promise(() => userSkillCatalog.refresh());
+      let authorizedDynamicModels = new Set<string>();
       const adapter = yield* makeFdDeepSeekAdapter({
         instanceId,
+        isSupportedModel: (model) =>
+          FD_RESPONSES_MODEL_CATALOG.some((entry) => entry.slug === model) ||
+          authorizedDynamicModels.has(model),
         kernel,
         ordinaryAdapter,
         ordinarySessionInput: (input) =>
@@ -312,6 +358,16 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       ) {
         const checkedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const authenticated = Option.isSome(credentialState);
+        const dynamicSlugs = authenticated
+          ? yield* Effect.promise(() => fetchFdUserModelSlugs(credentialState.value))
+          : [];
+        authorizedDynamicModels = new Set(dynamicSlugs);
+        const modelCatalog = [
+          ...FD_RESPONSES_MODEL_CATALOG,
+          ...dynamicSlugs
+            .filter((slug) => !FD_RESPONSES_MODEL_CATALOG.some((model) => model.slug === slug))
+            .map(modelConfigForSlug),
+        ];
         return {
           instanceId,
           driver: FD_DEEPSEEK_DRIVER_KIND,
@@ -335,7 +391,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
           ...(!authenticated && enabled
             ? { message: "Sign in to FD to use the model runtime." }
             : {}),
-          models: FD_RESPONSES_MODEL_CATALOG.map((model) => ({
+          models: modelCatalog.map((model) => ({
             slug: model.slug,
             name: model.name,
             ...(model.shortName ? { shortName: model.shortName } : {}),

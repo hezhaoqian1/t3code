@@ -108,7 +108,17 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
     {
       instanceId: input.instanceId,
       resolveModelCapabilities: (model) =>
-        findResponsesCodexModel(FD_RESPONSES_PROVIDERS, model)?.model,
+        findResponsesCodexModel(FD_RESPONSES_PROVIDERS, model)?.model ?? {
+          slug: model,
+          name: model,
+          supportsTools: true,
+          supportsVision: /vision|vl|image|omni|kimi/i.test(model),
+          visionRoute: /vision|vl|image|omni|kimi/i.test(model) ? "native" : "unsupported",
+          supportsReasoning: true,
+          supportsStructuredOutput: true,
+          supportsForcedToolChoice: false,
+          supportsParallelToolCalls: false,
+        },
       resolveModelRuntimeKey: (model) =>
         findResponsesCodexModel(FD_RESPONSES_PROVIDERS, model)?.provider.providerId,
       resolveRuntime: (session) =>
