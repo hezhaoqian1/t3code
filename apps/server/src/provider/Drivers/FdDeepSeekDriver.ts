@@ -27,7 +27,10 @@ import {
   FD_RESPONSES_MODEL,
   type FdResponsesInputImageContentPart,
 } from "../../fd-agent/FdResponsesProtocol.ts";
-import { FD_RESPONSES_MODEL_CATALOG } from "../../fd-codex/ResponsesModelCatalog.ts";
+import {
+  FD_RESPONSES_MODEL_CATALOG,
+  resolveFdResponsesModelConfig,
+} from "../../fd-codex/ResponsesModelCatalog.ts";
 import type { ResponsesCodexModelConfig } from "../../fd-codex/ResponsesCodexConfig.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { makeFdDeepSeekTextGeneration } from "../../textGeneration/FdDeepSeekTextGeneration.ts";
@@ -86,22 +89,7 @@ async function fetchFdUserModelSlugs(
 }
 
 function modelConfigForSlug(slug: string): ResponsesCodexModelConfig {
-  const known = FD_RESPONSES_MODEL_CATALOG.find((model) => model.slug === slug);
-  if (known) return known;
-  const lower = slug.toLowerCase();
-  const supportsVision = /vision|vl|image|omni|kimi/.test(lower);
-  return {
-    slug,
-    name: slug,
-    shortName: slug,
-    supportsTools: true,
-    supportsVision,
-    visionRoute: supportsVision ? "native" : "unsupported",
-    supportsReasoning: true,
-    supportsStructuredOutput: true,
-    supportsForcedToolChoice: false,
-    supportsParallelToolCalls: false,
-  };
+  return resolveFdResponsesModelConfig(slug)!;
 }
 
 export const resolveFdLocalToolContext = Effect.fn("resolveFdLocalToolContext")(function* (input: {
