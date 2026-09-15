@@ -208,7 +208,13 @@ async function processPdf(work: AttachmentWork, bytes: Buffer): Promise<Processe
           tables: [],
           imageReferences: [],
         });
-      if (work.visual) {
+      // A PDF page with a complete text layer does not need to make a paid
+      // vision request. Rendering every such page made Kimi appear stuck and
+      // needlessly duplicated the text that pdfjs already extracted. Keep
+      // rendering for scanned pages and pages containing embedded raster
+      // images, which are the cases where visual evidence adds information.
+      const needsVisualEvidence = work.visual && (!text || hasRaster);
+      if (needsVisualEvidence) {
         const natural = page.getViewport({ scale: 1 });
         const viewport = page.getViewport({
           scale: Math.min(2, 1600 / Math.min(natural.width, natural.height)),

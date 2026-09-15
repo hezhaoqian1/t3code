@@ -111,6 +111,27 @@ export function useNewThreadHandler() {
               : currentRouteTarget.draftId,
           )
         : null;
+      // The draft store is debounced for persistence, while the workspace
+      // picker can be clicked immediately after typing. Read it again at the
+      // point of each remap so a pending debounce cannot erase the visible
+      // composer text during navigation.
+      const readLatestComposerPrompt = () => {
+        const target = getCurrentRouteTarget();
+        const sameSource =
+          target !== null && currentRouteTarget !== null
+            ? target.kind === "draft" && currentRouteTarget.kind === "draft"
+              ? target.draftId === currentRouteTarget.draftId
+              : target.kind === "server" && currentRouteTarget.kind === "server"
+                ? target.threadRef.environmentId === currentRouteTarget.threadRef.environmentId &&
+                  target.threadRef.threadId === currentRouteTarget.threadRef.threadId
+                : false
+            : false;
+        const latest =
+          sameSource && target
+            ? getComposerDraft(target.kind === "server" ? target.threadRef : target.draftId)
+            : carrySourceComposer;
+        return latest?.prompt ?? "";
+      };
       const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
       const composerModelSelection = composerActiveProvider
         ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
@@ -259,8 +280,9 @@ export function useNewThreadHandler() {
           // Remapping a logical project can remove the old draft entry. Carry
           // the text after the remap so switching workspace never discards
           // text that is still visible in the composer.
-          if (options?.preserveComposer && carrySourceComposer?.prompt) {
-            setPrompt(reusableStoredDraftThread.draftId, carrySourceComposer.prompt);
+          const latestPrompt = readLatestComposerPrompt();
+          if (options?.preserveComposer && latestPrompt) {
+            setPrompt(reusableStoredDraftThread.draftId, latestPrompt);
           }
           // Re-read the route: the snapshot from before the await is stale
           // once a concurrent invocation's navigation lands, and navigating
@@ -302,8 +324,9 @@ export function useNewThreadHandler() {
           interactionMode: latestActiveDraftThread.interactionMode,
           ...pickExplicitWorkspaceOptions(options),
         });
-        if (options?.preserveComposer && carrySourceComposer?.prompt) {
-          setPrompt(currentRouteTarget.draftId, carrySourceComposer.prompt);
+        const latestPrompt = readLatestComposerPrompt();
+        if (options?.preserveComposer && latestPrompt) {
+          setPrompt(currentRouteTarget.draftId, latestPrompt);
         }
         return Promise.resolve();
       }
@@ -339,8 +362,9 @@ export function useNewThreadHandler() {
             interactionMode: racedDraft.interactionMode,
             ...pickExplicitWorkspaceOptions(options),
           });
-          if (options?.preserveComposer && carrySourceComposer?.prompt) {
-            setPrompt(racedDraft.draftId, carrySourceComposer.prompt);
+          const latestPrompt = readLatestComposerPrompt();
+          if (options?.preserveComposer && latestPrompt) {
+            setPrompt(racedDraft.draftId, latestPrompt);
           }
           await router.navigate({
             to: "/draft/$draftId",
@@ -368,8 +392,9 @@ export function useNewThreadHandler() {
         });
         // Switching workspaces creates a new draft identity, but must not
         // discard text the user has already entered in the composer.
-        if (options?.preserveComposer && carrySourceComposer?.prompt) {
-          setPrompt(draftId, carrySourceComposer.prompt);
+        const latestPrompt = readLatestComposerPrompt();
+        if (options?.preserveComposer && latestPrompt) {
+          setPrompt(draftId, latestPrompt);
         }
         applyStickyState(draftId);
         if (carryModelSelection) {

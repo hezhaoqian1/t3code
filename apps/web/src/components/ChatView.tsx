@@ -171,6 +171,7 @@ import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { FD_SKILL_THREAD_TITLE, selectedFdSkillVersionId } from "../fdSkillSelectionStore";
 import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
+import { useSendQueueStore } from "../sendQueueStore";
 import {
   isOfficeWorkspaceProject,
   shouldBlockOfficeTechnicalWorkbenchCommand,
@@ -1297,9 +1298,11 @@ function ChatViewContent(props: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
-  const [queuedMessagesByThread, setQueuedMessagesByThread] = useState<
-    Record<string, Array<{ id: string; text: string; createdAt: string }>>
-  >({});
+  const queuedMessagesByThread = useSendQueueStore((state) => state.byThreadKey);
+  const enqueueQueuedMessage = useSendQueueStore((state) => state.enqueue);
+  const removeQueuedMessage = useSendQueueStore((state) => state.remove);
+  const promoteQueuedMessage = useSendQueueStore((state) => state.promote);
+  const updateQueuedMessage = useSendQueueStore((state) => state.update);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
@@ -4581,6 +4584,7 @@ function ChatViewContent(props: ChatViewProps) {
       image: ComposerImageAttachment | null;
     },
     regenerateText?: string,
+    queuedMessageId?: string,
   ) => {
     e?.preventDefault();
     const notifyDirectAnnotationAttached = () => {
@@ -4613,11 +4617,17 @@ function ChatViewContent(props: ChatViewProps) {
         }
         return;
       }
-      const queued = { id: newMessageId(), text: queuedText, createdAt: new Date().toISOString() };
-      setQueuedMessagesByThread((existing) => ({
-        ...existing,
-        [activeThread.id]: [...(existing[activeThread.id] ?? []), queued],
-      }));
+      const queued = {
+        id: newMessageId(),
+        text: queuedText,
+        createdAt: new Date().toISOString(),
+        status: undefined,
+        error: undefined,
+      };
+      enqueueQueuedMessage(
+        scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
+        queued,
+      );
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -5056,6 +5066,12 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (queuedMessageId) {
+          removeQueuedMessage(
+            scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),
+            queuedMessageId,
+          );
+        }
         composerRef.current?.clearDocuments();
         composerRef.current?.clearNativeSkillSelection();
         acknowledgeActiveThreadWoke();
@@ -5063,6 +5079,18 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      if (queuedMessageId) {
+        updateQueuedMessage(
+          scopedThreadKey(
+            scopeThreadRef(activeThread?.environmentId ?? environmentId, threadIdForSend),
+          ),
+          queuedMessageId,
+          {
+            status: "failed",
+            error: "发送失败，请点击重试。",
+          },
+        );
+      }
       if (
         promptRef.current.length === 0 &&
         composerImagesRef.current.length === 0 &&
@@ -5115,7 +5143,8 @@ function ChatViewContent(props: ChatViewProps) {
     }
   };
 
-  const queuedMessages = activeThreadId ? (queuedMessagesByThread[activeThreadId] ?? []) : [];
+  const activeQueueKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+  const queuedMessages = activeQueueKey ? (queuedMessagesByThread[activeQueueKey] ?? []) : [];
 
   useEffect(() => {
     if (
@@ -5125,8 +5154,11 @@ function ChatViewContent(props: ChatViewProps) {
       threadDetailLoading ||
       activeEnvironmentUnavailable !== null ||
       !latestTurnSettled ||
-      !activeThreadId ||
+      !activeQueueKey ||
       queuedMessages.length === 0 ||
+      queuedMessages[0]?.status === "failed" ||
+      (composerRef.current?.getSendContext()?.images.length ?? 0) > 0 ||
+      (composerRef.current?.getSendContext()?.documents.length ?? 0) > 0 ||
       drainingQueuedMessageRef.current ||
       sendInFlightRef.current
     ) {
@@ -5135,15 +5167,11 @@ function ChatViewContent(props: ChatViewProps) {
     const next = queuedMessages[0];
     if (!next) return;
     drainingQueuedMessageRef.current = true;
-    setQueuedMessagesByThread((existing) => ({
-      ...existing,
-      [activeThreadId]: (existing[activeThreadId] ?? []).filter((entry) => entry.id !== next.id),
-    }));
     void (async () => {
       // Preserve text typed after the queued item was created. Attachments are
       // deliberately excluded from queueing while a turn is active.
       const draftText = promptRef.current;
-      await onSend(undefined, undefined, next.text);
+      await onSend(undefined, undefined, next.text, next.id);
       if (promptRef.current.length === 0 && draftText.length > 0) {
         promptRef.current = draftText;
         setComposerDraftPrompt(composerDraftTarget, draftText);
@@ -5153,7 +5181,7 @@ function ChatViewContent(props: ChatViewProps) {
     })();
   }, [
     activeEnvironmentUnavailable,
-    activeThreadId,
+    activeQueueKey,
     composerDraftTarget,
     isConnecting,
     isSendBusy,
@@ -5163,6 +5191,8 @@ function ChatViewContent(props: ChatViewProps) {
     queuedMessages,
     setComposerDraftPrompt,
     threadDetailLoading,
+    queuedMessagesByThread,
+    removeQueuedMessage,
   ]);
 
   const onRegenerateAssistantMessage = useCallback(
@@ -6050,43 +6080,70 @@ function ChatViewContent(props: ChatViewProps) {
                             key={queuedMessage.id}
                             className="flex max-w-56 shrink-0 items-center gap-1 rounded-md bg-muted/70 px-2 py-1"
                           >
-                            <span className="max-w-36 truncate" title={queuedMessage.text}>
+                            <span
+                              className="max-w-36 truncate"
+                              title={queuedMessage.error ?? queuedMessage.text}
+                            >
                               {index + 1}. {queuedMessage.text}
                             </span>
                             <button
                               type="button"
                               className="text-primary hover:underline"
                               onClick={() => {
-                                if (!activeThreadId || index === 0) return;
-                                setQueuedMessagesByThread((existing) => {
-                                  const current = existing[activeThreadId] ?? [];
-                                  const selected = current[index];
-                                  if (!selected) return existing;
-                                  return {
-                                    ...existing,
-                                    [activeThreadId]: [
-                                      selected,
-                                      ...current.slice(0, index),
-                                      ...current.slice(index + 1),
-                                    ],
-                                  };
-                                });
+                                if (!activeQueueKey) return;
+                                const currentSendContext = composerRef.current?.getSendContext();
+                                if (
+                                  currentSendContext &&
+                                  (currentSendContext.images.length > 0 ||
+                                    currentSendContext.documents.length > 0)
+                                ) {
+                                  toastManager.add(
+                                    stackedThreadToast({
+                                      type: "info",
+                                      title: "请先处理当前附件",
+                                      description: "排队消息不会混入后来添加的文件。",
+                                    }),
+                                  );
+                                  return;
+                                }
+                                if (queuedMessage.status === "failed") {
+                                  updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                    status: undefined,
+                                    error: undefined,
+                                  });
+                                }
+                                if (phase === "running") {
+                                  // Codex supports a follow-up turn while the
+                                  // current turn is active. The runtime queues
+                                  // it natively and returns its receipt; keep
+                                  // our item until that command succeeds.
+                                  void onSend(
+                                    undefined,
+                                    undefined,
+                                    queuedMessage.text,
+                                    queuedMessage.id,
+                                  );
+                                } else if (queuedMessage.status === "failed") {
+                                  void onSend(
+                                    undefined,
+                                    undefined,
+                                    queuedMessage.text,
+                                    queuedMessage.id,
+                                  );
+                                } else {
+                                  promoteQueuedMessage(activeQueueKey, queuedMessage.id);
+                                }
                               }}
                             >
-                              立即发送
+                              {queuedMessage.status === "failed" ? "重试" : "立即发送"}
                             </button>
                             <button
                               type="button"
                               className="text-muted-foreground hover:text-foreground"
                               aria-label={`删除排队消息 ${index + 1}`}
                               onClick={() => {
-                                if (!activeThreadId) return;
-                                setQueuedMessagesByThread((existing) => ({
-                                  ...existing,
-                                  [activeThreadId]: (existing[activeThreadId] ?? []).filter(
-                                    (entry) => entry.id !== queuedMessage.id,
-                                  ),
-                                }));
+                                if (!activeQueueKey) return;
+                                removeQueuedMessage(activeQueueKey, queuedMessage.id);
                               }}
                             >
                               删除
