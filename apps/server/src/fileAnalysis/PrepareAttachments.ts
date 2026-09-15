@@ -35,7 +35,12 @@ export async function prepareAttachments(input: {
       {
         attachment,
         path,
-        visual: route === "native" || route === "fd-preprocessor",
+        // PDFs use the shared visual fallback even for models without a
+        // native image route; standalone images still remain text-only here.
+        visual:
+          route === "native" ||
+          route === "fd-preprocessor" ||
+          attachment.name.toLowerCase().endsWith(".pdf"),
       },
       input.signal,
       input.platform,
@@ -56,12 +61,23 @@ export async function prepareAttachments(input: {
     for (const image of result.images) {
       input.signal.throwIfAborted();
       await input.onProgress?.(`正在识别页面或图片分段 ${++completedImages}/${visualCount}`);
-      if (route !== "native" && route !== "fd-preprocessor")
+      // PDF pages are rendered locally by the attachment worker. They can be
+      // sent through the shared FD vision preprocessor even when the selected
+      // chat model has no native image API, then the extracted evidence is
+      // supplied as trusted-by-source text to that model. This keeps PDF
+      // support consistent across Qwen/GLM while preserving the explicit
+      // unsupported state for standalone PNG/JPEG uploads.
+      const pdfFallbackRoute = attachment.name.toLowerCase().endsWith(".pdf")
+        ? "fd-preprocessor"
+        : "unsupported";
+      const effectiveRoute =
+        route === "native" || route === "fd-preprocessor" ? route : pdfFallbackRoute;
+      if (effectiveRoute !== "native" && effectiveRoute !== "fd-preprocessor")
         throw new Error("当前模型未开通视觉识别，请切换 Kimi K3。");
       let evidence: string;
       try {
         evidence = await input.vision.analyze({
-          model: route === "native" ? "kimi-k3" : "deepseek-v4-flash-vision-exp",
+          model: effectiveRoute === "native" ? "kimi-k3" : "deepseek-v4-flash-vision-exp",
           images: [
             {
               type: "input_image",

@@ -256,6 +256,12 @@ export function useNewThreadHandler() {
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
           );
+          // Remapping a logical project can remove the old draft entry. Carry
+          // the text after the remap so switching workspace never discards
+          // text that is still visible in the composer.
+          if (options?.preserveComposer && carrySourceComposer?.prompt) {
+            setPrompt(reusableStoredDraftThread.draftId, carrySourceComposer.prompt);
+          }
           // Re-read the route: the snapshot from before the await is stale
           // once a concurrent invocation's navigation lands, and navigating
           // again would push a duplicate history entry.
@@ -296,6 +302,9 @@ export function useNewThreadHandler() {
           interactionMode: latestActiveDraftThread.interactionMode,
           ...pickExplicitWorkspaceOptions(options),
         });
+        if (options?.preserveComposer && carrySourceComposer?.prompt) {
+          setPrompt(currentRouteTarget.draftId, carrySourceComposer.prompt);
+        }
         return Promise.resolve();
       }
 
@@ -330,6 +339,9 @@ export function useNewThreadHandler() {
             interactionMode: racedDraft.interactionMode,
             ...pickExplicitWorkspaceOptions(options),
           });
+          if (options?.preserveComposer && carrySourceComposer?.prompt) {
+            setPrompt(racedDraft.draftId, carrySourceComposer.prompt);
+          }
           await router.navigate({
             to: "/draft/$draftId",
             params: { draftId: racedDraft.draftId },
