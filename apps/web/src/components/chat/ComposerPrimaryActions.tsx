@@ -148,7 +148,27 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   if (isRunning) {
-    return renderStopGenerationButton(false);
+    return (
+      <div className="flex items-center gap-2">
+        {renderStopGenerationButton(false)}
+        <button
+          type="submit"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full bg-message-action text-message-action-foreground shadow-xs transition-all hover:scale-105 hover:bg-message-action-hover disabled:pointer-events-none disabled:opacity-30"
+          {...pointerFocusProps}
+          disabled={
+            isSendBusy ||
+            isSendDisabled ||
+            isConnecting ||
+            isEnvironmentUnavailable ||
+            !hasSendableContent
+          }
+          aria-label="排队发送"
+          title="当前任务完成后发送"
+        >
+          ↑
+        </button>
+      </div>
+    );
   }
 
   if (showPlanFollowUpPrompt) {
