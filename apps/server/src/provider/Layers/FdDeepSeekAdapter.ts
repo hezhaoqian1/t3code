@@ -134,6 +134,7 @@ interface EnterpriseToolGrounding {
 }
 
 export interface FdDeepSeekAdapterOptions {
+  readonly isSupportedModel?: (model: string) => boolean;
   readonly prepareAttachments?: (
     input: ProviderSendTurnInput,
     model: string,
@@ -285,6 +286,9 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
   options: FdDeepSeekAdapterOptions,
 ) {
   const instanceId = options.instanceId ?? FD_DEEPSEEK_INSTANCE_ID;
+  const isSupportedResponsesModel =
+    options.isSupportedModel ??
+    ((model: string) => FD_RESPONSES_MODEL_CATALOG.some((entry) => entry.slug === model));
   const now = options.now ?? (() => new Date());
   let nextId = 0;
   const randomId = options.randomId ?? (() => `fd-${++nextId}`);
