@@ -2241,6 +2241,17 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               ...state.logicalProjectDraftThreadKeyByLogicalProjectKey,
               [normalizedLogicalProjectKey]: draftId,
             };
+            // A draft has one current logical workspace. When a composer is
+            // moved to another workspace, remove aliases left by the old
+            // workspace so a later selection cannot resurrect the same draft
+            // with stale project context.
+            for (const [mappedKey, mappedDraftId] of Object.entries(
+              nextLogicalProjectDraftThreadKeyByLogicalProjectKey,
+            )) {
+              if (mappedDraftId === draftId && mappedKey !== normalizedLogicalProjectKey) {
+                delete nextLogicalProjectDraftThreadKeyByLogicalProjectKey[mappedKey];
+              }
+            }
             const nextDraftThreadsByThreadKey: Record<string, DraftThreadState> = {
               ...state.draftThreadsByThreadKey,
               [draftId]: nextDraftThread,

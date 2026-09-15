@@ -177,6 +177,39 @@ export function useNewThreadHandler() {
           ? getDraftThread(currentRouteTarget.threadRef)
           : getDraftSession(currentRouteTarget.draftId)
         : null;
+      // WorkspacePicker uses preserveComposer when the user is editing a new
+      // conversation. Keep that draft in place and update only its workspace;
+      // navigating to the target project's existing draft would replace the
+      // composer and make the text appear to be cleared.
+      if (
+        !taskArea &&
+        options?.preserveComposer &&
+        currentRouteTarget?.kind === "draft" &&
+        latestActiveDraftThread &&
+        latestActiveDraftThread.promotedTo == null
+      ) {
+        setDraftThreadContext(currentRouteTarget.draftId, { projectRef });
+        const movedDraft = getDraftSession(currentRouteTarget.draftId);
+        if (movedDraft) {
+          setLogicalProjectDraftThreadId(
+            logicalProjectKey,
+            projectRef,
+            currentRouteTarget.draftId,
+            {
+              threadId: movedDraft.threadId,
+              createdAt: movedDraft.createdAt,
+              runtimeMode: movedDraft.runtimeMode,
+              interactionMode: movedDraft.interactionMode,
+              branch: movedDraft.branch,
+              worktreePath: movedDraft.worktreePath,
+              envMode: movedDraft.envMode,
+              startFromOrigin: movedDraft.startFromOrigin,
+              ...(movedDraft.taskArea ? { taskArea: true } : {}),
+            },
+          );
+        }
+        return Promise.resolve();
+      }
       if (reusableStoredDraftThread) {
         return (async () => {
           const isDraftAlreadyOpen =
