@@ -1,6 +1,6 @@
 import type { ChatAttachment, ProviderSendTurnInput } from "@t3tools/contracts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
-import { FD_RESPONSES_MODEL_CATALOG } from "../fd-codex/ResponsesModelCatalog.ts";
+import { resolveFdResponsesModelConfig } from "../fd-codex/ResponsesModelCatalog.ts";
 import { FdVisionService, visionFailureMessage } from "../fd-vision/FdVisionService.ts";
 import { formatDocumentContext, type DocumentContext } from "./DocumentContext.ts";
 import { runAttachmentWorker } from "./AttachmentWorkerClient.ts";
@@ -15,7 +15,7 @@ export async function prepareAttachments(input: {
   readonly process?: typeof runAttachmentWorker;
   readonly onProgress?: (message: string) => Promise<void>;
 }): Promise<ProviderSendTurnInput> {
-  const route = FD_RESPONSES_MODEL_CATALOG.find((model) => model.slug === input.model)?.visionRoute;
+  const route = resolveFdResponsesModelConfig(input.model)?.visionRoute;
   const contexts: DocumentContext[] = [];
   const remaining: ChatAttachment[] = [];
   const observations: string[] = [];
@@ -77,7 +77,10 @@ export async function prepareAttachments(input: {
       let evidence: string;
       try {
         evidence = await input.vision.analyze({
-          model: effectiveRoute === "native" ? "kimi-k3" : "deepseek-v4-flash-vision-exp",
+          // Native routes must use the selected authorized model. Keeping
+          // the model here matters for dynamically added visual models; the
+          // Kimi slug is only the legacy fallback for the shared preprocessor.
+          model: effectiveRoute === "native" ? input.model : "deepseek-v4-flash-vision-exp",
           images: [
             {
               type: "input_image",

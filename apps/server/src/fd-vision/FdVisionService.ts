@@ -18,7 +18,9 @@ export interface FdVisionAnalyzeInput {
   readonly images: ReadonlyArray<FdResponsesInputImageContentPart>;
   readonly userPrompt?: string;
   readonly signal?: AbortSignal;
-  readonly model?: "kimi-k3" | typeof FD_RESPONSES_VISION_MODEL;
+  /** The selected native visual model, including one added by the dynamic
+   * authenticated model catalog. */
+  readonly model?: string;
 }
 
 export class FdVisionService {
@@ -50,7 +52,11 @@ export class FdVisionService {
     let evidenceBytes = 0;
     let completed = false;
     for await (const event of this.#streamer.stream({
-      model: input.model ?? FD_RESPONSES_VISION_MODEL,
+      // Dynamic models are authorized by the FD provider catalog before this
+      // service is called; the wire protocol's legacy union is kept for the
+      // built-in models, so narrow at this boundary.
+      model: (input.model ??
+        FD_RESPONSES_VISION_MODEL) as import("../fd-agent/FdResponsesProtocol.ts").FdResponsesModel,
       round: 1,
       input: [message],
       reasoningEffort: input.model === "kimi-k3" ? "low" : "none",

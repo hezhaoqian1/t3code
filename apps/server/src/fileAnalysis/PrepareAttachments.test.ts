@@ -73,6 +73,25 @@ describe("prepare attachments", () => {
     expect(result.input).toContain("page 1");
   });
 
+  it("uses the selected dynamically authorized visual model on native routes", async () => {
+    const requests: FdVisionAnalyzeInput[] = [];
+    await prepareAttachments({
+      platform: "win32",
+      turn,
+      model: "qwen-vl-enterprise",
+      attachmentsDir: "/tmp/attachments",
+      signal: new AbortController().signal,
+      process: async () => ({ images: [{ label: "page 1", bytes: new Uint8Array([1]) }] }),
+      vision: {
+        analyze: async (request) => {
+          requests.push(request);
+          return "text";
+        },
+      },
+    });
+    expect(requests[0]?.model).toBe("qwen-vl-enterprise");
+  });
+
   it("still rejects standalone images for models without a vision route", async () => {
     const originalAttachment = turn.attachments[0]!;
     const imageTurn = {

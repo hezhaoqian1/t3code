@@ -37,7 +37,10 @@ import {
   type FdResponsesInputItem,
   type FdResponsesMessageInputItem,
 } from "../../fd-agent/FdResponsesProtocol.ts";
-import { FD_RESPONSES_MODEL_CATALOG } from "../../fd-codex/ResponsesModelCatalog.ts";
+import {
+  FD_RESPONSES_MODEL_CATALOG,
+  resolveFdResponsesModelConfig,
+} from "../../fd-codex/ResponsesModelCatalog.ts";
 import {
   encodeFdContextBinding,
   restoreFdContextBinding,
@@ -1063,9 +1066,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       context.pendingPresentation = input.presentation;
       let ordinaryInput = input;
       if (attachments.length > 0) {
-        const modelMetadata = FD_RESPONSES_MODEL_CATALOG.find(
-          (model) => model.slug === selectedModel,
-        );
+        const modelMetadata = resolveFdResponsesModelConfig(selectedModel);
         if (modelMetadata?.visionRoute === "native") {
           // Native-capable models receive the original attachment. The ordinary
           // Codex adapter owns the conversion to a localImage turn input.

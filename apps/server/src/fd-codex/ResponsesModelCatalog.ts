@@ -1,4 +1,7 @@
-import type { ResponsesCodexProviderConfig } from "./ResponsesCodexConfig.ts";
+import type {
+  ResponsesCodexModelConfig,
+  ResponsesCodexProviderConfig,
+} from "./ResponsesCodexConfig.ts";
 
 export const FD_RESPONSES_PROVIDER: ResponsesCodexProviderConfig = {
   providerId: "fd_new_api",
@@ -85,3 +88,26 @@ export const FD_RESPONSES_PROVIDERS = [FD_RESPONSES_PROVIDER] as const;
 export const FD_RESPONSES_MODEL_CATALOG = FD_RESPONSES_PROVIDERS.flatMap(
   (provider) => provider.models,
 );
+
+/** Resolve a static or server-authorized model without duplicating capability
+ * inference in each attachment and provider path. Unknown models are only
+ * surfaced after the authenticated New API catalog authorizes them. */
+export function resolveFdResponsesModelConfig(slug: string): ResponsesCodexModelConfig | undefined {
+  const known = FD_RESPONSES_MODEL_CATALOG.find((model) => model.slug === slug);
+  if (known) return known;
+  const normalized = slug.trim().toLowerCase();
+  if (normalized.length === 0) return undefined;
+  const supportsVision = /vision|vl|image|omni|kimi/.test(normalized);
+  return {
+    slug,
+    name: slug,
+    shortName: slug,
+    supportsTools: true,
+    supportsVision,
+    visionRoute: supportsVision ? "native" : "unsupported",
+    supportsReasoning: true,
+    supportsStructuredOutput: true,
+    supportsForcedToolChoice: false,
+    supportsParallelToolCalls: false,
+  };
+}
