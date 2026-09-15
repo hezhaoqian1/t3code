@@ -6044,38 +6044,56 @@ function ChatViewContent(props: ChatViewProps) {
                       <span className="shrink-0 text-muted-foreground">
                         排队消息 {queuedMessages.length}
                       </span>
-                      <span className="min-w-0 flex-1 truncate">{queuedMessages[0]?.text}</span>
-                      <button
-                        type="button"
-                        className="shrink-0 text-primary hover:underline"
-                        onClick={() => {
-                          if (!activeThreadId || queuedMessages.length < 2) return;
-                          setQueuedMessagesByThread((existing) => ({
-                            ...existing,
-                            [activeThreadId]: [
-                              queuedMessages[1]!,
-                              queuedMessages[0]!,
-                              ...queuedMessages.slice(2),
-                            ],
-                          }));
-                        }}
-                      >
-                        立即发送
-                      </button>
-                      <button
-                        type="button"
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                        aria-label="删除排队消息"
-                        onClick={() => {
-                          if (!activeThreadId) return;
-                          setQueuedMessagesByThread((existing) => ({
-                            ...existing,
-                            [activeThreadId]: (existing[activeThreadId] ?? []).slice(1),
-                          }));
-                        }}
-                      >
-                        删除
-                      </button>
+                      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                        {queuedMessages.map((queuedMessage, index) => (
+                          <div
+                            key={queuedMessage.id}
+                            className="flex max-w-56 shrink-0 items-center gap-1 rounded-md bg-muted/70 px-2 py-1"
+                          >
+                            <span className="max-w-36 truncate" title={queuedMessage.text}>
+                              {index + 1}. {queuedMessage.text}
+                            </span>
+                            <button
+                              type="button"
+                              className="text-primary hover:underline"
+                              onClick={() => {
+                                if (!activeThreadId || index === 0) return;
+                                setQueuedMessagesByThread((existing) => {
+                                  const current = existing[activeThreadId] ?? [];
+                                  const selected = current[index];
+                                  if (!selected) return existing;
+                                  return {
+                                    ...existing,
+                                    [activeThreadId]: [
+                                      selected,
+                                      ...current.slice(0, index),
+                                      ...current.slice(index + 1),
+                                    ],
+                                  };
+                                });
+                              }}
+                            >
+                              立即发送
+                            </button>
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground"
+                              aria-label={`删除排队消息 ${index + 1}`}
+                              onClick={() => {
+                                if (!activeThreadId) return;
+                                setQueuedMessagesByThread((existing) => ({
+                                  ...existing,
+                                  [activeThreadId]: (existing[activeThreadId] ?? []).filter(
+                                    (entry) => entry.id !== queuedMessage.id,
+                                  ),
+                                }));
+                              }}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
