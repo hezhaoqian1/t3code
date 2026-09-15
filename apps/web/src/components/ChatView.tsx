@@ -1297,6 +1297,9 @@ function ChatViewContent(props: ChatViewProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
+  const [queuedMessagesByThread, setQueuedMessagesByThread] = useState<
+    Record<string, Array<{ id: string; text: string; createdAt: string }>>
+  >({});
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
@@ -1347,6 +1350,7 @@ function ChatViewContent(props: ChatViewProps) {
   const attachmentPreviewHandoffByMessageIdRef = useRef<Record<string, string[]>>({});
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
+  const drainingQueuedMessageRef = useRef(false);
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
   useLayoutEffect(() => {
@@ -4589,6 +4593,43 @@ function ChatViewContent(props: ChatViewProps) {
         }),
       );
     };
+    // A running turn owns the runtime session. Keep an additional text send
+    // local to this thread and drain it after the active turn settles instead
+    // of issuing a second start command (which the server correctly rejects).
+    if (phase === "running" && !directAnnotation && regenerateText === undefined) {
+      const queuedText = promptRef.current.trim();
+      const hasAttachments =
+        composerImagesRef.current.length > 0 ||
+        (composerRef.current?.getSendContext()?.documents.length ?? 0) !== 0;
+      if (!queuedText || hasAttachments || !activeThread) {
+        if (hasAttachments) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: "当前正在生成",
+              description: "带附件的消息请等待当前任务完成后再发送。",
+            }),
+          );
+        }
+        return;
+      }
+      const queued = { id: newMessageId(), text: queuedText, createdAt: new Date().toISOString() };
+      setQueuedMessagesByThread((existing) => ({
+        ...existing,
+        [activeThread.id]: [...(existing[activeThread.id] ?? []), queued],
+      }));
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: "消息已加入队列",
+          description: "当前任务完成后会自动发送。",
+        }),
+      );
+      return;
+    }
     if (
       !activeThread ||
       isSendBusy ||
@@ -5073,6 +5114,56 @@ function ChatViewContent(props: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+
+  const queuedMessages = activeThreadId ? (queuedMessagesByThread[activeThreadId] ?? []) : [];
+
+  useEffect(() => {
+    if (
+      phase === "running" ||
+      isSendBusy ||
+      isConnecting ||
+      threadDetailLoading ||
+      activeEnvironmentUnavailable !== null ||
+      !latestTurnSettled ||
+      !activeThreadId ||
+      queuedMessages.length === 0 ||
+      drainingQueuedMessageRef.current ||
+      sendInFlightRef.current
+    ) {
+      return;
+    }
+    const next = queuedMessages[0];
+    if (!next) return;
+    drainingQueuedMessageRef.current = true;
+    setQueuedMessagesByThread((existing) => ({
+      ...existing,
+      [activeThreadId]: (existing[activeThreadId] ?? []).filter((entry) => entry.id !== next.id),
+    }));
+    void (async () => {
+      // Preserve text typed after the queued item was created. Attachments are
+      // deliberately excluded from queueing while a turn is active.
+      const draftText = promptRef.current;
+      await onSend(undefined, undefined, next.text);
+      if (promptRef.current.length === 0 && draftText.length > 0) {
+        promptRef.current = draftText;
+        setComposerDraftPrompt(composerDraftTarget, draftText);
+        composerRef.current?.resetCursorState({ prompt: draftText });
+      }
+      drainingQueuedMessageRef.current = false;
+    })();
+  }, [
+    activeEnvironmentUnavailable,
+    activeThreadId,
+    composerDraftTarget,
+    isConnecting,
+    isSendBusy,
+    latestTurnSettled,
+    onSend,
+    phase,
+    queuedMessages,
+    setComposerDraftPrompt,
+    threadDetailLoading,
+  ]);
 
   const onRegenerateAssistantMessage = useCallback(
     (assistantMessageId: MessageId) => {
@@ -5945,6 +6036,48 @@ function ChatViewContent(props: ChatViewProps) {
                   ) : (
                     <ComposerBannerStack className="relative z-0" items={composerBannerItems} />
                   )}
+                  {queuedMessages.length > 0 ? (
+                    <div
+                      className="mx-auto mb-1 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2 text-xs shadow-sm"
+                      data-chat-send-queue="true"
+                    >
+                      <span className="shrink-0 text-muted-foreground">
+                        排队消息 {queuedMessages.length}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{queuedMessages[0]?.text}</span>
+                      <button
+                        type="button"
+                        className="shrink-0 text-primary hover:underline"
+                        onClick={() => {
+                          if (!activeThreadId || queuedMessages.length < 2) return;
+                          setQueuedMessagesByThread((existing) => ({
+                            ...existing,
+                            [activeThreadId]: [
+                              queuedMessages[1]!,
+                              queuedMessages[0]!,
+                              ...queuedMessages.slice(2),
+                            ],
+                          }));
+                        }}
+                      >
+                        立即发送
+                      </button>
+                      <button
+                        type="button"
+                        className="shrink-0 text-muted-foreground hover:text-foreground"
+                        aria-label="删除排队消息"
+                        onClick={() => {
+                          if (!activeThreadId) return;
+                          setQueuedMessagesByThread((existing) => ({
+                            ...existing,
+                            [activeThreadId]: (existing[activeThreadId] ?? []).slice(1),
+                          }));
+                        }}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ) : null}
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />
                   ) : null}

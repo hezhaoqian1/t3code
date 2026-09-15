@@ -48,16 +48,54 @@ describe("prepare attachments", () => {
     expect(result.input).toContain('trust="none"');
   });
 
-  it("does not silently route a text model through Kimi", async () => {
+  it("uses the shared vision preprocessor for PDF pages with text models", async () => {
+    const requests: FdVisionAnalyzeInput[] = [];
+    let visualRequested = false;
+    const result = await prepareAttachments({
+      platform: "win32",
+      turn,
+      model: "glm-5.2",
+      attachmentsDir: "/tmp/attachments",
+      signal: new AbortController().signal,
+      process: async (input) => {
+        visualRequested = input.visual;
+        return { images: [{ label: "page 1", bytes: new Uint8Array([1]) }] };
+      },
+      vision: {
+        analyze: async (request) => {
+          requests.push(request);
+          return "text";
+        },
+      },
+    });
+    expect(requests[0]?.model).toBe("deepseek-v4-flash-vision-exp");
+    expect(visualRequested).toBe(true);
+    expect(result.input).toContain("page 1");
+  });
+
+  it("still rejects standalone images for models without a vision route", async () => {
+    const originalAttachment = turn.attachments[0]!;
+    const imageTurn = {
+      ...turn,
+      attachments: [
+        {
+          type: "image" as const,
+          id: originalAttachment.id,
+          name: "image.png",
+          mimeType: "image/png",
+          sizeBytes: originalAttachment.sizeBytes,
+        },
+      ],
+    };
     let calls = 0;
     await expect(
       prepareAttachments({
         platform: "win32",
-        turn,
+        turn: imageTurn,
         model: "glm-5.2",
         attachmentsDir: "/tmp/attachments",
         signal: new AbortController().signal,
-        process: async () => ({ images: [{ label: "page 1", bytes: new Uint8Array([1]) }] }),
+        process: async () => ({ images: [{ label: "image.png", bytes: new Uint8Array([1]) }] }),
         vision: {
           analyze: async () => {
             calls++;

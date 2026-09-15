@@ -185,6 +185,12 @@ export function FdSkillPicker(props: {
 
   const selectFdSkill = (versionId: number | null) => {
     if (!props.threadId) return;
+    // Selecting the active skill again is a convenient toggle-off action.
+    // Keep the explicit clear row for discoverability, but don't require the
+    // user to move the pointer away from the skill they just selected.
+    if (versionId !== null && versionId === selectedVersionId) {
+      versionId = null;
+    }
     if (versionId === null) clearEnterpriseComposerDraft(props.threadId);
     useFdSkillSelectionStore.getState().select(props.threadId, versionId);
     if (versionId !== null) excludeEnterpriseComposerDraftFromPersistence(props.threadId);
