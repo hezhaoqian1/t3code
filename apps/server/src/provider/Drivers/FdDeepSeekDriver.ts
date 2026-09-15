@@ -285,8 +285,12 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       }
       const userSkillCatalog = new NativeSkillCatalog();
       yield* Effect.promise(() => userSkillCatalog.refresh());
+      let authorizedDynamicModels = new Set<string>();
       const adapter = yield* makeFdDeepSeekAdapter({
         instanceId,
+        isSupportedModel: (model) =>
+          FD_RESPONSES_MODEL_CATALOG.some((entry) => entry.slug === model) ||
+          authorizedDynamicModels.has(model),
         kernel,
         ordinaryAdapter,
         ordinarySessionInput: (input) =>
@@ -357,6 +361,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
         const dynamicSlugs = authenticated
           ? yield* Effect.promise(() => fetchFdUserModelSlugs(credentialState.value))
           : [];
+        authorizedDynamicModels = new Set(dynamicSlugs);
         const modelCatalog = [
           ...FD_RESPONSES_MODEL_CATALOG,
           ...dynamicSlugs
