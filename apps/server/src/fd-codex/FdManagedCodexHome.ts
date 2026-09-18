@@ -5,7 +5,7 @@ import {
   type ResponsesCodexProviderConfig,
 } from "./ResponsesCodexConfig.ts";
 
-export const FD_CODEX_MODEL = "deepseek-v4-flash";
+export const FD_CODEX_MODEL = "deepseek-flash";
 export const FD_CODEX_PROVIDER = "fd_new_api";
 export const FD_CODEX_API_KEY_ENV = "FD_NEW_API_KEY";
 
@@ -60,12 +60,12 @@ function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
     defaultModel: FD_CODEX_MODEL,
     models: [
       {
-        slug: "deepseek-v4-flash",
-        name: "DeepSeek V4 Flash",
-        shortName: "V4 Flash",
+        slug: "deepseek-flash",
+        name: "DeepSeek V4.1 Flash",
+        shortName: "Flash",
         supportsTools: true,
-        supportsVision: false,
-        visionRoute: "fd-preprocessor",
+        supportsVision: true,
+        visionRoute: "native",
         supportsReasoning: true,
         supportsStructuredOutput: true,
         supportsForcedToolChoice: true,
@@ -77,7 +77,7 @@ function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
         shortName: "V4 Pro",
         supportsTools: true,
         supportsVision: false,
-        visionRoute: "fd-preprocessor",
+        visionRoute: "unsupported",
         supportsReasoning: true,
         supportsStructuredOutput: true,
         supportsForcedToolChoice: true,
@@ -88,8 +88,8 @@ function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
         name,
         shortName,
         supportsTools: true,
-        supportsVision: shortName === "Kimi K3",
-        visionRoute: shortName === "Kimi K3" ? ("native" as const) : ("unsupported" as const),
+        supportsVision: shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash",
+        visionRoute: (shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash") ? ("native" as const) : ("unsupported" as const),
         supportsReasoning: true,
         supportsStructuredOutput: true,
         supportsForcedToolChoice: false,

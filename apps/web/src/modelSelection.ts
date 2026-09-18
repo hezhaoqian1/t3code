@@ -18,7 +18,7 @@ export function resolveAppModelSelection(
   if (selectedModel && models.some((model) => model.slug === selectedModel)) {
     return selectedModel;
   }
-  return models.find((model) => model.isDefault)?.slug ?? models[0]?.slug ?? "deepseek-v4-flash";
+  return models.find((model) => model.isDefault)?.slug ?? models[0]?.slug ?? "deepseek-flash";
 }
 
 export function resolveAppModelSelectionForInstance(

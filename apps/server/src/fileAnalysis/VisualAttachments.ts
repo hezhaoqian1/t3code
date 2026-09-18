@@ -175,6 +175,7 @@ async function processPdf(work: AttachmentWork, bytes: Buffer): Promise<Processe
   });
   const images: VisualPart[] = [];
   const sections: DocumentSection[] = [];
+  let ocrUsed = false;
   let totalBytes = 0;
   try {
     const pdf = await loading.promise;
@@ -214,6 +215,7 @@ async function processPdf(work: AttachmentWork, bytes: Buffer): Promise<Processe
       // rendering for scanned pages and pages containing embedded raster
       // images, which are the cases where visual evidence adds information.
       const needsVisualEvidence = work.visual && (!text || hasRaster);
+      if (!text && needsVisualEvidence) ocrUsed = true;
       if (needsVisualEvidence) {
         const natural = page.getViewport({ scale: 1 });
         const viewport = page.getViewport({
@@ -263,7 +265,7 @@ async function processPdf(work: AttachmentWork, bytes: Buffer): Promise<Processe
           : [{ code: "parser_warning", message: "当前仅提取文字层，未分析图表和页面布局。" }],
         extractedCharacters: sections.reduce((sum, section) => sum + section.text.length, 0),
         truncated: false,
-        ocrUsed: false,
+        ocrUsed,
       },
     };
   } catch (error) {

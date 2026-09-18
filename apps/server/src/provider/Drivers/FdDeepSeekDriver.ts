@@ -29,6 +29,7 @@ import {
 } from "../../fd-agent/FdResponsesProtocol.ts";
 import {
   FD_RESPONSES_MODEL_CATALOG,
+  isFdResponsesModelAdvertised,
   resolveFdResponsesModelConfig,
 } from "../../fd-codex/ResponsesModelCatalog.ts";
 import type { ResponsesCodexModelConfig } from "../../fd-codex/ResponsesCodexConfig.ts";
@@ -277,7 +278,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       const adapter = yield* makeFdDeepSeekAdapter({
         instanceId,
         isSupportedModel: (model) =>
-          FD_RESPONSES_MODEL_CATALOG.some((entry) => entry.slug === model) ||
+          isFdResponsesModelAdvertised(model) ||
           authorizedDynamicModels.has(model),
         kernel,
         ordinaryAdapter,
@@ -353,7 +354,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
         const modelCatalog = [
           ...FD_RESPONSES_MODEL_CATALOG,
           ...dynamicSlugs
-            .filter((slug) => !FD_RESPONSES_MODEL_CATALOG.some((model) => model.slug === slug))
+            .filter((slug) => !isFdResponsesModelAdvertised(slug))
             .map(modelConfigForSlug),
         ];
         return {

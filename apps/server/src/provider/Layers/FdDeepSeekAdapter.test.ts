@@ -216,15 +216,11 @@ describe("FdDeepSeekAdapter", () => {
         expect(invalidStart).toMatchObject({
           issue: "The selected model is not advertised by this provider.",
         });
-        const visionStart = yield* adapter
-          .startSession({
-            ...startInput,
-            modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_VISION_MODEL },
-          })
-          .pipe(Effect.flip);
-        expect(visionStart).toMatchObject({
-          issue: "The selected model is not advertised by this provider.",
+        const canonicalStart = yield* adapter.startSession({
+          ...startInput,
+          modelSelection: { ...startInput.modelSelection, model: FD_RUNTIME_VISION_MODEL },
         });
+        expect(canonicalStart.model).toBe(FD_RUNTIME_VISION_MODEL);
 
         yield* adapter.startSession({
           ...startInput,
@@ -1863,7 +1859,7 @@ describe("FdDeepSeekAdapter", () => {
             providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
             status: "ready" as const,
             runtimeMode: input.runtimeMode,
-            model: "qwen3.8-max",
+            model: "glm-5.2",
             threadId: input.threadId,
             createdAt: "2026-08-11T00:00:00.000Z",
             updatedAt: "2026-08-11T00:00:00.000Z",
@@ -1893,7 +1889,7 @@ describe("FdDeepSeekAdapter", () => {
       const result = yield* Effect.exit(
         adapter.sendTurn({
           threadId,
-          modelSelection: { instanceId: FD_DEEPSEEK_INSTANCE_ID, model: "qwen3.8-max" },
+          modelSelection: { instanceId: FD_DEEPSEEK_INSTANCE_ID, model: "glm-5.2" },
           input: "请分析图片",
           attachments: [
             { type: "image", id: "img-1", name: "chart.png", mimeType: "image/png", sizeBytes: 5 },

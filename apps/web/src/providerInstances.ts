@@ -10,7 +10,7 @@ import {
 export const FD_PROVIDER_INSTANCE_ID = ProviderInstanceId.make("fd-deepseek");
 export const FD_MODEL_SELECTION: ModelSelection = {
   instanceId: FD_PROVIDER_INSTANCE_ID,
-  model: "deepseek-v4-flash",
+  model: "deepseek-flash",
 };
 
 export const NO_PROVIDER_MODEL_SELECTION: ModelSelection = {

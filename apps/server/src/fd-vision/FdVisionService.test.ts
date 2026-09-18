@@ -12,7 +12,7 @@ const image = {
 function streamer(events: ReadonlyArray<FdResponsesEvent>): FdResponsesStreamer {
   return {
     stream: async function* (request) {
-      expect(request.model).toBe("deepseek-v4-flash-vision-exp");
+      expect(request.model).toBe("deepseek-flash");
       expect(request.round).toBe(1);
       expect(request.input[0]).toMatchObject({ role: "user" });
       yield* events;
