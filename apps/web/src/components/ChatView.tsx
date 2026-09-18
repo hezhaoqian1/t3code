@@ -171,7 +171,7 @@ import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { FD_SKILL_THREAD_TITLE, selectedFdSkillVersionId } from "../fdSkillSelectionStore";
 import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
-import { useSendQueueStore } from "../sendQueueStore";
+import { hasPendingAttachmentPreparation, useSendQueueStore } from "../sendQueueStore";
 import {
   isOfficeWorkspaceProject,
   shouldBlockOfficeTechnicalWorkbenchCommand,
@@ -1947,6 +1947,10 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const isPreparingAttachments = useMemo(
+    () => hasPendingAttachmentPreparation(threadActivities),
+    [threadActivities],
+  );
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
   // Native subagent fold: memoized by activity-list identity, shared by the
@@ -2050,7 +2054,12 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isWorking =
+    phase === "running" ||
+    isPreparingAttachments ||
+    isSendBusy ||
+    isConnecting ||
+    isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -4600,7 +4609,11 @@ function ChatViewContent(props: ChatViewProps) {
     // A running turn owns the runtime session. Keep an additional text send
     // local to this thread and drain it after the active turn settles instead
     // of issuing a second start command (which the server correctly rejects).
-    if (phase === "running" && !directAnnotation && regenerateText === undefined) {
+    if (
+      (phase === "running" || isPreparingAttachments || isSendBusy) &&
+      !directAnnotation &&
+      regenerateText === undefined
+    ) {
       const queuedText = promptRef.current.trim();
       const hasAttachments =
         composerImagesRef.current.length > 0 ||
@@ -5149,6 +5162,7 @@ function ChatViewContent(props: ChatViewProps) {
   useEffect(() => {
     if (
       phase === "running" ||
+      isPreparingAttachments ||
       isSendBusy ||
       isConnecting ||
       threadDetailLoading ||
@@ -5183,6 +5197,7 @@ function ChatViewContent(props: ChatViewProps) {
     activeEnvironmentUnavailable,
     activeQueueKey,
     composerDraftTarget,
+    isPreparingAttachments,
     isConnecting,
     isSendBusy,
     latestTurnSettled,
@@ -6080,15 +6095,26 @@ function ChatViewContent(props: ChatViewProps) {
                             key={queuedMessage.id}
                             className="flex max-w-56 shrink-0 items-center gap-1 rounded-md bg-muted/70 px-2 py-1"
                           >
-                            <span
-                              className="max-w-36 truncate"
+                            <input
+                              aria-label={`编辑排队消息 ${index + 1}`}
+                              className="w-36 min-w-0 rounded border border-transparent bg-transparent px-1 focus:border-primary focus:outline-none"
                               title={queuedMessage.error ?? queuedMessage.text}
-                            >
-                              {index + 1}. {queuedMessage.text}
-                            </span>
+                              value={queuedMessage.text}
+                              disabled={queuedMessage.status === "sending"}
+                              onChange={(event) => {
+                                if (activeQueueKey) {
+                                  updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                    text: event.target.value,
+                                  });
+                                }
+                              }}
+                            />
                             <button
                               type="button"
                               className="text-primary hover:underline"
+                              disabled={
+                                !queuedMessage.text.trim() || queuedMessage.status === "sending"
+                              }
                               onClick={() => {
                                 if (!activeQueueKey) return;
                                 const currentSendContext = composerRef.current?.getSendContext();
@@ -6112,7 +6138,9 @@ function ChatViewContent(props: ChatViewProps) {
                                     error: undefined,
                                   });
                                 }
-                                if (phase === "running") {
+                                if (isPreparingAttachments) {
+                                  promoteQueuedMessage(activeQueueKey, queuedMessage.id);
+                                } else if (phase === "running") {
                                   // Codex supports a follow-up turn while the
                                   // current turn is active. The runtime queues
                                   // it natively and returns its receipt; keep

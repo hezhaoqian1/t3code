@@ -1,4 +1,24 @@
 import { create } from "zustand";
+import type { OrchestrationThreadActivity } from "@t3tools/contracts";
+
+/** Attachment preparation owns the session before the provider emits turn.started. */
+export function hasPendingAttachmentPreparation(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): boolean {
+  const pending = new Set<string>();
+  for (const activity of activities) {
+    const payload = activity.payload;
+    const taskId =
+      typeof payload === "object" && payload !== null && "taskId" in payload
+        ? Reflect.get(payload, "taskId")
+        : undefined;
+    if (typeof taskId !== "string" || !taskId.startsWith("attachments-")) continue;
+    if (activity.kind === "task.completed") pending.delete(taskId);
+    else if (activity.kind === "task.started" || activity.kind === "task.progress")
+      pending.add(taskId);
+  }
+  return pending.size > 0;
+}
 
 export interface QueuedMessage {
   id: string;

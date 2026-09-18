@@ -1,4 +1,5 @@
 import {
+  FD_RUNTIME_LEGACY_DEFAULT_MODEL,
   FD_RUNTIME_MODELS,
   FD_RUNTIME_PRO_MODEL,
   FD_RUNTIME_VISION_MODEL,
@@ -23,6 +24,30 @@ import {
 } from "./FdResponsesProtocol.ts";
 
 describe("FdResponsesClient", () => {
+  it.each(["deepseek-flash", FD_RUNTIME_LEGACY_DEFAULT_MODEL] as const)(
+    "accepts the %s policy identity without losing explicitly authorized visual models",
+    async (model) => {
+      const fetch = vi.fn(async () => sseResponse(textEvents("vision-policy", "page evidence")));
+      const client = new FdResponsesClient(
+        reader({
+          ...credentials(),
+          policy: { ...credentials().policy, model, models: FD_RUNTIME_MODELS },
+        }),
+        { fetch },
+      );
+      await expect(
+        collect(
+          client.stream({
+            model: FD_RUNTIME_VISION_MODEL,
+            round: 1,
+            input: userInput(),
+          }),
+        ),
+      ).resolves.toContainEqual({ type: "text-delta", text: "page evidence" });
+      expect(fetch).toHaveBeenCalledOnce();
+    },
+  );
+
   it("streams text, public reasoning summary, usage, and exact model metadata", async () => {
     let credentialReads = 0;
     let requestBody: Record<string, unknown> | undefined;
@@ -147,7 +172,16 @@ describe("FdResponsesClient", () => {
     expect(fetch).toHaveBeenCalledOnce();
 
     const legacyFetch = vi.fn(async () => sseResponse(textEvents("unused", "unused")));
-    const legacyClient = new FdResponsesClient(reader(), { fetch: legacyFetch });
+    const legacyClient = new FdResponsesClient(
+      reader({
+        ...credentials(),
+        policy: {
+          ...credentials().policy,
+          model: FD_RUNTIME_LEGACY_DEFAULT_MODEL,
+        },
+      }),
+      { fetch: legacyFetch },
+    );
     const result = await collectFailure(
       legacyClient.stream({
         model: FD_RUNTIME_VISION_MODEL,

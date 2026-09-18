@@ -1535,7 +1535,7 @@ function OpenCommandPaletteDialog(props: {
           existing.id,
           clientSettings.sidebarThreadSortOrder,
         );
-        if (latestThread) {
+        if (latestThread && !activeDraftThread) {
           await navigate({
             to: "/$threadId",
             params: buildThreadRouteParams(
@@ -1544,7 +1544,10 @@ function OpenCommandPaletteDialog(props: {
           });
         } else {
           const navigationResult = await settlePromise(() =>
-            handleNewThread(scopeProjectRef(existing.environmentId, existing.id)),
+            handleNewThread(scopeProjectRef(existing.environmentId, existing.id), {
+              preserveComposer: activeDraftThread !== null,
+              replace: activeDraftThread !== null,
+            }),
           );
           if (navigationResult._tag === "Failure") {
             const error = squashAtomCommandFailure(navigationResult);
@@ -1588,7 +1591,10 @@ function OpenCommandPaletteDialog(props: {
       }
 
       const navigationResult = await settlePromise(() =>
-        handleNewThread(scopeProjectRef(input.environmentId, projectId)),
+        handleNewThread(scopeProjectRef(input.environmentId, projectId), {
+          preserveComposer: activeDraftThread !== null,
+          replace: activeDraftThread !== null,
+        }),
       );
       if (navigationResult._tag === "Failure") {
         const error = squashAtomCommandFailure(navigationResult);
@@ -1606,6 +1612,7 @@ function OpenCommandPaletteDialog(props: {
     [
       handleNewThread,
       createProject,
+      activeDraftThread,
       navigate,
       primaryEnvironment,
       primaryEnvironmentId,

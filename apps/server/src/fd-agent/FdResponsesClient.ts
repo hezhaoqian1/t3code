@@ -2,7 +2,10 @@
 import { clearTimeout, setTimeout } from "node:timers";
 
 import { createOpenAI } from "@ai-sdk/openai";
-import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
+import {
+  FD_RUNTIME_LEGACY_DEFAULT_MODEL,
+  type FdServerRuntimeCredentialProjection,
+} from "@t3tools/contracts/fd/runtime-credentials";
 import { Ajv, type AnySchema, type ValidateFunction } from "ajv";
 import * as addFormatsModule from "ajv-formats";
 import { jsonSchema, streamText, tool, type ToolSet } from "ai";
@@ -450,7 +453,8 @@ function validateCredentials(
   if (
     credentials.policy.version !== 1 ||
     credentials.policy.capability !== FD_RESPONSES_CAPABILITY ||
-    credentials.policy.model !== FD_RESPONSES_MODEL
+    (credentials.policy.model !== FD_RESPONSES_MODEL &&
+      credentials.policy.model !== FD_RUNTIME_LEGACY_DEFAULT_MODEL)
   ) {
     throw new FdResponsesError("policy_invalid");
   }
