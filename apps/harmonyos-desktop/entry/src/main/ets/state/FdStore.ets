@@ -113,6 +113,34 @@ export class FdStore {
     this.selectedSkillVersionId = this.activeThread.skillVersionId ?? 0;
   }
 
+  async createThread(): Promise<void> {
+    if (!this.client.isAuthenticated) {
+      this.activeThread = sampleThread();
+      this.threads = [this.activeThread, ...this.threads.filter((thread: FdThreadShell) => thread.id !== this.activeThread.id)];
+      this.selectedModel = this.activeThread.model;
+      this.selectedSkillVersionId = 0;
+      this.queuedTurns = [];
+      return;
+    }
+    const detail = await this.client.createThread(this.selectedModel);
+    this.activeThread = detail;
+    const shell: FdThreadShell = {
+      id: detail.id,
+      title: detail.title,
+      model: detail.model,
+      skillVersionId: detail.skillVersionId,
+      state: detail.state,
+      latestMessage: detail.latestMessage,
+      updatedAt: detail.updatedAt,
+      hasPendingApprovals: detail.hasPendingApprovals
+    };
+    this.threads = [shell, ...this.threads.filter((thread: FdThreadShell) => thread.id !== shell.id)];
+    this.selectedModel = detail.model;
+    this.selectedSkillVersionId = detail.skillVersionId ?? 0;
+    this.queuedTurns = [];
+    this.activeTurnId = '';
+  }
+
   selectSkill(versionId: number): void {
     this.selectedSkillVersionId = this.selectedSkillVersionId === versionId ? 0 : versionId;
   }

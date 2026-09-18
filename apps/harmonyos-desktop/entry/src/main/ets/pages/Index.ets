@@ -375,6 +375,22 @@ struct Index {
       }
       .width('100%')
       .padding({ left: 18, right: 18, bottom: 16 });
+      Button('新建任务')
+        .width('calc(100% - 36vp)')
+        .height(38)
+        .margin({ left: 18, right: 18, bottom: 14 })
+        .backgroundColor('#176B87')
+        .fontColor(Color.White)
+        .onClick(async () => {
+          try {
+            await this.store.createThread();
+            this.syncFromStore();
+            this.connectStream();
+          } catch (error) {
+            this.errorText = error instanceof FdRuntimeError ? error.message : '新建任务失败';
+            this.syncFromStore();
+          }
+        });
       Divider().color('#DFE7EA');
       Text('任务').fontSize(13).fontColor('#80939A').margin({ left: 18, top: 18, bottom: 8 });
       Scroll() {

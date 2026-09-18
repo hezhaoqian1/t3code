@@ -17,6 +17,7 @@ import {
   FdThreadDetail,
   FdThreadShell,
   createClientId,
+  createUuid,
   isoNow
 } from '../data/FdModels';
 
@@ -98,7 +99,13 @@ export class FdRuntimeClient {
   }
 
   async getSkills(): Promise<Array<FdSkill>> {
-    const root = await this.request(`${FD_LEGACY_API_PREFIX}/fd-skills/self`, 'GET');
+    let root: JsonObject;
+    try {
+      root = await this.request(`${FD_RUNTIME_API_PREFIX}/skills`, 'GET');
+    } catch (error) {
+      if (!(error instanceof FdRuntimeError) || (error.code !== 'http_404' && error.code !== 'http_405')) throw error;
+      root = await this.request(`${FD_LEGACY_API_PREFIX}/fd-skills/self`, 'GET');
+    }
     const data = object(root['data'] ?? root);
     const skills = arrayValue(data['skills']);
     const capabilities = object(data['model_capabilities'] ?? {});
@@ -136,6 +143,14 @@ export class FdRuntimeClient {
       `${FD_RUNTIME_API_PREFIX}/threads/${encodeURIComponent(threadId)}`,
       'GET'
     );
+    return parseThreadDetail(object(root['data'] ?? root));
+  }
+
+  async createThread(model: string): Promise<FdThreadDetail> {
+    const root = await this.request(`${FD_RUNTIME_API_PREFIX}/threads`, 'POST', {
+      clientThreadId: createUuid(),
+      model: model.length > 0 ? model : FD_DEFAULT_MODEL
+    });
     return parseThreadDetail(object(root['data'] ?? root));
   }
 

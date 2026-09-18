@@ -2,8 +2,9 @@
 
 Date: `2026-09-19`
 
-Status: native ArkUI foundation implemented in a dedicated worktree; mobile
-runtime endpoints and Harmony SDK build remain pending.
+Status: native ArkUI foundation and the first FD Runtime mobile read/recovery
+endpoints are implemented in dedicated worktrees. Turn streaming, attachment
+processing, and a real Harmony SDK build remain pending.
 
 ## Decision
 
@@ -32,11 +33,13 @@ T3 already defines the product semantics we should preserve:
 - Thread and shell subscriptions use monotonically increasing sequences and an
   explicit synchronized marker.
 
-The current FD gateway already exposes `/api/fd-skills/self`,
-`/api/agent/turns`, and the desktop history endpoint. Those APIs are useful
-compatibility inputs, but they do not expose the complete remote task, attachment,
-or preview contract required by a native client. The production design therefore
-needs a versioned mobile/runtime API.
+The FD gateway now also exposes the first versioned mobile/runtime read contract:
+`/api/mobile/v1/bootstrap`, `/skills`, `/threads`, and thread history/detail
+routes. These routes are a thin adapter over the existing `fd_desktop` binding,
+encrypted workspace history, and Skill authorization. They do not duplicate the
+long-lived history store or expose provider/tool internals. Turn streaming,
+attachment processing, and scoped preview are intentionally still separate
+follow-up work.
 
 ## Ownership
 
@@ -252,7 +255,9 @@ and recovery rules. They do not share a DOM UI or assume the same runtime is loc
 
 - Add mobile session/token endpoints and capability discovery.
 - Add durable thread shell/detail/history APIs backed by the same visible message
-  owner used by T3, without exposing provider reasoning or tool payloads.
+  owner used by T3, without exposing provider reasoning or tool payloads. The
+  first read/recovery slice is now available under `/api/mobile/v1`; it is
+  user-scoped and limited to `fd_desktop` bindings.
 - Add unified WebSocket/SSE stream with sequence replay and explicit interrupt.
 
 ### Phase 2: native ArkUI shell
