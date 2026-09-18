@@ -89,6 +89,16 @@ export const FD_RESPONSES_MODEL_CATALOG = FD_RESPONSES_PROVIDERS.flatMap(
   (provider) => provider.models,
 );
 
+/** Models accepted by the provider boundary, including persisted legacy names. */
+export function isFdResponsesModelAdvertised(slug: string): boolean {
+  const normalized = slug.trim().toLowerCase();
+  return (
+    FD_RESPONSES_MODEL_CATALOG.some((model) => model.slug === normalized) ||
+    normalized === "deepseek-v4-flash" ||
+    normalized === "deepseek-v4-flash-vision-exp"
+  );
+}
+
 /** Resolve a static or server-authorized model without duplicating capability
  * inference in each attachment and provider path. Unknown models are only
  * surfaced after the authenticated New API catalog authorizes them. */

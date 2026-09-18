@@ -39,6 +39,7 @@ import {
 } from "../../fd-agent/FdResponsesProtocol.ts";
 import {
   FD_RESPONSES_MODEL_CATALOG,
+  isFdResponsesModelAdvertised,
   resolveFdResponsesModelConfig,
 } from "../../fd-codex/ResponsesModelCatalog.ts";
 import {
@@ -70,7 +71,7 @@ import { discoverPresentationArtifacts } from "../../presentation/PresentationAr
 export { FD_DEEPSEEK_DRIVER_KIND, FD_DEEPSEEK_INSTANCE_ID } from "../../fd-agent/FdModelPolicy.ts";
 
 function isSupportedResponsesModel(value: string): boolean {
-  return FD_RESPONSES_MODEL_CATALOG.some((model) => model.slug === value);
+  return isFdResponsesModelAdvertised(value);
 }
 
 interface FdTurnRecord {
@@ -291,7 +292,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
   const instanceId = options.instanceId ?? FD_DEEPSEEK_INSTANCE_ID;
   const isSupportedResponsesModel =
     options.isSupportedModel ??
-    ((model: string) => FD_RESPONSES_MODEL_CATALOG.some((entry) => entry.slug === model));
+    ((model: string) => isFdResponsesModelAdvertised(model));
   const now = options.now ?? (() => new Date());
   let nextId = 0;
   const randomId = options.randomId ?? (() => `fd-${++nextId}`);
