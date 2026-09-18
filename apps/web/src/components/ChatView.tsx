@@ -5097,17 +5097,28 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      const failureError = squashAtomCommandFailure(failure);
+      const failureMessage =
+        failureError instanceof Error ? failureError.message : String(failureError);
+      const queueKey = scopedThreadKey(
+        scopeThreadRef(activeThread?.environmentId ?? environmentId, threadIdForSend),
+      );
+      const waitingForActiveTurn = failureMessage.includes("当前任务仍在处理");
       if (queuedMessageId) {
-        updateQueuedMessage(
-          scopedThreadKey(
-            scopeThreadRef(activeThread?.environmentId ?? environmentId, threadIdForSend),
-          ),
-          queuedMessageId,
-          {
-            status: "failed",
-            error: "发送失败，请点击重试。",
-          },
-        );
+        updateQueuedMessage(queueKey, queuedMessageId, {
+          status: "failed",
+          error: waitingForActiveTurn
+            ? "当前任务仍在收尾，稍后自动重试。"
+            : "发送失败，请点击重试。",
+        });
+        if (waitingForActiveTurn) {
+          window.setTimeout(() => {
+            updateQueuedMessage(queueKey, queuedMessageId, {
+              status: undefined,
+              error: undefined,
+            });
+          }, 1200);
+        }
       }
       if (
         promptRef.current.length === 0 &&
@@ -5145,10 +5156,9 @@ function ChatViewContent(props: ChatViewProps) {
         });
       }
       if (!isAtomCommandInterrupted(failure)) {
-        const error = squashAtomCommandFailure(failure);
         setThreadError(
           threadIdForSend,
-          error instanceof Error ? error.message : "Failed to send message.",
+          failureError instanceof Error ? failureError.message : "Failed to send message.",
         );
       }
     }
@@ -5172,7 +5182,7 @@ function ChatViewContent(props: ChatViewProps) {
       isConnecting ||
       threadDetailLoading ||
       activeEnvironmentUnavailable !== null ||
-      !latestTurnSettled ||
+      activePendingProgress !== null ||
       !activeQueueKey ||
       queuedMessages.length === 0 ||
       queuedMessages[0]?.status === "failed" ||
@@ -5201,11 +5211,11 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeEnvironmentUnavailable,
     activeQueueKey,
+    activePendingProgress,
     composerDraftTarget,
     isPreparingAttachments,
     isConnecting,
     isSendBusy,
-    latestTurnSettled,
     onSend,
     phase,
     queuedMessages,
