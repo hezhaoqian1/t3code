@@ -2,7 +2,8 @@
 
 Date: `2026-09-19`
 
-Status: design in a dedicated worktree; no production client code has been changed.
+Status: native ArkUI foundation implemented in a dedicated worktree; mobile
+runtime endpoints and Harmony SDK build remain pending.
 
 ## Decision
 
@@ -141,8 +142,9 @@ the active turn is still running.
 ## Attachment and preview pipeline
 
 1. ArkUI invokes the system document/photo picker and receives a sandbox URI.
-2. The client reads metadata and computes a streaming SHA-256 without loading the
-   whole file into memory.
+2. The client reads metadata and streams one server-sized part at a time without
+   loading the whole file into memory. OpenHarmony's CryptoArchitectureKit
+   computes a SHA-256 for each part and for the complete file.
 3. `POST /attachments` creates an upload session and returns a server-selected
    chunk size and limits. `PUT /attachments/{id}/parts/{index}` uploads chunks;
    each part is checksum-verified and retryable. `POST /attachments/{id}/complete`
@@ -255,14 +257,15 @@ and recovery rules. They do not share a DOM UI or assume the same runtime is loc
 
 ### Phase 2: native ArkUI shell
 
-- Create `apps/harmonyos-fd` as a real ArkTS application.
-- Implement secure session, task list, thread detail, Skill sheet, and stream
-  reducer against the fake runtime first, then the staging runtime.
+- Create `apps/harmonyos-desktop` as a real ArkTS application.
+- Implement the login shell, task list, thread detail, Skill sheet, editable
+  queue, native picker, scoped preview surface, and stream reducer against the
+  compatibility runtime first, then the staging runtime.
 - Verify process death, offline relaunch, account logout, and sequence recovery.
 
 ### Phase 3: files and production hardening
 
-- Implement picker URI handling, resumable chunk uploads, processing progress,
+- Implement server-side checksum negotiation, resumable chunk retry, processing progress,
   server OCR/vision routing, signed previews, and queue editing.
 - Add device-size performance budgets, encrypted cache expiry, accessibility, and
   telemetry with no user text or secrets.
@@ -312,3 +315,26 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 - The repository machine has no DevEco/Harmony SDK or `hvigorw` wrapper. The
   ArkUI build remains pending on a Harmony-capable build host; T3 server, desktop,
   contracts, and native static checks pass in this worktree.
+
+## Worktree implementation status
+
+The dedicated branch `codex/harmony-native-fd-client` currently contains:
+
+- A native ArkUI entry point for task list, thread history, streaming progress,
+  Skill selection/deselection, queue editing, attachment chips, and preview.
+- A reducer in `FdStore` that applies monotonically increasing stream sequences,
+  keeps volatile assistant deltas separate from durable snapshots, and starts
+  queued turns only after an explicit terminal event.
+- A compatibility client for the existing gateway plus the versioned
+  `/api/mobile/v1` contract. The model selector uses the gateway's advertised
+  capability keys when available, so adding a model does not require an app
+  rebuild.
+- A picker URI transfer adapter that opens the URI, reads bounded chunks, uploads
+  them with progress, finalizes the server attachment, and replaces the local
+  temporary ID. A 404/405 mobile API response is surfaced as an actionable error;
+  the attachment is never silently sent through the legacy text-only endpoint.
+
+The production gateway still returns `404` for `/api/mobile/v1/threads`, so the
+new attachment and durable-thread paths are intentionally not described as
+deployed. The existing legacy Skill/history/SSE compatibility path remains
+available for text-only smoke tests.

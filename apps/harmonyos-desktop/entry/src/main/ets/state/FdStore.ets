@@ -1,5 +1,6 @@
 import {
   FdAttachment,
+  FdAttachmentPatch,
   FdMessage,
   FdQueuedTurn,
   FdSkill,
@@ -18,6 +19,7 @@ export class FdStore {
   readonly client: FdRuntimeClient;
   threads: Array<FdThreadShell> = [];
   skills: Array<FdSkill> = [];
+  models: Array<string> = ['deepseek-flash'];
   activeThread: FdThreadDetail = sampleThread();
   queuedTurns: Array<FdQueuedTurn> = [];
   selectedSkillVersionId: number = 0;
@@ -56,6 +58,7 @@ export class FdStore {
     this.accountName = '';
     this.threads = sampleThreadShells();
     this.skills = sampleSkills();
+    this.models = ['deepseek-flash'];
     this.activeThread = sampleThread();
     this.queuedTurns = [];
     this.selectedSkillVersionId = 0;
@@ -64,20 +67,27 @@ export class FdStore {
 
   async refreshWorkspace(): Promise<void> {
     this.lastError = '';
+    let skillsLoaded = false;
     try {
-      const [skills, threads] = await Promise.all([
-        this.client.getSkills(),
-        this.client.listThreads()
-      ]);
+      const skills = await this.client.getSkills();
       if (skills.length > 0) this.skills = skills;
+      this.models = this.client.supportedModels;
+      skillsLoaded = true;
+    } catch (error) {
+      this.lastError = error instanceof FdRuntimeError ? error.message : 'Skill 目录暂不可用';
+    }
+    try {
+      const threads = await this.client.listThreads();
       if (threads.length > 0) {
         this.threads = threads;
         await this.openThread(threads[0].id);
       }
     } catch (error) {
       // The native shell remains usable while the mobile API is being rolled out.
-      // The error is visible in the status banner; no fake data is sent upstream.
-      this.lastError = error instanceof FdRuntimeError ? error.message : 'FD Runtime 暂不可用';
+      // A thread 404 must not discard a successfully loaded Skill/model catalog.
+      if (!skillsLoaded || this.lastError.length === 0) {
+        this.lastError = error instanceof FdRuntimeError ? error.message : '任务列表暂不可用';
+      }
     }
   }
 
@@ -113,6 +123,16 @@ export class FdStore {
     );
     next.push(attachment);
     this.activeThread.attachments = next;
+  }
+
+  updateAttachment(attachmentId: string, update: FdAttachmentPatch): void {
+    const index = this.activeThread.attachments.findIndex(
+      (item: FdAttachment) => item.attachmentId === attachmentId
+    );
+    if (index < 0) return;
+    const current = this.activeThread.attachments[index];
+    if (current === undefined) return;
+    this.activeThread.attachments[index] = { ...current, ...update };
   }
 
   removeAttachment(attachmentId: string): void {

@@ -2,7 +2,7 @@ import { picker } from '@kit.CoreFileKit';
 import { promptAction } from '@kit.ArkUI';
 import { webview } from '@kit.ArkWeb';
 
-import { FD_DEFAULT_MODEL, FD_RUNTIME_ORIGIN, FD_SUPPORTED_MODELS } from '../config/HarmonyConfig';
+import { FD_DEFAULT_MODEL, FD_RUNTIME_ORIGIN } from '../config/HarmonyConfig';
 import {
   FdAttachment,
   FdMessage,
@@ -13,6 +13,7 @@ import {
   createClientId
 } from '../data/FdModels';
 import { FdRuntimeError, FdStreamHandle } from '../network/FdRuntimeClient';
+import { uploadPickedAttachment } from '../network/AttachmentTransfer';
 import { FdStore } from '../state/FdStore';
 
 @Entry
@@ -32,6 +33,7 @@ struct Index {
   @State private messages: Array<FdMessage> = [];
   @State private attachments: Array<FdAttachment> = [];
   @State private skills: Array<FdSkill> = [];
+  @State private models: Array<string> = [FD_DEFAULT_MODEL];
   @State private queuedTurns: Array<FdQueuedTurn> = [];
   @State private activeThreadId: string = '';
   @State private activeThreadTitle: string = '';
@@ -58,6 +60,7 @@ struct Index {
     this.messages = this.store.activeThread.messages.slice();
     this.attachments = this.store.activeThread.attachments.slice();
     this.skills = this.store.skills.slice();
+    this.models = this.store.models.slice();
     this.queuedTurns = this.store.queuedTurns.slice();
     this.activeThreadId = this.store.activeThread.id;
     this.activeThreadTitle = this.store.activeThread.title;
@@ -130,6 +133,11 @@ struct Index {
   private async sendDraft(): Promise<void> {
     const text = this.draft.trim();
     if (text.length === 0 && this.attachments.length === 0) return;
+    if (this.attachments.some((item: FdAttachment) => item.state !== 'ready')) {
+      this.errorText = '附件仍在上传或解析，请等待状态变为可用后再发送';
+      this.syncFromStore();
+      return;
+    }
     const wasWorking = this.store.activeThread.state === 'working';
     const queued = this.store.enqueueTurn(text.length === 0 ? '请分析附件。' : text);
     this.draft = '';
@@ -196,11 +204,12 @@ struct Index {
     this.syncFromStore();
   }
 
-  private selectFiles(): void {
+  private async selectFiles(): Promise<void> {
     const options = new picker.DocumentSelectOptions();
     options.maxSelectNumber = 8;
     const documentPicker = new picker.DocumentViewPicker();
-    documentPicker.select(options).then((uris: Array<string>) => {
+    try {
+      const uris = await documentPicker.select(options);
       for (const uri of uris) {
         const name = decodeURIComponent(uri.split('/').pop() ?? '附件');
         const attachment: FdAttachment = {
@@ -213,9 +222,44 @@ struct Index {
           sourceUri: uri
         };
         this.store.addAttachment(attachment);
+        this.syncFromStore();
+        if (this.store.client.isAuthenticated) {
+          await this.uploadAttachment(attachment);
+        }
       }
       this.syncFromStore();
-    }).catch(() => promptAction.showToast({ message: '未选择文件' }));
+    } catch (error) {
+      if (error instanceof FdRuntimeError) {
+        this.errorText = error.message;
+        this.syncFromStore();
+      } else {
+        promptAction.showToast({ message: '未选择文件' });
+      }
+    }
+  }
+
+  private async uploadAttachment(attachment: FdAttachment): Promise<void> {
+    this.store.updateAttachment(attachment.attachmentId, { state: 'uploading', progress: 0 });
+    this.syncFromStore();
+    try {
+      const uploaded = await uploadPickedAttachment(
+        this.store.client,
+        this.store.activeThread.id,
+        attachment,
+        (progress) => {
+          this.store.updateAttachment(attachment.attachmentId, progress);
+          this.syncFromStore();
+        }
+      );
+      this.store.removeAttachment(attachment.attachmentId);
+      this.store.addAttachment(uploaded);
+      this.syncFromStore();
+    } catch (error) {
+      const message = error instanceof FdRuntimeError ? error.message : '附件上传失败';
+      this.store.updateAttachment(attachment.attachmentId, { state: 'failed', errorMessage: message });
+      this.errorText = message;
+      this.syncFromStore();
+    }
   }
 
   private mimeTypeForName(name: string): string {
@@ -352,10 +396,14 @@ struct Index {
         }
       }.layoutWeight(1).width('100%');
       Text('模型').fontSize(13).fontColor('#80939A').margin({ left: 18, bottom: 6 });
-      Select(FD_SUPPORTED_MODELS.map((model: string) => ({ value: model })))
-        .selected(FD_SUPPORTED_MODELS.indexOf(this.selectedModel))
+      Select(this.models.map((model: string) => ({ value: model })))
+        .selected(this.models.indexOf(this.selectedModel))
         .value(this.selectedModel)
-        .onSelect((index: number) => { this.store.selectedModel = FD_SUPPORTED_MODELS[index]; this.syncFromStore(); });
+        .onSelect((index: number) => {
+          const selected = this.models[index];
+          if (selected !== undefined) this.store.selectedModel = selected;
+          this.syncFromStore();
+        });
       Text(this.statusText).fontSize(12).fontColor(this.errorText.length > 0 ? '#C2414A' : '#80939A').margin({ left: 18, right: 18, top: 14, bottom: 16 });
     }
     .width(280)
@@ -408,8 +456,11 @@ struct Index {
           ForEach(this.attachments, (item: FdAttachment) => {
             Row() {
               Text(item.name).fontSize(12).fontColor('#355761').layoutWeight(1).maxLines(1);
-              Text(item.state === 'ready' ? '预览' : item.state === 'selected' ? '待上传' : item.state)
-                .fontSize(12).fontColor('#176B87').onClick(() => this.previewAttachment(item));
+              Text(item.state === 'ready' ? '预览' : item.state === 'failed' ? '重试' : item.state === 'selected' ? '待上传' : `${item.state} ${item.progress}%`)
+                .fontSize(12).fontColor('#176B87').onClick(() => {
+                  if (item.state === 'ready') this.previewAttachment(item);
+                  else if (item.state === 'failed') this.uploadAttachment(item);
+                });
               Text('删除').fontSize(12).fontColor('#C2414A').margin({ left: 10 }).onClick(() => { this.store.removeAttachment(item.attachmentId); this.syncFromStore(); });
             }.padding({ left: 24, right: 24, top: 5, bottom: 5 });
           }, (item: FdAttachment) => item.attachmentId);

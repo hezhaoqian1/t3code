@@ -16,6 +16,7 @@ const requiredFiles = [
   "entry/src/main/ets/config/HarmonyConfig.ets",
   "entry/src/main/ets/data/FdModels.ets",
   "entry/src/main/ets/network/FdRuntimeClient.ets",
+  "entry/src/main/ets/network/AttachmentTransfer.ets",
   "entry/src/main/ets/state/FdStore.ets",
   "entry/src/main/ets/pages/Index.ets",
 ];
@@ -24,6 +25,7 @@ for (const file of requiredFiles) assert.ok(existsSync(resolve(app, file)), `mis
 
 const index = read("entry/src/main/ets/pages/Index.ets");
 const client = read("entry/src/main/ets/network/FdRuntimeClient.ets");
+const transfer = read("entry/src/main/ets/network/AttachmentTransfer.ets");
 const store = read("entry/src/main/ets/state/FdStore.ets");
 const config = read("entry/src/main/ets/config/HarmonyConfig.ets");
 
@@ -43,12 +45,23 @@ assert.match(client, /agent\/desktop\/threads/);
 assert.match(client, /client: 'fd_desktop'/);
 assert.match(client, /parseLegacySse/);
 assert.match(client, /attachments_require_mobile_api/);
+assert.match(client, /uploadAttachmentPart/);
+assert.match(client, /completeAttachmentUpload/);
+assert.match(client, /threadId,/);
+assert.match(client, /supportedModels/);
+assert.match(transfer, /fileIo\.openSync/);
+assert.match(transfer, /fileIo\.readSync/);
+assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
+assert.match(transfer, /wholeDigest\.digest/);
+assert.match(transfer, /uploadPickedAttachment/);
 assert.match(client, /afterSequence=/);
 assert.match(client, /Authorization/);
 assert.match(store, /activeTurnId/);
 assert.match(store, /this\.queuedTurns/);
+assert.match(store, /this\.models/);
 assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
+assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
 assert.match(config, /deepseek-flash/);
 
 const moduleJson5 = read("entry/src/main/module.json5");

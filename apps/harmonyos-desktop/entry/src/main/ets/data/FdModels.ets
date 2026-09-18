@@ -13,6 +13,14 @@ export interface FdAttachment {
   errorMessage?: string;
 }
 
+export interface FdAttachmentPatch {
+  state?: FdAttachmentState;
+  progress?: number;
+  sizeBytes?: number;
+  previewUrl?: string;
+  errorMessage?: string;
+}
+
 export interface FdMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';

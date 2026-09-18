@@ -49,6 +49,7 @@ export class FdRuntimeClient {
   private accessToken: string = '';
   private runtimeTokenId: number = 0;
   private userName: string = '';
+  private modelCatalog: Array<string> = FD_SUPPORTED_MODELS.slice();
 
   constructor(origin: string = FD_RUNTIME_ORIGIN) {
     this.origin = origin.replace(/\/$/, '');
@@ -60,6 +61,10 @@ export class FdRuntimeClient {
 
   get currentUserName(): string {
     return this.userName;
+  }
+
+  get supportedModels(): Array<string> {
+    return this.modelCatalog.slice();
   }
 
   async login(username: string, password: string): Promise<FdSession> {
@@ -97,10 +102,13 @@ export class FdRuntimeClient {
     const data = object(root['data'] ?? root);
     const skills = arrayValue(data['skills']);
     const capabilities = object(data['model_capabilities'] ?? {});
+    const advertisedModels = Object.keys(capabilities)
+      .filter((model: string) => model.length > 0 && model.length <= 128);
+    if (advertisedModels.length > 0) this.modelCatalog = advertisedModels;
     return skills.map((raw: Object) => {
       const item = object(raw);
       const modelCapabilities: Array<string> = [];
-      for (const model of FD_SUPPORTED_MODELS) {
+      for (const model of this.modelCatalog) {
         const capability = object(capabilities[model] ?? {});
         if (capability['fd_skills'] === true) modelCapabilities.push(model);
       }
@@ -197,22 +205,81 @@ export class FdRuntimeClient {
   }
 
   async createAttachmentUpload(
+    threadId: string,
     name: string,
     mimeType: string,
     sizeBytes: number,
     sha256: string
   ): Promise<{ attachmentId: string; chunkSize: number; uploadUrl: string }> {
     const root = await this.request(`${FD_RUNTIME_API_PREFIX}/attachments`, 'POST', {
+      threadId,
       name,
       mimeType,
       sizeBytes,
-      sha256
+      ...(sha256.length > 0 ? { sha256 } : {})
     });
     const data = object(root['data'] ?? root);
     return {
       attachmentId: stringValue(data['attachmentId'] ?? data['attachment_id']),
       chunkSize: numberValue(data['chunkSize'] ?? data['chunk_size'], 8 * 1024 * 1024),
       uploadUrl: stringValue(data['uploadUrl'] ?? data['upload_url'])
+    };
+  }
+
+  async uploadAttachmentPart(
+    uploadUrl: string,
+    partIndex: number,
+    totalParts: number,
+    data: ArrayBuffer,
+    checksum: string
+  ): Promise<void> {
+    if (this.accessToken.length === 0) throw new FdRuntimeError('unauthenticated', '请先登录 FD AI');
+    const request = http.createHttp();
+    try {
+      const target = uploadUrl.startsWith('http://') || uploadUrl.startsWith('https://')
+        ? uploadUrl
+        : `${this.origin}${uploadUrl.startsWith('/') ? '' : '/'}${uploadUrl}`;
+      const response = await request.request(target, {
+        method: http.RequestMethod.PUT,
+        header: {
+          'Content-Type': 'application/octet-stream',
+          'X-Part-Index': String(partIndex),
+          'X-Part-Count': String(totalParts),
+          ...(target.startsWith(this.origin) ? { Authorization: `Bearer ${this.accessToken}` } : {}),
+          ...(checksum.length > 0 ? { 'X-Part-SHA256': checksum } : {})
+        },
+        extraData: data,
+        expectDataType: http.HttpDataType.STRING
+      });
+      if (response.responseCode < 200 || response.responseCode >= 300) {
+        throw new FdRuntimeError(`http_${response.responseCode}`, '附件分片上传失败');
+      }
+    } catch (error) {
+      if (error instanceof FdRuntimeError) throw error;
+      throw new FdRuntimeError('network_error', '附件分片上传连接失败');
+    } finally {
+      request.destroy();
+    }
+  }
+
+  async completeAttachmentUpload(
+    attachmentId: string,
+    totalParts: number,
+    sha256: string
+  ): Promise<FdAttachment> {
+    const root = await this.request(
+      `${FD_RUNTIME_API_PREFIX}/attachments/${encodeURIComponent(attachmentId)}/complete`,
+      'POST',
+      { totalParts, sha256 }
+    );
+    const data = object(root['data'] ?? root);
+    return {
+      attachmentId,
+      name: stringValue(data['name']),
+      mimeType: stringValue(data['mimeType'] ?? data['mime_type']),
+      sizeBytes: numberValue(data['sizeBytes'] ?? data['size_bytes'], 0),
+      state: 'processing',
+      progress: 0
     };
   }
 
