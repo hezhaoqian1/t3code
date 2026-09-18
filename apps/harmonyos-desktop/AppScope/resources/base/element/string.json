@@ -1,0 +1,6 @@
+{
+  "string": [
+    { "name": "app_name", "value": "方德 AI" },
+    { "name": "app_description", "value": "方德 AI 原生鸿蒙客户端" }
+  ]
+}

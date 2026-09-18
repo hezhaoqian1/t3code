@@ -1,0 +1,8 @@
+{
+  "name": "@fdsure/harmonyos-fd-client",
+  "private": true,
+  "scripts": {
+    "build": "hvigorw assembleHap --mode module -p product=default",
+    "clean": "hvigorw clean"
+  }
+}
