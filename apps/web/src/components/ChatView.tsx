@@ -153,6 +153,9 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
+  PencilIcon,
+  CheckIcon,
+  XIcon,
   WifiOffIcon,
 } from "lucide-react";
 import { cn, randomHex } from "~/lib/utils";
@@ -1303,6 +1306,8 @@ function ChatViewContent(props: ChatViewProps) {
   const removeQueuedMessage = useSendQueueStore((state) => state.remove);
   const promoteQueuedMessage = useSendQueueStore((state) => state.promote);
   const updateQueuedMessage = useSendQueueStore((state) => state.update);
+  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
+  const [editingQueuedText, setEditingQueuedText] = useState("");
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
@@ -6083,99 +6088,180 @@ function ChatViewContent(props: ChatViewProps) {
                   )}
                   {queuedMessages.length > 0 ? (
                     <div
-                      className="mx-auto mb-1 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2 text-xs shadow-sm"
+                      className="mx-auto mb-1 flex w-full max-w-3xl flex-col gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2 text-xs shadow-sm"
                       data-chat-send-queue="true"
                     >
-                      <span className="shrink-0 text-muted-foreground">
-                        排队消息 {queuedMessages.length}
-                      </span>
-                      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-foreground">
+                          排队消息 {queuedMessages.length}
+                        </span>
+                        <span className="text-muted-foreground">
+                          当前任务完成后自动发送，可编辑或立即发送
+                        </span>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-1.5">
                         {queuedMessages.map((queuedMessage, index) => (
                           <div
                             key={queuedMessage.id}
-                            className="flex max-w-56 shrink-0 items-center gap-1 rounded-md bg-muted/70 px-2 py-1"
+                            className="flex min-w-0 items-start gap-2 rounded-md bg-muted/70 px-2 py-1.5"
                           >
-                            <input
-                              aria-label={`编辑排队消息 ${index + 1}`}
-                              className="w-36 min-w-0 rounded border border-transparent bg-transparent px-1 focus:border-primary focus:outline-none"
-                              title={queuedMessage.error ?? queuedMessage.text}
-                              value={queuedMessage.text}
-                              disabled={queuedMessage.status === "sending"}
-                              onChange={(event) => {
-                                if (activeQueueKey) {
-                                  updateQueuedMessage(activeQueueKey, queuedMessage.id, {
-                                    text: event.target.value,
-                                  });
+                            <span className="mt-1 shrink-0 text-muted-foreground">{index + 1}</span>
+                            <div className="min-w-0 flex-1">
+                              {editingQueuedMessageId === queuedMessage.id ? (
+                                <textarea
+                                  autoFocus
+                                  aria-label={`编辑排队消息 ${index + 1}`}
+                                  className="min-h-16 w-full resize-y rounded border border-primary/50 bg-background px-2 py-1.5 text-sm leading-5 outline-none"
+                                  value={editingQueuedText}
+                                  onChange={(event) => setEditingQueuedText(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      setEditingQueuedMessageId(null);
+                                    } else if (
+                                      event.key === "Enter" &&
+                                      (event.ctrlKey || event.metaKey)
+                                    ) {
+                                      event.preventDefault();
+                                      const text = editingQueuedText.trim();
+                                      if (activeQueueKey && text.length > 0) {
+                                        updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                          text,
+                                        });
+                                        setEditingQueuedMessageId(null);
+                                      }
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="block w-full truncate text-left text-sm leading-6 hover:text-primary"
+                                  title={queuedMessage.text}
+                                  onClick={() => {
+                                    setEditingQueuedMessageId(queuedMessage.id);
+                                    setEditingQueuedText(queuedMessage.text);
+                                  }}
+                                >
+                                  {queuedMessage.text || "（空消息）"}
+                                </button>
+                              )}
+                              {queuedMessage.error ? (
+                                <div
+                                  className="mt-0.5 truncate text-destructive"
+                                  title={queuedMessage.error}
+                                >
+                                  {queuedMessage.error}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              {editingQueuedMessageId === queuedMessage.id ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-primary hover:bg-background"
+                                    aria-label={`保存排队消息 ${index + 1}`}
+                                    disabled={!editingQueuedText.trim()}
+                                    onClick={() => {
+                                      if (!activeQueueKey) return;
+                                      updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                        text: editingQueuedText.trim(),
+                                      });
+                                      setEditingQueuedMessageId(null);
+                                    }}
+                                  >
+                                    <CheckIcon className="size-3.5" />
+                                    保存
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground hover:bg-background"
+                                    aria-label={`取消编辑排队消息 ${index + 1}`}
+                                    onClick={() => setEditingQueuedMessageId(null)}
+                                  >
+                                    <XIcon className="size-3.5" />
+                                    取消
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                  aria-label={`编辑排队消息 ${index + 1}`}
+                                  disabled={queuedMessage.status === "sending"}
+                                  onClick={() => {
+                                    setEditingQueuedMessageId(queuedMessage.id);
+                                    setEditingQueuedText(queuedMessage.text);
+                                  }}
+                                >
+                                  <PencilIcon className="size-3.5" />
+                                  编辑
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="rounded px-1.5 py-1 text-primary hover:bg-background"
+                                disabled={
+                                  !queuedMessage.text.trim() || queuedMessage.status === "sending"
                                 }
-                              }}
-                            />
-                            <button
-                              type="button"
-                              className="text-primary hover:underline"
-                              disabled={
-                                !queuedMessage.text.trim() || queuedMessage.status === "sending"
-                              }
-                              onClick={() => {
-                                if (!activeQueueKey) return;
-                                const currentSendContext = composerRef.current?.getSendContext();
-                                if (
-                                  currentSendContext &&
-                                  (currentSendContext.images.length > 0 ||
-                                    currentSendContext.documents.length > 0)
-                                ) {
-                                  toastManager.add(
-                                    stackedThreadToast({
-                                      type: "info",
-                                      title: "请先处理当前附件",
-                                      description: "排队消息不会混入后来添加的文件。",
-                                    }),
-                                  );
-                                  return;
-                                }
-                                if (queuedMessage.status === "failed") {
-                                  updateQueuedMessage(activeQueueKey, queuedMessage.id, {
-                                    status: undefined,
-                                    error: undefined,
-                                  });
-                                }
-                                if (isPreparingAttachments) {
-                                  promoteQueuedMessage(activeQueueKey, queuedMessage.id);
-                                } else if (phase === "running") {
-                                  // Codex supports a follow-up turn while the
-                                  // current turn is active. The runtime queues
-                                  // it natively and returns its receipt; keep
-                                  // our item until that command succeeds.
-                                  void onSend(
-                                    undefined,
-                                    undefined,
-                                    queuedMessage.text,
-                                    queuedMessage.id,
-                                  );
-                                } else if (queuedMessage.status === "failed") {
-                                  void onSend(
-                                    undefined,
-                                    undefined,
-                                    queuedMessage.text,
-                                    queuedMessage.id,
-                                  );
-                                } else {
-                                  promoteQueuedMessage(activeQueueKey, queuedMessage.id);
-                                }
-                              }}
-                            >
-                              {queuedMessage.status === "failed" ? "重试" : "立即发送"}
-                            </button>
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground"
-                              aria-label={`删除排队消息 ${index + 1}`}
-                              onClick={() => {
-                                if (!activeQueueKey) return;
-                                removeQueuedMessage(activeQueueKey, queuedMessage.id);
-                              }}
-                            >
-                              删除
-                            </button>
+                                onClick={() => {
+                                  if (!activeQueueKey) return;
+                                  const currentSendContext = composerRef.current?.getSendContext();
+                                  if (
+                                    currentSendContext &&
+                                    (currentSendContext.images.length > 0 ||
+                                      currentSendContext.documents.length > 0)
+                                  ) {
+                                    toastManager.add(
+                                      stackedThreadToast({
+                                        type: "info",
+                                        title: "请先处理当前附件",
+                                        description: "排队消息不会混入后来添加的文件。",
+                                      }),
+                                    );
+                                    return;
+                                  }
+                                  if (queuedMessage.status === "failed") {
+                                    updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                      status: undefined,
+                                      error: undefined,
+                                    });
+                                  }
+                                  if (isPreparingAttachments) {
+                                    promoteQueuedMessage(activeQueueKey, queuedMessage.id);
+                                  } else if (
+                                    phase === "running" ||
+                                    queuedMessage.status === "failed"
+                                  ) {
+                                    void onSend(
+                                      undefined,
+                                      undefined,
+                                      queuedMessage.text,
+                                      queuedMessage.id,
+                                    );
+                                  } else {
+                                    promoteQueuedMessage(activeQueueKey, queuedMessage.id);
+                                  }
+                                }}
+                              >
+                                {queuedMessage.status === "failed" ? "重试" : "立即发送"}
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded px-1.5 py-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                                aria-label={`删除排队消息 ${index + 1}`}
+                                onClick={() => {
+                                  if (!activeQueueKey) return;
+                                  removeQueuedMessage(activeQueueKey, queuedMessage.id);
+                                  if (editingQueuedMessageId === queuedMessage.id) {
+                                    setEditingQueuedMessageId(null);
+                                  }
+                                }}
+                              >
+                                删除
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>
