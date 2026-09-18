@@ -6238,12 +6238,15 @@ function ChatViewContent(props: ChatViewProps) {
                                       error: undefined,
                                     });
                                   }
-                                  if (isPreparingAttachments) {
+                                  if (isPreparingAttachments || phase === "running") {
+                                    // Immediate send means "move this item to
+                                    // the front" while the active turn owns
+                                    // the provider session. Sending a second
+                                    // turn here makes the server reject it as
+                                    // still processing and leaves a red work
+                                    // step behind.
                                     promoteQueuedMessage(activeQueueKey, queuedMessage.id);
-                                  } else if (
-                                    phase === "running" ||
-                                    queuedMessage.status === "failed"
-                                  ) {
+                                  } else if (queuedMessage.status === "failed") {
                                     void onSend(
                                       undefined,
                                       undefined,
