@@ -1,5 +1,5 @@
 import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { isElectron } from "../../env";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { stackedThreadToast, toastManager } from "../ui/toast";
@@ -18,6 +18,25 @@ import { showDesktopUpdateDownloadedToast } from "../desktopUpdate.toast";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { Separator } from "../ui/separator";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+
+const UPDATE_NOTICE_SEEN_KEY = "fd.desktop.update-notice-seen-version";
+const UPDATE_NOTICE_OPEN_EVENT = "fd:desktop-update-notice-open";
+
+function hasSeenUpdateNotice(version: string): boolean {
+  try {
+    return window.localStorage.getItem(UPDATE_NOTICE_SEEN_KEY) === version;
+  } catch {
+    return false;
+  }
+}
+
+function markUpdateNoticeSeen(version: string): void {
+  try {
+    window.localStorage.setItem(UPDATE_NOTICE_SEEN_KEY, version);
+  } catch {
+    // A restricted storage context should not prevent the update UI from rendering.
+  }
+}
 
 function keyReleaseNoteItems(items: ReadonlyArray<string>) {
   const occurrences = new Map<string, number>();
@@ -70,6 +89,33 @@ function SidebarUpdateReleaseNotesTooltip({
 export function SidebarUpdatePill() {
   const state = useDesktopUpdateState();
   const [dismissed, setDismissed] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  useEffect(() => {
+    const onOpenNotice = () => setDetailsOpen(true);
+    window.addEventListener(UPDATE_NOTICE_OPEN_EVENT, onOpenNotice);
+    return () => window.removeEventListener(UPDATE_NOTICE_OPEN_EVENT, onOpenNotice);
+  }, []);
+
+  useEffect(() => {
+    if (!state || state.status !== "available" || !state.availableVersion) return;
+    const version = state.availableVersion;
+    if (hasSeenUpdateNotice(version)) return;
+
+    markUpdateNoticeSeen(version);
+    toastManager.add(
+      stackedThreadToast({
+        type: "info",
+        title: `方德 AI ${version} 有新版本`,
+        description: "点击查看本次更新内容，或从左下角下载并安装。",
+        timeout: 12_000,
+        actionProps: {
+          children: "查看更新",
+          onClick: () => window.dispatchEvent(new Event(UPDATE_NOTICE_OPEN_EVENT)),
+        },
+      }),
+    );
+  }, [state]);
 
   const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed;
   const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "发现新版本";
@@ -164,7 +210,10 @@ export function SidebarUpdatePill() {
           }`}
         >
           <div className="pointer-events-none absolute inset-0 rounded-lg transition-colors group-has-[button.update-main:hover]/update:bg-update/12" />
-          <Tooltip>
+          <Tooltip
+            open={detailsOpen ? true : undefined}
+            onOpenChange={(open) => setDetailsOpen(open)}
+          >
             <TooltipTrigger
               render={
                 <button
@@ -201,17 +250,18 @@ export function SidebarUpdatePill() {
             />
             <TooltipPopup
               align="start"
-              className={
-                state?.channel === "nightly" && state.releaseNotes.length > 0
-                  ? // pointer-events-auto overrides the positioner's pointer-events-none so the
-                    // release notes stay open (and scrollable) when the cursor moves into them.
-                    "pointer-events-auto max-w-none text-balance"
-                  : undefined
-              }
+              className="pointer-events-auto max-w-none text-balance"
               side="top"
             >
               {state ? (
-                <SidebarUpdateReleaseNotesTooltip state={state} tooltip={tooltip} />
+                <div className="w-80 max-w-[calc(100vw-2rem)]">
+                  <SidebarUpdateReleaseNotesTooltip state={state} tooltip={tooltip} />
+                  {state.availableVersion && (
+                    <div className="mt-3 border-t border-border/60 px-1 pt-2 text-[11px] text-muted-foreground">
+                      点击左下角按钮下载并安装 {state.availableVersion}
+                    </div>
+                  )}
+                </div>
               ) : (
                 tooltip
               )}
