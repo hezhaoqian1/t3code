@@ -153,6 +153,9 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
+  PencilIcon,
+  CheckIcon,
+  XIcon,
   WifiOffIcon,
 } from "lucide-react";
 import { cn, randomHex } from "~/lib/utils";
@@ -171,7 +174,8 @@ import { useBrowserHistoryStore } from "~/browserHistoryStore";
 import { FD_SKILL_THREAD_TITLE, selectedFdSkillVersionId } from "../fdSkillSelectionStore";
 import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
-import { useSendQueueStore } from "../sendQueueStore";
+import { hasPendingAttachmentPreparation, useSendQueueStore } from "../sendQueueStore";
+import { useFdAccount } from "../fd/FdAccountProvider";
 import {
   isOfficeWorkspaceProject,
   shouldBlockOfficeTechnicalWorkbenchCommand,
@@ -1155,6 +1159,7 @@ function chatActionErrorMessage(error: unknown): string {
 }
 
 function ChatViewContent(props: ChatViewProps) {
+  const fdAccount = useFdAccount();
   const {
     environmentId,
     threadId,
@@ -1303,6 +1308,8 @@ function ChatViewContent(props: ChatViewProps) {
   const removeQueuedMessage = useSendQueueStore((state) => state.remove);
   const promoteQueuedMessage = useSendQueueStore((state) => state.promote);
   const updateQueuedMessage = useSendQueueStore((state) => state.update);
+  const [editingQueuedMessageId, setEditingQueuedMessageId] = useState<string | null>(null);
+  const [editingQueuedText, setEditingQueuedText] = useState("");
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
   optimisticUserMessagesRef.current = optimisticUserMessages;
   const [localDraftErrorsByDraftId, setLocalDraftErrorsByDraftId] = useState<
@@ -1947,6 +1954,10 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const isPreparingAttachments = useMemo(
+    () => hasPendingAttachmentPreparation(threadActivities),
+    [threadActivities],
+  );
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const turnPlans = useMemo(() => deriveTurnPlans(threadActivities), [threadActivities]);
   // Native subagent fold: memoized by activity-list identity, shared by the
@@ -2050,7 +2061,12 @@ function ChatViewContent(props: ChatViewProps) {
     activePendingUserInput: activePendingUserInput?.requestId ?? null,
     threadError,
   });
-  const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const isWorking =
+    phase === "running" ||
+    isPreparingAttachments ||
+    isSendBusy ||
+    isConnecting ||
+    isRevertingCheckpoint;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -4600,7 +4616,11 @@ function ChatViewContent(props: ChatViewProps) {
     // A running turn owns the runtime session. Keep an additional text send
     // local to this thread and drain it after the active turn settles instead
     // of issuing a second start command (which the server correctly rejects).
-    if (phase === "running" && !directAnnotation && regenerateText === undefined) {
+    if (
+      (phase === "running" || isPreparingAttachments || isSendBusy) &&
+      !directAnnotation &&
+      regenerateText === undefined
+    ) {
       const queuedText = promptRef.current.trim();
       const hasAttachments =
         composerImagesRef.current.length > 0 ||
@@ -5079,17 +5099,28 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
+      const failureError = squashAtomCommandFailure(failure);
+      const failureMessage =
+        failureError instanceof Error ? failureError.message : String(failureError);
+      const queueKey = scopedThreadKey(
+        scopeThreadRef(activeThread?.environmentId ?? environmentId, threadIdForSend),
+      );
+      const waitingForActiveTurn = failureMessage.includes("当前任务仍在处理");
       if (queuedMessageId) {
-        updateQueuedMessage(
-          scopedThreadKey(
-            scopeThreadRef(activeThread?.environmentId ?? environmentId, threadIdForSend),
-          ),
-          queuedMessageId,
-          {
-            status: "failed",
-            error: "发送失败，请点击重试。",
-          },
-        );
+        updateQueuedMessage(queueKey, queuedMessageId, {
+          status: "failed",
+          error: waitingForActiveTurn
+            ? "当前任务仍在收尾，稍后自动重试。"
+            : "发送失败，请点击重试。",
+        });
+        if (waitingForActiveTurn) {
+          window.setTimeout(() => {
+            updateQueuedMessage(queueKey, queuedMessageId, {
+              status: undefined,
+              error: undefined,
+            });
+          }, 1200);
+        }
       }
       if (
         promptRef.current.length === 0 &&
@@ -5127,10 +5158,9 @@ function ChatViewContent(props: ChatViewProps) {
         });
       }
       if (!isAtomCommandInterrupted(failure)) {
-        const error = squashAtomCommandFailure(failure);
         setThreadError(
           threadIdForSend,
-          error instanceof Error ? error.message : "Failed to send message.",
+          failureError instanceof Error ? failureError.message : "Failed to send message.",
         );
       }
     }
@@ -5149,11 +5179,12 @@ function ChatViewContent(props: ChatViewProps) {
   useEffect(() => {
     if (
       phase === "running" ||
+      isPreparingAttachments ||
       isSendBusy ||
       isConnecting ||
       threadDetailLoading ||
       activeEnvironmentUnavailable !== null ||
-      !latestTurnSettled ||
+      activePendingProgress !== null ||
       !activeQueueKey ||
       queuedMessages.length === 0 ||
       queuedMessages[0]?.status === "failed" ||
@@ -5182,10 +5213,11 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeEnvironmentUnavailable,
     activeQueueKey,
+    activePendingProgress,
     composerDraftTarget,
+    isPreparingAttachments,
     isConnecting,
     isSendBusy,
-    latestTurnSettled,
     onSend,
     phase,
     queuedMessages,
@@ -5959,6 +5991,7 @@ function ChatViewContent(props: ChatViewProps) {
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <ProviderStatusBanner
                 status={visibleProviderStatus}
+                fdAuthenticated={fdAccount.state.status === "authenticated"}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
               />
             </div>
@@ -6068,86 +6101,183 @@ function ChatViewContent(props: ChatViewProps) {
                   )}
                   {queuedMessages.length > 0 ? (
                     <div
-                      className="mx-auto mb-1 flex w-full max-w-3xl items-center gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2 text-xs shadow-sm"
+                      className="mx-auto mb-1 flex w-full max-w-3xl flex-col gap-2 rounded-lg border border-border/60 bg-background/95 px-3 py-2 text-xs shadow-sm"
                       data-chat-send-queue="true"
                     >
-                      <span className="shrink-0 text-muted-foreground">
-                        排队消息 {queuedMessages.length}
-                      </span>
-                      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-foreground">
+                          排队消息 {queuedMessages.length}
+                        </span>
+                        <span className="text-muted-foreground">
+                          当前任务完成后自动发送，可编辑或立即发送
+                        </span>
+                      </div>
+                      <div className="flex min-w-0 flex-col gap-1.5">
                         {queuedMessages.map((queuedMessage, index) => (
                           <div
                             key={queuedMessage.id}
-                            className="flex max-w-56 shrink-0 items-center gap-1 rounded-md bg-muted/70 px-2 py-1"
+                            className="flex min-w-0 items-start gap-2 rounded-md bg-muted/70 px-2 py-1.5"
                           >
-                            <span
-                              className="max-w-36 truncate"
-                              title={queuedMessage.error ?? queuedMessage.text}
-                            >
-                              {index + 1}. {queuedMessage.text}
-                            </span>
-                            <button
-                              type="button"
-                              className="text-primary hover:underline"
-                              onClick={() => {
-                                if (!activeQueueKey) return;
-                                const currentSendContext = composerRef.current?.getSendContext();
-                                if (
-                                  currentSendContext &&
-                                  (currentSendContext.images.length > 0 ||
-                                    currentSendContext.documents.length > 0)
-                                ) {
-                                  toastManager.add(
-                                    stackedThreadToast({
-                                      type: "info",
-                                      title: "请先处理当前附件",
-                                      description: "排队消息不会混入后来添加的文件。",
-                                    }),
-                                  );
-                                  return;
+                            <span className="mt-1 shrink-0 text-muted-foreground">{index + 1}</span>
+                            <div className="min-w-0 flex-1">
+                              {editingQueuedMessageId === queuedMessage.id ? (
+                                <textarea
+                                  autoFocus
+                                  aria-label={`编辑排队消息 ${index + 1}`}
+                                  className="min-h-16 w-full resize-y rounded border border-primary/50 bg-background px-2 py-1.5 text-sm leading-5 outline-none"
+                                  value={editingQueuedText}
+                                  onChange={(event) => setEditingQueuedText(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Escape") {
+                                      event.preventDefault();
+                                      setEditingQueuedMessageId(null);
+                                    } else if (
+                                      event.key === "Enter" &&
+                                      (event.ctrlKey || event.metaKey)
+                                    ) {
+                                      event.preventDefault();
+                                      const text = editingQueuedText.trim();
+                                      if (activeQueueKey && text.length > 0) {
+                                        updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                          text,
+                                        });
+                                        setEditingQueuedMessageId(null);
+                                      }
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="block w-full truncate text-left text-sm leading-6 hover:text-primary"
+                                  title={queuedMessage.text}
+                                  onClick={() => {
+                                    setEditingQueuedMessageId(queuedMessage.id);
+                                    setEditingQueuedText(queuedMessage.text);
+                                  }}
+                                >
+                                  {queuedMessage.text || "（空消息）"}
+                                </button>
+                              )}
+                              {queuedMessage.error ? (
+                                <div
+                                  className="mt-0.5 truncate text-destructive"
+                                  title={queuedMessage.error}
+                                >
+                                  {queuedMessage.error}
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-1">
+                              {editingQueuedMessageId === queuedMessage.id ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-primary hover:bg-background"
+                                    aria-label={`保存排队消息 ${index + 1}`}
+                                    disabled={!editingQueuedText.trim()}
+                                    onClick={() => {
+                                      if (!activeQueueKey) return;
+                                      updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                        text: editingQueuedText.trim(),
+                                      });
+                                      setEditingQueuedMessageId(null);
+                                    }}
+                                  >
+                                    <CheckIcon className="size-3.5" />
+                                    保存
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground hover:bg-background"
+                                    aria-label={`取消编辑排队消息 ${index + 1}`}
+                                    onClick={() => setEditingQueuedMessageId(null)}
+                                  >
+                                    <XIcon className="size-3.5" />
+                                    取消
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-muted-foreground hover:bg-background hover:text-foreground"
+                                  aria-label={`编辑排队消息 ${index + 1}`}
+                                  disabled={queuedMessage.status === "sending"}
+                                  onClick={() => {
+                                    setEditingQueuedMessageId(queuedMessage.id);
+                                    setEditingQueuedText(queuedMessage.text);
+                                  }}
+                                >
+                                  <PencilIcon className="size-3.5" />
+                                  编辑
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="rounded px-1.5 py-1 text-primary hover:bg-background"
+                                disabled={
+                                  !queuedMessage.text.trim() || queuedMessage.status === "sending"
                                 }
-                                if (queuedMessage.status === "failed") {
-                                  updateQueuedMessage(activeQueueKey, queuedMessage.id, {
-                                    status: undefined,
-                                    error: undefined,
-                                  });
-                                }
-                                if (phase === "running") {
-                                  // Codex supports a follow-up turn while the
-                                  // current turn is active. The runtime queues
-                                  // it natively and returns its receipt; keep
-                                  // our item until that command succeeds.
-                                  void onSend(
-                                    undefined,
-                                    undefined,
-                                    queuedMessage.text,
-                                    queuedMessage.id,
-                                  );
-                                } else if (queuedMessage.status === "failed") {
-                                  void onSend(
-                                    undefined,
-                                    undefined,
-                                    queuedMessage.text,
-                                    queuedMessage.id,
-                                  );
-                                } else {
-                                  promoteQueuedMessage(activeQueueKey, queuedMessage.id);
-                                }
-                              }}
-                            >
-                              {queuedMessage.status === "failed" ? "重试" : "立即发送"}
-                            </button>
-                            <button
-                              type="button"
-                              className="text-muted-foreground hover:text-foreground"
-                              aria-label={`删除排队消息 ${index + 1}`}
-                              onClick={() => {
-                                if (!activeQueueKey) return;
-                                removeQueuedMessage(activeQueueKey, queuedMessage.id);
-                              }}
-                            >
-                              删除
-                            </button>
+                                onClick={() => {
+                                  if (!activeQueueKey) return;
+                                  const currentSendContext = composerRef.current?.getSendContext();
+                                  if (
+                                    currentSendContext &&
+                                    (currentSendContext.images.length > 0 ||
+                                      currentSendContext.documents.length > 0)
+                                  ) {
+                                    toastManager.add(
+                                      stackedThreadToast({
+                                        type: "info",
+                                        title: "请先处理当前附件",
+                                        description: "排队消息不会混入后来添加的文件。",
+                                      }),
+                                    );
+                                    return;
+                                  }
+                                  if (queuedMessage.status === "failed") {
+                                    updateQueuedMessage(activeQueueKey, queuedMessage.id, {
+                                      status: undefined,
+                                      error: undefined,
+                                    });
+                                  }
+                                  if (isPreparingAttachments || phase === "running") {
+                                    // Immediate send means "move this item to
+                                    // the front" while the active turn owns
+                                    // the provider session. Sending a second
+                                    // turn here makes the server reject it as
+                                    // still processing and leaves a red work
+                                    // step behind.
+                                    promoteQueuedMessage(activeQueueKey, queuedMessage.id);
+                                  } else if (queuedMessage.status === "failed") {
+                                    void onSend(
+                                      undefined,
+                                      undefined,
+                                      queuedMessage.text,
+                                      queuedMessage.id,
+                                    );
+                                  } else {
+                                    promoteQueuedMessage(activeQueueKey, queuedMessage.id);
+                                  }
+                                }}
+                              >
+                                {queuedMessage.status === "failed" ? "重试" : "立即发送"}
+                              </button>
+                              <button
+                                type="button"
+                                className="rounded px-1.5 py-1 text-muted-foreground hover:bg-background hover:text-destructive"
+                                aria-label={`删除排队消息 ${index + 1}`}
+                                onClick={() => {
+                                  if (!activeQueueKey) return;
+                                  removeQueuedMessage(activeQueueKey, queuedMessage.id);
+                                  if (editingQueuedMessageId === queuedMessage.id) {
+                                    setEditingQueuedMessageId(null);
+                                  }
+                                }}
+                              >
+                                删除
+                              </button>
+                            </div>
                           </div>
                         ))}
                       </div>

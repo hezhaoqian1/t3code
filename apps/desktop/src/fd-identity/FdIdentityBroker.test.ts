@@ -495,7 +495,7 @@ describe("FdIdentityBroker", () => {
       expect.objectContaining({
         accessToken: "refreshed-access",
         policy: expect.objectContaining({
-          model: "deepseek-v4-flash",
+          model: "deepseek-flash",
           models: [...FD_RUNTIME_MODELS],
           expiresAt: 2_000_000_100,
         }),

@@ -24,6 +24,10 @@ function warningProvider(): ServerProvider {
   };
 }
 
+function unauthenticatedProvider(): ServerProvider {
+  return { ...warningProvider(), auth: { status: "unauthenticated" } };
+}
+
 describe("ProviderStatusBanner", () => {
   it("stays hidden after its current warning is dismissed", () => {
     const status = warningProvider();
@@ -63,5 +67,17 @@ describe("ProviderStatusBanner", () => {
 
     expect(markup).toContain('aria-label="关闭服务状态提示"');
     expect(markup).toContain("智能服务暂不可用");
+  });
+
+  it("does not flash a stale login prompt after the desktop account authenticated", () => {
+    const markup = renderToStaticMarkup(
+      <ProviderStatusBanner
+        status={unauthenticatedProvider()}
+        fdAuthenticated
+        onDismiss={() => {}}
+      />,
+    );
+
+    expect(markup).toBe("");
   });
 });

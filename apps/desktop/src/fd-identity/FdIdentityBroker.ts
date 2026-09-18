@@ -8,7 +8,10 @@ import type {
   FdUsageSummary,
 } from "@t3tools/contracts";
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
-import { FD_RUNTIME_MODELS } from "@t3tools/contracts/fd/runtime-credentials";
+import {
+  FD_RUNTIME_DEFAULT_MODEL,
+  FD_RUNTIME_MODELS,
+} from "@t3tools/contracts/fd/runtime-credentials";
 
 import {
   CredentialVault,
@@ -405,7 +408,7 @@ export class FdIdentityBroker {
       policy: {
         version: 1,
         capability: "general_assistant",
-        model: "deepseek-v4-flash",
+        model: FD_RUNTIME_DEFAULT_MODEL,
         models: FD_RUNTIME_MODELS,
         expiresAt: credentials.accessExpiresAt,
       },

@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { dispatchQueuedMessage, useSendQueueStore } from "./sendQueueStore";
+import {
+  dispatchQueuedMessage,
+  hasPendingAttachmentPreparation,
+  useSendQueueStore,
+} from "./sendQueueStore";
 
 const item = (id: string) => ({
   id,
@@ -12,6 +16,27 @@ const item = (id: string) => ({
 
 describe("sendQueueStore", () => {
   beforeEach(() => useSendQueueStore.setState({ byThreadKey: {} }));
+
+  it("treats attachment preparation as active until its task completes", () => {
+    const base = {
+      id: "activity-1",
+      tone: "info",
+      summary: "attachment",
+      turnId: null,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    } as const;
+    expect(
+      hasPendingAttachmentPreparation([
+        { ...base, kind: "task.started", payload: { taskId: "attachments-1" } },
+      ] as never),
+    ).toBe(true);
+    expect(
+      hasPendingAttachmentPreparation([
+        { ...base, kind: "task.started", payload: { taskId: "attachments-1" } },
+        { ...base, id: "activity-2", kind: "task.completed", payload: { taskId: "attachments-1" } },
+      ] as never),
+    ).toBe(false);
+  });
 
   it("keeps messages by scoped thread and promotes an item without losing FIFO order", () => {
     const store = useSendQueueStore.getState();

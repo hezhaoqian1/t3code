@@ -98,7 +98,6 @@ export function isFdResponsesModelAdvertised(slug: string): boolean {
     normalized === "deepseek-v4-flash-vision-exp"
   );
 }
-
 /** Resolve a static or server-authorized model without duplicating capability
  * inference in each attachment and provider path. Unknown models are only
  * surfaced after the authenticated New API catalog authorizes them. */
