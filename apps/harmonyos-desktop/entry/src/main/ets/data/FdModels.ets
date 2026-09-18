@@ -90,6 +90,7 @@ export type FdStreamEvent =
   | { type: 'thread.snapshot'; sequence: number; detail: FdThreadDetail; resumeToken?: string }
   | { type: 'thread.synchronized'; sequence: number }
   | { type: 'turn.started'; sequence: number; turnId: string; model: string }
+  | { type: 'turn.progress'; sequence: number; phase: string; message: string }
   | { type: 'skill.authorized'; sequence: number; skillVersionId: number }
   | { type: 'tool.started'; sequence: number; tool: string; label: string }
   | { type: 'tool.completed'; sequence: number; tool: string; status: 'succeeded' | 'failed' }

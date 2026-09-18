@@ -133,6 +133,11 @@ struct Index {
   private async sendDraft(): Promise<void> {
     const text = this.draft.trim();
     if (text.length === 0 && this.attachments.length === 0) return;
+    if (this.store.client.isAuthenticated && this.store.selectedSkillVersionId === 0) {
+      this.errorText = '请选择一个 FD Skill 后再发送；取消选择后可继续编辑任务，但当前移动 Agent 不会绕过 Skill 权限。';
+      this.syncFromStore();
+      return;
+    }
     if (this.attachments.some((item: FdAttachment) => item.state !== 'ready')) {
       this.errorText = '附件仍在上传或解析，请等待状态变为可用后再发送';
       this.syncFromStore();
@@ -148,7 +153,9 @@ struct Index {
   private async startQueuedTurn(turn: FdQueuedTurn): Promise<void> {
     this.store.removeQueued(turn.id);
     try {
-      const streamUrl = await this.store.startTurn(turn);
+      const streamUrl = await this.store.startTurn(turn, (_event: FdStreamEvent): void => {
+        this.syncFromStore();
+      });
       this.syncFromStore();
       if (streamUrl.length > 0) this.connectStream();
       else this.startNextQueuedTurn();

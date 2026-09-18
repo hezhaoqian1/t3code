@@ -2,9 +2,10 @@
 
 Date: `2026-09-19`
 
-Status: native ArkUI foundation and the first FD Runtime mobile read/recovery
-endpoints are implemented in dedicated worktrees. Turn streaming, attachment
-processing, and a real Harmony SDK build remain pending.
+Status: native ArkUI foundation, the FD Runtime mobile read/recovery contract,
+turn SSE, resumable attachment transfer, scoped preview, and text/image model
+input are implemented in dedicated worktrees. PDF/Office server-side parsing
+and a real Harmony SDK build remain pending.
 
 ## Decision
 
@@ -33,13 +34,15 @@ T3 already defines the product semantics we should preserve:
 - Thread and shell subscriptions use monotonically increasing sequences and an
   explicit synchronized marker.
 
-The FD gateway now also exposes the first versioned mobile/runtime read contract:
-`/api/mobile/v1/bootstrap`, `/skills`, `/threads`, and thread history/detail
-routes. These routes are a thin adapter over the existing `fd_desktop` binding,
-encrypted workspace history, and Skill authorization. They do not duplicate the
-long-lived history store or expose provider/tool internals. Turn streaming,
-attachment processing, and scoped preview are intentionally still separate
-follow-up work.
+The FD gateway now also exposes the versioned mobile/runtime contract:
+`/api/mobile/v1/bootstrap`, `/skills`, `/threads`, thread history/detail, turn
+SSE and explicit interrupt routes, plus resumable attachment upload and scoped
+preview routes. These routes are a thin adapter over the existing `fd_desktop`
+binding, encrypted workspace history, and Skill authorization. They do not
+duplicate the long-lived history store or expose provider/tool internals.
+Uploaded text files and images can be prepared for an Agent turn; PDF/Office
+files can be stored and previewed but still return an explicit unsupported
+error when sent as Agent context until server-side extraction is implemented.
 
 ## Ownership
 
@@ -152,9 +155,11 @@ the active turn is still running.
    chunk size and limits. `PUT /attachments/{id}/parts/{index}` uploads chunks;
    each part is checksum-verified and retryable. `POST /attachments/{id}/complete`
    finalizes the object.
-4. The server reports `queued`, `scanning`, `extracting`, `ocr`, `vision`,
-   `ready`, or `failed` through the same thread stream. A turn cannot claim an
-   attachment is readable until the server reports `ready`.
+4. The current gateway reports upload completion as `ready` for the transfer
+   layer. It does not yet run PDF/Office extraction or OCR; those files remain
+   previewable but are rejected as model context with a precise unsupported
+   response. The processing-state vocabulary is reserved for the parser/OCR
+   worker that will be added later.
 5. The turn contains only attachment IDs and a user-visible name. The runtime
    decides whether to use native model image input, DeepSeek visual preprocessing,
    OCR, or text extraction based on the selected model and policy.
@@ -339,7 +344,8 @@ The dedicated branch `codex/harmony-native-fd-client` currently contains:
   temporary ID. A 404/405 mobile API response is surfaced as an actionable error;
   the attachment is never silently sent through the legacy text-only endpoint.
 
-The production gateway still returns `404` for `/api/mobile/v1/threads`, so the
-new attachment and durable-thread paths are intentionally not described as
-deployed. The existing legacy Skill/history/SSE compatibility path remains
-available for text-only smoke tests.
+The dedicated gateway branch contains the mobile endpoints, but they have not
+been deployed to production from this worktree. The production gateway may
+still return `404` for `/api/mobile/v1/threads` until that branch is released.
+The existing legacy Skill/history/SSE compatibility path remains available for
+text-only smoke tests.

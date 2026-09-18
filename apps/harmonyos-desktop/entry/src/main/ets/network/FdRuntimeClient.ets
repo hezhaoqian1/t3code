@@ -20,6 +20,7 @@ import {
   createUuid,
   isoNow
 } from '../data/FdModels';
+import { util } from '@kit.ArkTS';
 
 type JsonObject = Record<string, Object>;
 type HttpVerb = 'GET' | 'POST' | 'DELETE';
@@ -179,7 +180,8 @@ export class FdRuntimeClient {
     text: string,
     attachments: Array<FdAttachment>,
     model: string,
-    skillVersionId?: number
+    skillVersionId?: number,
+    onEvent?: (event: FdStreamEvent) => void
   ): Promise<FdTurnReceipt> {
     const body: JsonObject = {
       requestId: createClientId('request'),
@@ -190,24 +192,23 @@ export class FdRuntimeClient {
       ...(skillVersionId === undefined ? {} : { skillVersionId })
     };
     try {
-      const root = await this.request(
-        `${FD_RUNTIME_API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns`,
-        'POST',
-        body
+      const events = await this.requestSse(
+        `${FD_RUNTIME_API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns`, body,
+        onEvent ?? ((_event: FdStreamEvent): void => {})
       );
-      const data = object(root['data'] ?? root);
+      const started = events.find((event: FdStreamEvent) => event.type === 'turn.started');
       return {
-        turnId: stringValue(data['turnId'] ?? data['turn_id']) || createClientId('turn'),
-        sequence: numberValue(data['sequence'], 0),
-        streamUrl: stringValue(data['streamUrl'] ?? data['stream_url']) || 'default',
-        events: []
+        turnId: started !== undefined && started.type === 'turn.started' ? started.turnId : createClientId('turn'),
+        sequence: 0,
+        streamUrl: '',
+        events
       };
     } catch (error) {
       if (!(error instanceof FdRuntimeError) || (error.code !== 'http_404' && error.code !== 'http_405')) throw error;
       if (attachments.length > 0) {
         throw new FdRuntimeError('attachments_require_mobile_api', '当前 FD 网关旧接口不支持鸿蒙附件，请等待移动附件接口上线');
       }
-      return this.startLegacySseTurn(threadId, text, model, skillVersionId);
+      return this.startLegacySseTurn(threadId, text, model, skillVersionId, onEvent);
     }
   }
 
@@ -293,8 +294,9 @@ export class FdRuntimeClient {
       name: stringValue(data['name']),
       mimeType: stringValue(data['mimeType'] ?? data['mime_type']),
       sizeBytes: numberValue(data['sizeBytes'] ?? data['size_bytes'], 0),
-      state: 'processing',
-      progress: 0
+      state: (stringValue(data['state']) as FdAttachment['state']) || 'processing',
+      progress: numberValue(data['progress'], stringValue(data['state']) === 'ready' ? 100 : 0),
+      ...(stringValue(data['errorMessage'] ?? data['error_message']).length === 0 ? {} : { errorMessage: stringValue(data['errorMessage'] ?? data['error_message']) })
     };
   }
 
@@ -305,7 +307,8 @@ export class FdRuntimeClient {
       { requestId: createClientId('preview') }
     );
     const data = object(root['data'] ?? root);
-    return stringValue(data['url'] ?? data['previewUrl'] ?? data['preview_url']);
+    const url = stringValue(data['url'] ?? data['previewUrl'] ?? data['preview_url']);
+    return url.startsWith('/') ? `${this.origin}${url}` : url;
   }
 
   connectThreadStream(
@@ -372,7 +375,8 @@ export class FdRuntimeClient {
     threadId: string,
     text: string,
     model: string,
-    skillVersionId?: number
+    skillVersionId?: number,
+    onEvent?: (event: FdStreamEvent) => void
   ): Promise<FdTurnReceipt> {
     if (this.runtimeTokenId === 0) this.runtimeTokenId = await this.findOrCreateRuntimeToken();
     const body: JsonObject = {
@@ -387,6 +391,9 @@ export class FdRuntimeClient {
     };
     const raw = await this.requestText(`${FD_LEGACY_API_PREFIX}/agent/turns`, body, 'text/event-stream');
     const events = parseLegacySse(raw);
+    if (onEvent !== undefined) {
+      for (const event of events) onEvent(event);
+    }
     const started = events.find((event: FdStreamEvent) => event.type === 'turn.started');
     const turnId = started !== undefined && started.type === 'turn.started' ? started.turnId : createClientId('turn');
     return { turnId, sequence: 0, streamUrl: '', events };
@@ -446,6 +453,90 @@ export class FdRuntimeClient {
       if (error instanceof FdRuntimeError) throw error;
       throw new FdRuntimeError('network_error', '无法连接 FD Agent');
     } finally {
+      request.destroy();
+    }
+  }
+
+  private async requestSse(
+    path: string,
+    body: JsonObject,
+    onEvent: (event: FdStreamEvent) => void
+  ): Promise<Array<FdStreamEvent>> {
+    if (this.accessToken.length === 0) throw new FdRuntimeError('unauthenticated', '请先登录 FD AI');
+    const request = http.createHttp();
+    const decoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+    const events: Array<FdStreamEvent> = [];
+    let pending = '';
+    let sequence = 0;
+    let parseError: FdRuntimeError | undefined;
+    let resolveEnd: (() => void) | undefined;
+    const endPromise = new Promise<void>((resolve: () => void) => { resolveEnd = resolve; });
+    const handleChunk = (data: ArrayBuffer): void => {
+      if (parseError !== undefined) return;
+      pending += decoder.decodeToString(new Uint8Array(data), { stream: true });
+      const blocks = pending.replace(/\r\n/g, '\n').split('\n\n');
+      pending = blocks.pop() ?? '';
+      for (const block of blocks) {
+        try {
+          const parsed = parseLegacySseBlock(block, sequence);
+          sequence = parsed.sequence;
+          if (parsed.event !== undefined) {
+            events.push(parsed.event);
+            onEvent(parsed.event);
+          }
+        } catch (error) {
+          parseError = error instanceof FdRuntimeError
+            ? error
+            : new FdRuntimeError('invalid_stream', 'FD Agent 返回了无法解析的事件');
+          return;
+        }
+      }
+    };
+    const handleEnd = (): void => {
+      if (resolveEnd !== undefined) resolveEnd();
+    };
+    request.on('dataReceive', handleChunk);
+    request.on('dataEnd', handleEnd);
+    try {
+      const responseCode = await new Promise<number>((resolve: (value: number) => void, reject: (reason: Object) => void) => {
+        request.requestInStream(this.origin + path, {
+          method: http.RequestMethod.POST,
+          header: {
+            Accept: 'text/event-stream',
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.accessToken}`
+          },
+          extraData: JSON.stringify(body),
+          usingCache: false,
+          readTimeout: 300000,
+          connectTimeout: 60000
+        }, (error: Object, code: number) => {
+          if (error !== null && error !== undefined) reject(error);
+          else resolve(code);
+        });
+      });
+      await endPromise;
+      pending += decoder.decodeToString(new Uint8Array(0), { stream: false });
+      if (pending.trim().length > 0 && parseError === undefined) {
+        const parsed = parseLegacySseBlock(pending, sequence);
+        sequence = parsed.sequence;
+        if (parsed.event !== undefined) {
+          events.push(parsed.event);
+          onEvent(parsed.event);
+        }
+      }
+      if (responseCode < 200 || responseCode >= 300) {
+        throw new FdRuntimeError(`http_${responseCode}`, 'FD Agent 请求失败');
+      }
+      if (parseError !== undefined) throw parseError;
+      if (events.length === 0) throw new FdRuntimeError('empty_stream', 'FD Agent 没有返回任务事件');
+      return events;
+    } catch (error) {
+      if (error instanceof FdRuntimeError) throw error;
+      throw new FdRuntimeError('network_error', '无法连接 FD Agent');
+    } finally {
+      request.off('dataReceive', handleChunk);
+      request.off('dataEnd', handleEnd);
       request.destroy();
     }
   }
@@ -524,6 +615,9 @@ function parseStreamEvent(value: JsonObject): FdStreamEvent {
   if (type === 'turn.started') return {
     type: 'turn.started', sequence, turnId: stringValue(value['turnId'] ?? value['turn_id']), model: stringValue(value['model'])
   };
+  if (type === 'turn.progress') return {
+    type: 'turn.progress', sequence, phase: stringValue(value['phase']), message: stringValue(value['message'])
+  };
   if (type === 'skill.authorized') return {
     type: 'skill.authorized', sequence, skillVersionId: numberValue(value['skillVersionId'] ?? value['skill_version_id'], 0)
   };
@@ -540,35 +634,40 @@ function parseLegacySse(raw: string): Array<FdStreamEvent> {
   let sequence = 0;
   const blocks = raw.replace(/\r\n/g, '\n').split('\n\n');
   for (const block of blocks) {
-    let eventName = '';
-    const dataLines: Array<string> = [];
-    for (const line of block.split('\n')) {
-      if (line.startsWith('event:')) eventName = line.slice(6).trim();
-      if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-    }
-    if (eventName.length === 0 || dataLines.length === 0) continue;
-    try {
-      const value = object(JSON.parse(dataLines.join('\n')));
-      sequence += 1;
-      const turnId = stringValue(value['turn_id'] ?? value['turnId']);
-      if (eventName === 'turn.started') {
-        events.push({ type: 'turn.started', sequence, turnId, model: stringValue(value['model']) });
-      } else if (eventName === 'assistant.delta') {
-        events.push({ type: 'assistant.delta', sequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || createClientId('message'), delta: stringValue(value['delta']) });
-      } else if (eventName === 'turn.completed') {
-        const message = object(value['message'] ?? value);
-        events.push({ type: 'turn.completed', sequence, messageId: stringValue(message['id']) || createClientId('message'), text: stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined });
-      } else if (eventName === 'turn.failed') {
-        events.push({ type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true });
-      } else if (eventName === 'tool.started') {
-        events.push({ type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label']) });
-      } else if (eventName === 'tool.completed') {
-        events.push({ type: 'tool.completed', sequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' });
-      }
-    } catch (_error) {
-      throw new FdRuntimeError('invalid_stream', 'FD Agent 返回了无法解析的事件');
+    const parsed = parseLegacySseBlock(block, sequence);
+    sequence = parsed.sequence;
+    if (parsed.event !== undefined) {
+      events.push(parsed.event);
     }
   }
   if (events.length === 0) throw new FdRuntimeError('empty_stream', 'FD Agent 没有返回任务事件');
   return events;
+}
+
+function parseLegacySseBlock(block: string, currentSequence: number): { event?: FdStreamEvent; sequence: number } {
+  let eventName = '';
+  const dataLines: Array<string> = [];
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) eventName = line.slice(6).trim();
+    if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+  }
+  if (eventName.length === 0 || dataLines.length === 0) return { sequence: currentSequence };
+  try {
+    const value = object(JSON.parse(dataLines.join('\n')));
+    const sequence = currentSequence + 1;
+    const turnId = stringValue(value['turn_id'] ?? value['turnId']);
+    if (eventName === 'turn.started') return { sequence, event: { type: 'turn.started', sequence, turnId, model: stringValue(value['model']) } };
+    if (eventName === 'turn.progress') return { sequence, event: { type: 'turn.progress', sequence, phase: stringValue(value['phase']), message: stringValue(value['message']) } };
+    if (eventName === 'assistant.delta') return { sequence, event: { type: 'assistant.delta', sequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || createClientId('message'), delta: stringValue(value['delta']) } };
+    if (eventName === 'turn.completed') {
+      const message = object(value['message'] ?? value);
+      return { sequence, event: { type: 'turn.completed', sequence, messageId: stringValue(message['id']) || createClientId('message'), text: stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
+    }
+    if (eventName === 'turn.failed') return { sequence, event: { type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
+    if (eventName === 'tool.started') return { sequence, event: { type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };
+    if (eventName === 'tool.completed') return { sequence, event: { type: 'tool.completed', sequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' } };
+    return { sequence: currentSequence };
+  } catch (_error) {
+    throw new FdRuntimeError('invalid_stream', 'FD Agent 返回了无法解析的事件');
+  }
 }

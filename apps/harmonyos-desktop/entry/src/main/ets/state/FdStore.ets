@@ -111,6 +111,17 @@ export class FdStore {
     }
     this.selectedModel = this.activeThread.model;
     this.selectedSkillVersionId = this.activeThread.skillVersionId ?? 0;
+    // Mobile thread snapshots intentionally omit Skill internals. Start a
+    // recovered thread with the first server-authorized Skill so the first
+    // send is usable; the user can still deselect it explicitly in the sheet.
+    if (this.selectedSkillVersionId === 0 && this.skills.length > 0) {
+      for (const skill of this.skills) {
+        if (skill.modelCapabilities.length === 0 || skill.modelCapabilities.includes(this.selectedModel)) {
+          this.selectedSkillVersionId = skill.versionId;
+          break;
+        }
+      }
+    }
   }
 
   async createThread(): Promise<void> {
@@ -204,7 +215,7 @@ export class FdStore {
     this.queuedTurns[target] = current;
   }
 
-  async startTurn(turn: FdQueuedTurn): Promise<string> {
+  async startTurn(turn: FdQueuedTurn, onEvent?: (event: FdStreamEvent) => void): Promise<string> {
     const userMessage: FdMessage = {
       id: createClientId('message'),
       role: 'user',
@@ -233,15 +244,27 @@ export class FdStore {
       this.activeThread.state = 'idle';
       return '';
     }
+    let terminalEvent = false;
     const receipt = await this.client.startTurn(
       this.activeThread.id,
       turn.text,
       turn.attachments,
       turn.model,
-      turn.skillVersionId
+      turn.skillVersionId,
+      (event: FdStreamEvent): void => {
+        if (event.type === 'turn.started') this.activeTurnId = event.turnId;
+        this.applyEvent(event);
+        if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
+          terminalEvent = true;
+        }
+        if (onEvent !== undefined) onEvent(event);
+      }
     );
-    this.activeTurnId = receipt.turnId;
-    for (const event of receipt.events) this.applyEvent(event);
+    if (!terminalEvent) this.activeTurnId = receipt.turnId;
+    if (receipt.events.length === 0) {
+      this.activeThread.state = 'error';
+      this.lastError = 'FD Runtime 没有返回任务事件';
+    }
     return receipt.streamUrl;
   }
 
@@ -257,6 +280,12 @@ export class FdStore {
         this.activeThread.state = 'working';
         this.activeThread.activities.push({
           id: createClientId('activity'), kind: 'turn.started', summary: `模型 ${event.model} 已开始处理`, tone: 'info', createdAt: isoNow()
+        });
+        break;
+      case 'turn.progress':
+        this.activeThread.state = 'working';
+        this.activeThread.activities.push({
+          id: createClientId('activity'), kind: event.phase, summary: event.message, tone: 'info', createdAt: isoNow()
         });
         break;
       case 'skill.authorized':
