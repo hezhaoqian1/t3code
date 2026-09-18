@@ -6,9 +6,13 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const Secret = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(16_384));
 const MAX_FD_RUNTIME_ORIGIN_LENGTH = 2_048;
 
-export const FD_RUNTIME_DEFAULT_MODEL = "deepseek-v4-flash" as const;
+/** Canonical DeepSeek model name. The V4 aliases below remain readable for
+ * existing credentials and persisted threads. */
+export const FD_RUNTIME_DEFAULT_MODEL = "deepseek-flash" as const;
+export const FD_RUNTIME_LEGACY_DEFAULT_MODEL = "deepseek-v4-flash" as const;
 export const FD_RUNTIME_PRO_MODEL = "deepseek-v4-pro" as const;
-export const FD_RUNTIME_VISION_MODEL = "deepseek-v4-flash-vision-exp" as const;
+export const FD_RUNTIME_VISION_MODEL = FD_RUNTIME_DEFAULT_MODEL;
+export const FD_RUNTIME_LEGACY_VISION_MODEL = "deepseek-v4-flash-vision-exp" as const;
 export const FD_RUNTIME_QWEN_MAX_MODEL = "qwen3.8-max" as const;
 export const FD_RUNTIME_QWEN_FLASH_MODEL = "qwen3.8-flash" as const;
 export const FD_RUNTIME_GLM_MODEL = "glm-5.2" as const;
@@ -23,17 +27,20 @@ export const FD_RUNTIME_SELECTABLE_MODELS = [
 ] as const;
 export const FD_RUNTIME_MODELS = [
   ...FD_RUNTIME_SELECTABLE_MODELS,
-  FD_RUNTIME_VISION_MODEL,
+  FD_RUNTIME_LEGACY_DEFAULT_MODEL,
+  FD_RUNTIME_LEGACY_VISION_MODEL,
 ] as const;
 export type FdRuntimeModel = (typeof FD_RUNTIME_MODELS)[number];
-export type FdRuntimeSelectableModel = (typeof FD_RUNTIME_SELECTABLE_MODELS)[number];
+export type FdRuntimeSelectableModel =
+  | (typeof FD_RUNTIME_SELECTABLE_MODELS)[number]
+  | typeof FD_RUNTIME_LEGACY_DEFAULT_MODEL;
 
 export function isFdRuntimeModel(value: string): value is FdRuntimeModel {
   return FD_RUNTIME_MODELS.some((model) => model === value);
 }
 
 export function isFdRuntimeSelectableModel(value: string): value is FdRuntimeSelectableModel {
-  return FD_RUNTIME_SELECTABLE_MODELS.some((model) => model === value);
+  return FD_RUNTIME_SELECTABLE_MODELS.some((model) => model === value) || value === FD_RUNTIME_LEGACY_DEFAULT_MODEL;
 }
 
 export const FdRuntimeNewApiOrigin = Schema.String.check(
@@ -49,30 +56,25 @@ export type FdRuntimeNewApiOrigin = typeof FdRuntimeNewApiOrigin.Type;
 export const FdServerRuntimePolicyProjection = Schema.Struct({
   version: Schema.Literal(1),
   capability: Schema.Literal("general_assistant"),
-  model: Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
+  model: Schema.Union([
+    Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
+    Schema.Literal(FD_RUNTIME_LEGACY_DEFAULT_MODEL),
+  ]),
   // Accept the pre-vision two-model policy while allowing newly issued
   // credentials to authorize the internal Vision preprocessor.
   models: Schema.optionalKey(
-    Schema.Union([
-      Schema.Tuple([
-        Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
-        Schema.Literal(FD_RUNTIME_PRO_MODEL),
+    Schema.Array(
+      Schema.Literals([
+        FD_RUNTIME_DEFAULT_MODEL,
+        FD_RUNTIME_LEGACY_DEFAULT_MODEL,
+        FD_RUNTIME_PRO_MODEL,
+        FD_RUNTIME_LEGACY_VISION_MODEL,
+        FD_RUNTIME_QWEN_MAX_MODEL,
+        FD_RUNTIME_QWEN_FLASH_MODEL,
+        FD_RUNTIME_GLM_MODEL,
+        FD_RUNTIME_KIMI_MODEL,
       ]),
-      Schema.Tuple([
-        Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
-        Schema.Literal(FD_RUNTIME_PRO_MODEL),
-        Schema.Literal(FD_RUNTIME_VISION_MODEL),
-      ]),
-      Schema.Tuple([
-        Schema.Literal(FD_RUNTIME_DEFAULT_MODEL),
-        Schema.Literal(FD_RUNTIME_PRO_MODEL),
-        Schema.Literal(FD_RUNTIME_QWEN_MAX_MODEL),
-        Schema.Literal(FD_RUNTIME_QWEN_FLASH_MODEL),
-        Schema.Literal(FD_RUNTIME_GLM_MODEL),
-        Schema.Literal(FD_RUNTIME_KIMI_MODEL),
-        Schema.Literal(FD_RUNTIME_VISION_MODEL),
-      ]),
-    ]),
+    ),
   ),
   expiresAt: PositiveInt,
 }).annotate(strict);

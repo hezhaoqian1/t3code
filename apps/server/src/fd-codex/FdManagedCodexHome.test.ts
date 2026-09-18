@@ -45,7 +45,7 @@ describe("FD managed Codex runtime boundary", () => {
     });
 
     const config = await readFile(configPath, "utf8");
-    expect(config).toContain('model = "deepseek-v4-flash"');
+    expect(config).toContain('model = "deepseek-flash"');
     expect(config).toContain('model_provider = "fd_new_api"');
     expect(config).toContain('base_url = "http://127.0.0.1:3001/v1"');
     expect(config).toContain('env_key = "FD_NEW_API_KEY"');
@@ -170,12 +170,13 @@ describe("FD managed Codex runtime boundary", () => {
           capability: "general_assistant",
           model: "deepseek-v4-flash",
           models: [
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "deepseek-v4-pro",
             "qwen3.8-max",
             "qwen3.8-flash",
             "glm-5.2",
             "kimi-k3",
+            "deepseek-v4-flash",
             "deepseek-v4-flash-vision-exp",
           ],
           expiresAt: 4_102_444_800,

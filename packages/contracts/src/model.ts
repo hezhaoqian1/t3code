@@ -141,7 +141,7 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 
 const FD_DEEPSEEK_DRIVER_KIND = ProviderDriverKind.make("fd-deepseek");
 
-export const DEFAULT_MODEL = "deepseek-v4-flash";
+export const DEFAULT_MODEL = "deepseek-flash";
 export const DEFAULT_TEXT_GENERATION_MODEL = DEFAULT_MODEL;
 
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
@@ -157,7 +157,12 @@ export const DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER: Partial<
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Partial<
   Record<ProviderDriverKind, Record<string, string>>
-> = { [FD_DEEPSEEK_DRIVER_KIND]: {} };
+> = {
+  [FD_DEEPSEEK_DRIVER_KIND]: {
+    "deepseek-v4-flash": DEFAULT_MODEL,
+    "deepseek-v4-flash-vision-exp": DEFAULT_MODEL,
+  },
+};
 
 // ── Provider display names ────────────────────────────────────────────
 

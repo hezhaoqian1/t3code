@@ -80,7 +80,7 @@ export async function prepareAttachments(input: {
           // Native routes must use the selected authorized model. Keeping
           // the model here matters for dynamically added visual models; the
           // Kimi slug is only the legacy fallback for the shared preprocessor.
-          model: effectiveRoute === "native" ? input.model : "deepseek-v4-flash-vision-exp",
+          model: effectiveRoute === "native" ? input.model : "deepseek-flash",
           images: [
             {
               type: "input_image",

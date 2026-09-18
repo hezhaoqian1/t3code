@@ -7,7 +7,7 @@ describe("Responses-backed Codex configuration", () => {
   it("renders a provider config without embedding a secret", () => {
     const config = renderResponsesCodexConfig(FD_RESPONSES_PROVIDER);
 
-    expect(config).toContain('model = "deepseek-v4-flash"');
+    expect(config).toContain('model = "deepseek-flash"');
     expect(config).toContain('model_provider = "fd_new_api"');
     expect(config).toContain('env_key = "FD_NEW_API_KEY"');
     expect(config).toContain('wire_api = "responses"');

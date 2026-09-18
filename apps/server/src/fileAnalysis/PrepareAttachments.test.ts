@@ -68,7 +68,7 @@ describe("prepare attachments", () => {
         },
       },
     });
-    expect(requests[0]?.model).toBe("deepseek-v4-flash-vision-exp");
+    expect(requests[0]?.model).toBe("deepseek-flash");
     expect(visualRequested).toBe(true);
     expect(result.input).toContain("page 1");
   });
