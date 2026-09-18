@@ -21,15 +21,20 @@ export function shouldShowProviderStatusBanner(
 export const ProviderStatusBanner = memo(function ProviderStatusBanner({
   onDismiss,
   status,
+  fdAuthenticated = false,
 }: {
   onDismiss: () => void;
   status: ServerProvider | null;
+  /** The desktop account state is authoritative immediately after login.
+   * The provider catalog can lag one websocket/config event behind it. */
+  fdAuthenticated?: boolean;
 }) {
   if (!status || status.status === "ready" || status.status === "disabled") {
     return null;
   }
 
   const isUnauthenticated = status.auth.status === "unauthenticated";
+  if (isUnauthenticated && fdAuthenticated) return null;
   const title = isUnauthenticated ? "需要登录" : "智能服务暂不可用";
   const message = isUnauthenticated
     ? "请登录方德账号后继续。"

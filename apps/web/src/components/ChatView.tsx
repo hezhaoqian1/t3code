@@ -175,6 +175,7 @@ import { FD_SKILL_THREAD_TITLE, selectedFdSkillVersionId } from "../fdSkillSelec
 import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import { hasPendingAttachmentPreparation, useSendQueueStore } from "../sendQueueStore";
+import { useFdAccount } from "../fd/FdAccountProvider";
 import {
   isOfficeWorkspaceProject,
   shouldBlockOfficeTechnicalWorkbenchCommand,
@@ -1158,6 +1159,7 @@ function chatActionErrorMessage(error: unknown): string {
 }
 
 function ChatViewContent(props: ChatViewProps) {
+  const fdAccount = useFdAccount();
   const {
     environmentId,
     threadId,
@@ -5989,6 +5991,7 @@ function ChatViewContent(props: ChatViewProps) {
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <ProviderStatusBanner
                 status={visibleProviderStatus}
+                fdAuthenticated={fdAccount.state.status === "authenticated"}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
               />
             </div>
