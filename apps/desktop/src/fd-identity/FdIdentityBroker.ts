@@ -90,11 +90,6 @@ export class FdIdentityBroker {
         this.#setState({ status: "credentials_unavailable", message: STORAGE_MESSAGE });
         return;
       }
-      if (this.#vaultState.pendingRevocations.length > 0) {
-        await this.#clearProjection("revocation-pending");
-        this.#setRevocationPending();
-        return;
-      }
       const active = this.#vaultState.active;
       if (!active) {
         await this.#clearProjection("anonymous");
@@ -118,10 +113,6 @@ export class FdIdentityBroker {
   reload(): Promise<FdAccountReloadResult> {
     if (this.#refreshFlight) return this.#refreshFlight;
     const flight = this.#serialize(async () => {
-      if (this.#vaultState.pendingRevocations.length > 0) {
-        this.#setRevocationPending();
-        return { state: this.getState() };
-      }
       if (!this.#vaultState.active) {
         this.#setState({ status: "anonymous" });
         return { state: this.getState() };
@@ -159,58 +150,30 @@ export class FdIdentityBroker {
 
   login(input: FdAccountLoginInput): Promise<FdAccountLoginResult> {
     return this.#serialize(async () => {
-      let recoveredAuth: NewApiAuthSession | undefined;
-      if (this.#vaultState.pendingRevocations.length > 0) {
-        try {
-          recoveredAuth = await this.#client.authenticate(input.username.trim(), input.password);
-        } catch (error) {
-          this.#setRevocationPending();
-          return { ...loginFailure(error), state: this.getState() };
-        }
-        if (
-          this.#vaultState.pendingRevocations.some(
-            (pending) => pending.userId !== recoveredAuth?.user.id,
-          )
-        ) {
-          await this.#client
-            .logoutSession(toPendingRevocationFromAuth(recoveredAuth, "authentication-recovery"))
-            .catch(() => undefined);
-          this.#setRevocationPending();
-          return {
-            ok: false,
-            code: "revocation_pending",
-            message: "请使用上次登录的员工账号完成安全恢复。",
-            state: this.getState(),
-          };
-        }
-        if (!(await this.#recoverPendingRevocations(recoveredAuth))) {
-          return {
-            ok: false,
-            code: "revocation_pending",
-            message: REVOCATION_MESSAGE,
-            state: this.getState(),
-          };
-        }
-      }
-      if (this.#vaultState.active) {
-        return {
-          ok: false,
-          code: "account_unavailable",
-          message: "当前账号状态需要先刷新，无法直接切换账号。",
-          state: this.getState(),
+      let previousPendingRevocations = [...this.#vaultState.pendingRevocations];
+      const previousActive = this.#vaultState.active;
+      if (previousActive) {
+        await this.#clearProjection("login-replace");
+        this.#vaultState = {
+          active: null,
+          pendingRevocations: enqueuePendingRevocation(
+            previousPendingRevocations,
+            toPendingRevocation(previousActive),
+          ),
         };
+        await this.#vault.save(this.#vaultState);
+        previousPendingRevocations = [...this.#vaultState.pendingRevocations];
       }
       let pending: PendingFdRevocation | undefined;
       try {
         const deviceId = await this.#vault.deviceId();
         const runtimeTokenName = desktopRuntimeTokenName(deviceId);
         await this.#vault.save(this.#vaultState);
-        const auth =
-          recoveredAuth ?? (await this.#client.authenticate(input.username.trim(), input.password));
+        const auth = await this.#client.authenticate(input.username.trim(), input.password);
         pending = toPendingRevocationFromAuth(auth, runtimeTokenName);
         const pendingState: StoredFdVaultState = {
           active: null,
-          pendingRevocations: [pending],
+          pendingRevocations: enqueuePendingRevocation(previousPendingRevocations, pending),
         };
         await this.#vault.save(pendingState);
         this.#vaultState = pendingState;
@@ -225,16 +188,20 @@ export class FdIdentityBroker {
         pending = toPendingRevocation(credentials);
         const validatedPendingState: StoredFdVaultState = {
           active: null,
-          pendingRevocations: [pending],
+          pendingRevocations: enqueuePendingRevocation(previousPendingRevocations, pending),
         };
         await this.#vault.save(validatedPendingState);
         this.#vaultState = validatedPendingState;
         await this.#publishProjection(credentials);
-        const activeState: StoredFdVaultState = { active: credentials, pendingRevocations: [] };
+        const activeState: StoredFdVaultState = {
+          active: credentials,
+          pendingRevocations: previousPendingRevocations,
+        };
         await this.#vault.save(activeState);
         this.#vaultState = activeState;
         this.#setState(this.#authenticatedState(credentials));
         this.#startPeriodicRefresh();
+        void this.#retryPendingRevocationsInBackground();
         return {
           ok: true,
           state: this.getState() as Extract<FdAccountState, { status: "authenticated" }>,
@@ -332,11 +299,12 @@ export class FdIdentityBroker {
   async #completePendingRevocation(pending: PendingFdRevocation): Promise<boolean> {
     try {
       let current = pending;
+      const active = this.#vaultState.active;
       const remaining = this.#vaultState.pendingRevocations.slice(1);
       if (!current.tokensRevoked) {
         current = await this.#client.refreshPendingRevocation(current);
         if (current !== pending) {
-          this.#vaultState = { active: null, pendingRevocations: [current, ...remaining] };
+          this.#vaultState = { active, pendingRevocations: [current, ...remaining] };
           await this.#vault.save(this.#vaultState);
         }
         await this.#client.revokeRuntimeTokens({
@@ -344,57 +312,42 @@ export class FdIdentityBroker {
           runtimeTokenName: current.runtimeTokenName,
         });
         current = { ...current, tokensRevoked: true };
-        this.#vaultState = { active: null, pendingRevocations: [current, ...remaining] };
+        this.#vaultState = { active, pendingRevocations: [current, ...remaining] };
         await this.#vault.save(this.#vaultState);
       }
       await this.#client.logoutSession(current, async (refreshed) => {
         current = refreshed;
-        this.#vaultState = { active: null, pendingRevocations: [current, ...remaining] };
+        this.#vaultState = { active, pendingRevocations: [current, ...remaining] };
         await this.#vault.save(this.#vaultState);
       });
       const completedState: StoredFdVaultState = {
-        active: null,
+        active,
         pendingRevocations: remaining,
       };
       await this.#vault.save(completedState);
       this.#vaultState = completedState;
-      if (remaining.length === 0) this.#setState({ status: "anonymous" });
-      else this.#setRevocationPending();
+      if (remaining.length === 0) {
+        this.#setState(active ? this.#authenticatedState(active) : { status: "anonymous" });
+      } else if (!active) {
+        this.#setRevocationPending();
+      }
       return true;
     } catch {
-      this.#setRevocationPending();
+      if (this.#vaultState.active)
+        this.#setState(this.#authenticatedState(this.#vaultState.active));
+      else this.#setRevocationPending();
       return false;
     }
   }
 
-  async #recoverPendingRevocations(auth: NewApiAuthSession): Promise<boolean> {
-    try {
+  #retryPendingRevocationsInBackground(): Promise<void> {
+    if (this.#vaultState.pendingRevocations.length === 0) return Promise.resolve();
+    return this.#serialize(async () => {
       while (this.#vaultState.pendingRevocations.length > 0) {
-        let pending = this.#vaultState.pendingRevocations[0]!;
-        const remaining = this.#vaultState.pendingRevocations.slice(1);
-        if (!pending.tokensRevoked) {
-          await this.#client.revokeRuntimeTokens({
-            accessToken: auth.accessToken,
-            runtimeTokenName: pending.runtimeTokenName,
-          });
-          pending = { ...pending, tokensRevoked: true };
-          this.#vaultState = { active: null, pendingRevocations: [pending, ...remaining] };
-          await this.#vault.save(this.#vaultState);
-        }
-        await this.#client.logoutSession(pending, async (refreshed) => {
-          pending = refreshed;
-          this.#vaultState = { active: null, pendingRevocations: [pending, ...remaining] };
-          await this.#vault.save(this.#vaultState);
-        });
-        this.#vaultState = { active: null, pendingRevocations: remaining };
-        await this.#vault.save(this.#vaultState);
+        const pending = this.#vaultState.pendingRevocations[0];
+        if (!pending || !(await this.#completePendingRevocation(pending))) break;
       }
-      this.#setState({ status: "anonymous" });
-      return true;
-    } catch {
-      this.#setRevocationPending();
-      return false;
-    }
+    });
   }
 
   async #publishProjection(credentials: StoredFdCredentials): Promise<void> {
@@ -476,11 +429,7 @@ export class FdIdentityBroker {
     if (this.#disposed || this.#refreshIntervalMs <= 0 || this.#refreshTimer) return;
     // @effect-diagnostics globalTimers:off
     this.#refreshTimer = setInterval(() => {
-      if (
-        !this.#disposed &&
-        this.#vaultState.active &&
-        this.#vaultState.pendingRevocations.length === 0
-      ) {
+      if (!this.#disposed && this.#vaultState.active) {
         void this.reload().catch(() => undefined);
       }
     }, this.#refreshIntervalMs);
