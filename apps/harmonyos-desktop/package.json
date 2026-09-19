@@ -2,6 +2,7 @@
   "name": "@fdsure/harmonyos-fd-client",
   "private": true,
   "scripts": {
+    "check": "node ../../scripts/check-harmony-native.mjs",
     "build": "hvigorw assembleHap --mode module -p product=default",
     "clean": "hvigorw clean"
   }

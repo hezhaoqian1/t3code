@@ -5,7 +5,6 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = resolve(root, "apps/harmonyos-desktop");
-
 const read = (relativePath) => readFileSync(resolve(app, relativePath), "utf8");
 const requiredFiles = [
   "AppScope/app.json5",
@@ -13,12 +12,17 @@ const requiredFiles = [
   "AppScope/resources/base/media/icon.svg",
   "entry/src/main/module.json5",
   "entry/src/main/resources/base/profile/main_pages.json",
+  "entry/src/main/ets/entryability/EntryAbility.ets",
   "entry/src/main/ets/config/HarmonyConfig.ets",
   "entry/src/main/ets/data/FdModels.ets",
   "entry/src/main/ets/network/FdRuntimeClient.ets",
   "entry/src/main/ets/network/AttachmentTransfer.ets",
   "entry/src/main/ets/state/FdStore.ets",
   "entry/src/main/ets/pages/Index.ets",
+  "build-profile.json5",
+  "hvigorfile.ts",
+  "hvigor-config.json5",
+  "oh-package.json5",
 ];
 
 for (const file of requiredFiles) assert.ok(existsSync(resolve(app, file)), `missing ${file}`);
@@ -28,7 +32,9 @@ const client = read("entry/src/main/ets/network/FdRuntimeClient.ets");
 const transfer = read("entry/src/main/ets/network/AttachmentTransfer.ets");
 const store = read("entry/src/main/ets/state/FdStore.ets");
 const config = read("entry/src/main/ets/config/HarmonyConfig.ets");
+const moduleJson5 = read("entry/src/main/module.json5");
 
+assert.match(index, /@Entry/);
 assert.match(index, /DocumentViewPicker/);
 assert.match(index, /ForEach\(this\.threads/);
 assert.match(index, /ForEach\(this\.messages/);
@@ -37,7 +43,10 @@ assert.match(index, /buildQueueSheet/);
 assert.match(index, /buildPreviewSheet/);
 assert.match(index, /connectThreadStream/);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);
-assert.doesNotMatch(index, /HARMONY_WEB_URL|USE_PACKAGED_WEB_BUNDLE/);
+assert.doesNotMatch(
+  index,
+  /HARMONY_WEB_URL|USE_PACKAGED_WEB_BUNDLE|this\.webUrl|onShowFileSelector/,
+);
 
 assert.match(client, /fd-skills\/self/);
 assert.match(client, /agent\/turns/);
@@ -55,23 +64,22 @@ assert.match(client, /supportedModels/);
 assert.match(client, /getThreadHistory/);
 assert.match(client, /historyCursor/);
 assert.match(client, /identifierValue/);
+assert.match(client, /afterSequence=/);
+assert.match(client, /Authorization/);
 assert.match(transfer, /fileIo\.openSync/);
 assert.match(transfer, /fileIo\.readSync/);
 assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
 assert.match(transfer, /wholeDigest\.digest/);
 assert.match(transfer, /uploadPickedAttachment/);
-assert.match(client, /afterSequence=/);
-assert.match(client, /Authorization/);
 assert.match(store, /activeTurnId/);
 assert.match(store, /this\.queuedTurns/);
+assert.match(store, /editQueued/);
 assert.match(store, /this\.models/);
 assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /loadOlderHistory/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
 assert.match(config, /deepseek-flash/);
-
-const moduleJson5 = read("entry/src/main/module.json5");
 assert.match(moduleJson5, /ohos\.permission\.INTERNET/);
 assert.match(moduleJson5, /deviceTypes/);
 

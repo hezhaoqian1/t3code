@@ -78,9 +78,14 @@ export class FdStore {
     }
     try {
       const threads = await this.client.listThreads();
+      // A successful empty response is authoritative. Keeping the offline
+      // sample row after sign-in makes a real account appear to have history
+      // and sends the first message to a non-existent local thread.
+      this.threads = threads;
       if (threads.length > 0) {
-        this.threads = threads;
         await this.openThread(threads[0].id);
+      } else {
+        await this.createThread();
       }
     } catch (error) {
       // The native shell remains usable while the mobile API is being rolled out.
@@ -192,6 +197,10 @@ export class FdStore {
     this.activeThread.attachments = this.activeThread.attachments.filter(
       (item: FdAttachment) => item.attachmentId !== attachmentId
     );
+  }
+
+  clearAttachments(): void {
+    this.activeThread.attachments = [];
   }
 
   enqueueTurn(text: string): FdQueuedTurn {
