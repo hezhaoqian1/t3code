@@ -96,6 +96,9 @@ export class FdStore {
         // Legacy Agent turns create a conversation lazily. Keep a real UUID
         // shell so the user can send text while the mobile API rolls out.
         try {
+          // Do not leak constructor-only demo rows into an authenticated
+          // account when the compatibility route is active.
+          this.threads = [];
           await this.createThread();
           this.lastError = '';
         } catch (fallbackError) {
