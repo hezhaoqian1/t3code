@@ -44,6 +44,7 @@ assert.match(index, /buildQueueSheet/);
 assert.match(index, /buildPreviewSheet/);
 assert.match(index, /connectThreadStream/);
 assert.match(index, /sendQueuedImmediately/);
+assert.match(index, /运行进度/);
 assert.match(index, /this.store.clearAttachments()/);
 assert.match(index, /activeTurnId.length/);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);

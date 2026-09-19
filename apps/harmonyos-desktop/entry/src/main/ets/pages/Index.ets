@@ -5,6 +5,7 @@ import { webview } from '@kit.ArkWeb';
 import { FD_DEFAULT_MODEL, FD_RUNTIME_ORIGIN } from '../config/HarmonyConfig';
 import {
   FdAttachment,
+  FdActivity,
   FdMessage,
   FdQueuedTurn,
   FdSkill,
@@ -32,6 +33,7 @@ struct Index {
   @State private loginError: string = '';
   @State private threads: Array<FdThreadShell> = [];
   @State private messages: Array<FdMessage> = [];
+  @State private activities: Array<FdActivity> = [];
   @State private attachments: Array<FdAttachment> = [];
   @State private skills: Array<FdSkill> = [];
   @State private models: Array<string> = [FD_DEFAULT_MODEL];
@@ -60,6 +62,7 @@ struct Index {
     this.accountName = this.store.accountName;
     this.threads = this.store.threads.slice();
     this.messages = this.store.activeThread.messages.slice();
+    this.activities = this.store.activeThread.activities.slice(-12);
     this.attachments = this.store.activeThread.attachments.slice();
     this.skills = this.store.skills.slice();
     this.models = this.store.models.slice();
@@ -69,7 +72,12 @@ struct Index {
     this.selectedSkillVersionId = this.store.selectedSkillVersionId;
     this.selectedModel = this.store.selectedModel;
     if (this.store.lastError.length > 0) this.errorText = this.store.lastError;
-    if (this.store.activeThread.state === 'working' || this.store.activeTurnId.length > 0) this.statusText = '正在处理';
+    const latestActivity = this.activities[this.activities.length - 1];
+    if ((this.store.activeThread.state === 'working' || this.store.activeTurnId.length > 0) && latestActivity !== undefined && latestActivity.summary.length > 0) {
+      this.statusText = latestActivity.summary;
+    } else if (this.store.activeThread.state === 'working' || this.store.activeTurnId.length > 0) {
+      this.statusText = '正在处理';
+    }
     else if (this.store.activeThread.state === 'queued') this.statusText = `排队中 (${this.queuedTurns.length})`;
     else this.statusText = this.signedIn ? '已连接 FD Runtime' : '离线演示模式';
   }
@@ -512,6 +520,31 @@ struct Index {
       Divider().color('#DFE7EA');
       Scroll() {
         Column() {
+          if (this.activities.length > 0) {
+            Column() {
+              Text('运行进度').fontSize(12).fontColor('#80939A').margin({ bottom: 4 });
+              ForEach(this.activities, (activity: FdActivity) => {
+                Row() {
+                  LoadingProgress()
+                    .width(12)
+                    .height(12)
+                    .visibility(activity.kind === 'turn.started' || activity.kind === 'understanding' || activity.kind === 'answering' ? Visibility.Visible : Visibility.None)
+                  Text(activity.summary)
+                    .fontSize(12)
+                    .fontColor(activity.tone === 'error' ? '#C2414A' : '#52717B')
+                    .margin({ left: 6 })
+                    .maxLines(2);
+                }
+                .width('100%')
+                .padding({ top: 3, bottom: 3 });
+              }, (activity: FdActivity) => activity.id);
+            }
+            .width('calc(100% - 48vp)')
+            .padding(12)
+            .margin({ left: 24, right: 24, top: 10, bottom: 4 })
+            .backgroundColor('#F5F7FA')
+            .borderRadius(8)
+          }
           if (this.store.activeThread.hasMoreHistory) {
             Text(this.historyBusy ? '正在加载更早历史...' : '加载更早历史')
               .fontSize(12)
