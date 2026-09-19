@@ -100,7 +100,7 @@ describe("FdIdentityBroker", () => {
     expect(result.state).toEqual({ status: "anonymous" });
   });
 
-  it("persists and exposes revocation_pending when DELETE is unavailable, then retries safely", async () => {
+  it("allows a different account while an old revocation is pending", async () => {
     let storedState: StoredFdVaultState = { active: credentials(), pendingRevocations: [] };
     const vault = mockVault({
       load: vi.fn(async () => storedState),
@@ -131,13 +131,12 @@ describe("FdIdentityBroker", () => {
     expect(storedState.pendingRevocations).toHaveLength(1);
 
     const login = await broker.login({ username: "different-user", password: "password" });
-    expect(login).toMatchObject({ ok: false, code: "revocation_pending" });
+    expect(login).toMatchObject({
+      ok: true,
+      state: { status: "authenticated", profile: { id: 99 } },
+    });
     expect(authenticate).toHaveBeenCalledOnce();
-    expect(logoutSession).toHaveBeenCalledOnce();
-
-    const retry = await broker.retryRevocation();
-    expect(retry).toEqual({ completed: true, state: { status: "anonymous" } });
-    expect(revokeRuntimeTokens).toHaveBeenCalledTimes(2);
+    expect(storedState.active).toMatchObject({ user: { id: 99, username: "different-user" } });
   });
 
   it("serializes concurrent state-changing operations", async () => {
@@ -332,7 +331,7 @@ describe("FdIdentityBroker", () => {
 
     await broker.initialize();
 
-    expect(broker.getState()).toMatchObject({ status: "revocation_pending" });
+    expect(broker.getState()).toEqual({ status: "anonymous" });
     expect(client.validate).not.toHaveBeenCalled();
     expect(publisher.set).not.toHaveBeenCalled();
     expect(vault.save).toHaveBeenCalledWith(
