@@ -122,9 +122,12 @@ Skill version's context to another.
 }
 ```
 
-The response is an accepted receipt with `turnId` and the stream URL. The stream
-supports WebSocket first and SSE fallback. A client sends `afterSequence` and
-`resumeToken` on reconnect. Events are compatible with the T3 vocabulary:
+The response is an accepted receipt with `turnId` and the stream URL. The current
+mobile rollout enables authenticated SSE for the turn endpoint. The client keeps
+a WebSocket replay adapter, but does not open it until bootstrap advertises a
+deployed replay endpoint; this avoids connecting to an unreleased route. A client
+sends `afterSequence` and `resumeToken` when replay is available. Events are
+compatible with the T3 vocabulary:
 
 - `thread.snapshot`, `thread.message-sent`
 - `turn.started`, `skill.authorized`

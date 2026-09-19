@@ -304,7 +304,12 @@ export class FdStore {
         break;
       }
       case 'turn.completed': {
-        const message = this.activeThread.messages.find((item: FdMessage) => item.id === event.messageId);
+        // Older gateways put the durable message id only inside the completed
+        // payload, while their delta events have no message_id. Reconcile the
+        // terminal event with the current streaming assistant before creating
+        // a second message.
+        const message = this.activeThread.messages.find((item: FdMessage) => item.id === event.messageId) ??
+          [...this.activeThread.messages].reverse().find((item: FdMessage) => item.role === 'assistant' && item.streaming);
         if (message === undefined) {
           this.activeThread.messages.push({ id: event.messageId, role: 'assistant', text: event.text, createdAt: isoNow(), updatedAt: isoNow(), streaming: false, attachments: [] });
         } else {

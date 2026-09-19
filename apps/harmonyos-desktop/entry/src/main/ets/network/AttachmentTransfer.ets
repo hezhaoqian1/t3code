@@ -89,10 +89,13 @@ export async function uploadPickedAttachment(
       mimeType: completed.mimeType.length > 0 ? completed.mimeType : attachment.mimeType,
       sizeBytes: completed.sizeBytes > 0 ? completed.sizeBytes : sizeBytes,
       sourceUri,
-      state: 'processing',
-      progress: 0
+      // The transfer API and the parser API deliberately have separate states.
+      // Preserve the server result: images/text are ready immediately today,
+      // while a future parser may legitimately return processing here.
+      state: completed.state,
+      progress: completed.progress
     };
-    onProgress({ state: 'processing', progress: 0, sizeBytes: result.sizeBytes });
+    onProgress({ state: result.state, progress: result.progress, sizeBytes: result.sizeBytes });
     return result;
   } catch (error) {
     const message = error instanceof FdRuntimeError ? error.message : '附件上传失败';

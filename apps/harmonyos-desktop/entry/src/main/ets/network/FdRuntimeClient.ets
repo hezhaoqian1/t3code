@@ -603,17 +603,26 @@ function parseThreadDetail(value: JsonObject): FdThreadDetail {
 function parseStreamEvent(value: JsonObject): FdStreamEvent {
   const type = stringValue(value['type']);
   const sequence = numberValue(value['sequence'], 0);
+  const turnId = stringValue(value['turnId'] ?? value['turn_id']);
+  const stableMessageId = stringValue(value['messageId'] ?? value['message_id']) ||
+    (turnId.length > 0 ? `assistant-${turnId}` : createClientId('message'));
   if (type === 'assistant.delta') return {
-    type: 'assistant.delta', sequence, messageId: stringValue(value['messageId'] ?? value['message_id']), delta: stringValue(value['delta'])
+    type: 'assistant.delta', sequence, messageId: stableMessageId, delta: stringValue(value['delta'])
   };
-  if (type === 'turn.completed') return {
-    type: 'turn.completed', sequence, messageId: stringValue(value['messageId'] ?? value['message_id']), text: stringValue(value['text']), resumeToken: stringValue(value['resumeToken'] ?? value['resume_token']) || undefined
-  };
+  if (type === 'turn.completed') {
+    const message = object(value['message']);
+    return {
+      type: 'turn.completed', sequence,
+      messageId: stringValue(value['messageId'] ?? value['message_id']) || stringValue(message['id']) || stableMessageId,
+      text: stringValue(value['text']) || stringValue(message['text']),
+      resumeToken: stringValue(value['resumeToken'] ?? value['resume_token']) || undefined
+    };
+  }
   if (type === 'turn.failed') return {
     type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true
   };
   if (type === 'turn.started') return {
-    type: 'turn.started', sequence, turnId: stringValue(value['turnId'] ?? value['turn_id']), model: stringValue(value['model'])
+    type: 'turn.started', sequence, turnId, model: stringValue(value['model'])
   };
   if (type === 'turn.progress') return {
     type: 'turn.progress', sequence, phase: stringValue(value['phase']), message: stringValue(value['message'])
@@ -656,12 +665,14 @@ function parseLegacySseBlock(block: string, currentSequence: number): { event?: 
     const value = object(JSON.parse(dataLines.join('\n')));
     const sequence = currentSequence + 1;
     const turnId = stringValue(value['turn_id'] ?? value['turnId']);
+    const stableMessageId = stringValue(value['message_id'] ?? value['messageId']) ||
+      (turnId.length > 0 ? `assistant-${turnId}` : createClientId('message'));
     if (eventName === 'turn.started') return { sequence, event: { type: 'turn.started', sequence, turnId, model: stringValue(value['model']) } };
     if (eventName === 'turn.progress') return { sequence, event: { type: 'turn.progress', sequence, phase: stringValue(value['phase']), message: stringValue(value['message']) } };
-    if (eventName === 'assistant.delta') return { sequence, event: { type: 'assistant.delta', sequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || createClientId('message'), delta: stringValue(value['delta']) } };
+    if (eventName === 'assistant.delta') return { sequence, event: { type: 'assistant.delta', sequence, messageId: stableMessageId, delta: stringValue(value['delta']) } };
     if (eventName === 'turn.completed') {
       const message = object(value['message'] ?? value);
-      return { sequence, event: { type: 'turn.completed', sequence, messageId: stringValue(message['id']) || createClientId('message'), text: stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
+      return { sequence, event: { type: 'turn.completed', sequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || stringValue(message['id']) || stableMessageId, text: stringValue(value['text']) || stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
     }
     if (eventName === 'turn.failed') return { sequence, event: { type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
     if (eventName === 'tool.started') return { sequence, event: { type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };

@@ -102,7 +102,6 @@ struct Index {
   private async openThread(threadId: string): Promise<void> {
     await this.store.openThread(threadId);
     this.syncFromStore();
-    this.connectStream();
   }
 
   private connectStream(): void {
@@ -392,7 +391,6 @@ struct Index {
           try {
             await this.store.createThread();
             this.syncFromStore();
-            this.connectStream();
           } catch (error) {
             this.errorText = error instanceof FdRuntimeError ? error.message : '新建任务失败';
             this.syncFromStore();
