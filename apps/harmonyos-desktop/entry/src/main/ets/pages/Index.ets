@@ -22,6 +22,7 @@ struct Index {
   private readonly store: FdStore = new FdStore();
   private stream: FdStreamHandle | undefined;
   private previewController: webview.WebviewController = new webview.WebviewController();
+  private pendingImmediateTurnId: string = '';
 
   @State private signedIn: boolean = false;
   @State private accountName: string = '';
@@ -96,6 +97,7 @@ struct Index {
   private logout(): void {
     this.stream?.close();
     this.stream = undefined;
+    this.pendingImmediateTurnId = '';
     this.store.logout();
     this.syncFromStore();
   }
@@ -141,6 +143,15 @@ struct Index {
     this.store.applyEvent(event);
     this.syncFromStore();
     if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
+      const immediateId = this.pendingImmediateTurnId;
+      this.pendingImmediateTurnId = '';
+      if (immediateId.length > 0) {
+        const immediate = this.store.queuedTurns.find((turn: FdQueuedTurn) => turn.id === immediateId);
+        if (immediate !== undefined) {
+          this.startQueuedTurn(immediate);
+          return;
+        }
+      }
       this.startNextQueuedTurn();
     }
   }
@@ -160,6 +171,7 @@ struct Index {
     }
     const wasWorking = this.store.activeThread.state === 'working';
     const queued = this.store.enqueueTurn(text.length === 0 ? '请分析附件。' : text);
+    this.store.clearAttachments();
     this.draft = '';
     this.syncFromStore();
     if (!wasWorking) await this.startQueuedTurn(queued);
@@ -197,13 +209,27 @@ struct Index {
       return;
     }
     try {
-      await this.store.client.interruptTurn(this.store.activeThread.id, this.store.activeTurnId);
-      this.store.activeThread.state = 'idle';
-      this.store.activeTurnId = '';
+      const interrupted = await this.store.client.interruptTurn(this.store.activeThread.id, this.store.activeTurnId);
+      if (!interrupted) {
+        this.pendingImmediateTurnId = '';
+        this.errorText = '当前任务已经结束，请重新发送排队消息';
+      } else {
+        this.statusText = '正在停止当前任务...';
+      }
       this.syncFromStore();
     } catch (error) {
       this.errorText = error instanceof FdRuntimeError ? error.message : '中断失败';
     }
+  }
+
+  private async sendQueuedImmediately(turn: FdQueuedTurn): Promise<void> {
+    if (this.store.activeThread.state !== 'working') {
+      await this.startQueuedTurn(turn);
+      return;
+    }
+    this.pendingImmediateTurnId = turn.id;
+    this.errorText = '正在停止当前任务，完成后立即发送所选消息';
+    await this.interruptCurrentTurn();
   }
 
   private editQueued(turn: FdQueuedTurn, value: string): void {
@@ -571,13 +597,13 @@ struct Index {
       if (this.queuedTurns.length === 0) {
         Text('当前没有排队消息。发送中的任务不会被新消息打断。').fontSize(13).fontColor('#80939A').margin(18);
       }
-      ForEach(this.queuedTurns, (turn: FdQueuedTurn, index: number) => {
+      ForEach(this.queuedTurns, (turn: FdQueuedTurn) => {
         Row() {
           TextInput({ text: turn.text }).layoutWeight(1).height(40).onChange((value: string) => this.editQueued(turn, value));
           Text('上移').fontSize(12).fontColor('#176B87').margin({ left: 8 }).onClick(() => this.moveQueued(turn, -1));
           Text('下移').fontSize(12).fontColor('#176B87').margin({ left: 8 }).onClick(() => this.moveQueued(turn, 1));
           Text('删除').fontSize(12).fontColor('#C2414A').margin({ left: 8 }).onClick(() => this.removeQueued(turn));
-          if (index === 0 && this.store.activeThread.state !== 'working') Text('立即').fontSize(12).fontColor('#176B87').margin({ left: 8 }).onClick(() => this.startNextQueuedTurn());
+          Text('立即').fontSize(12).fontColor('#176B87').margin({ left: 8 }).onClick(() => this.sendQueuedImmediately(turn));
         }
         .padding({ left: 18, right: 18, bottom: 8 });
       }, (turn: FdQueuedTurn) => turn.id);

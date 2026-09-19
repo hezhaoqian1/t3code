@@ -42,6 +42,9 @@ jobs:
       - name: Check
         run: vp check
 
+      - name: Check native Harmony client contract
+        run: node scripts/check-harmony-native.mjs
+
       - name: Typecheck
         run: vpr typecheck
 
