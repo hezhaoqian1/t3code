@@ -711,6 +711,7 @@ function parseLegacySseBlock(block: string, currentSequence: number): { event?: 
       return { sequence: nextSequence, event: { type: 'turn.completed', sequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || stringValue(message['id']) || stableMessageId, text: stringValue(value['text']) || stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
     }
     if (eventName === 'turn.failed') return { sequence: nextSequence, event: { type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
+    if (eventName === 'turn.interrupted') return { sequence: nextSequence, event: { type: 'turn.interrupted', sequence, message: stringValue(value['message']) || undefined } };
     if (eventName === 'tool.started') return { sequence: nextSequence, event: { type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };
     if (eventName === 'tool.completed') return { sequence: nextSequence, event: { type: 'tool.completed', sequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' } };
     return { sequence: currentSequence };

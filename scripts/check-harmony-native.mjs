@@ -57,6 +57,7 @@ assert.match(client, /parseLegacySse/);
 assert.match(client, /requestInStream/);
 assert.match(client, /dataReceive/);
 assert.match(client, /dataEnd/);
+assert.match(client, /eventName === 'turn\.interrupted'/);
 assert.match(client, /attachments_require_mobile_api/);
 assert.match(client, /uploadAttachmentPart/);
 assert.match(client, /completeAttachmentUpload/);
