@@ -94,6 +94,8 @@ assert.match(store, /this\.models/);
 assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /loadOlderHistory/);
 assert.match(store, /this\.activeThread = \{[\s\S]*\.\.\.local[\s\S]*hasMoreHistory: false/);
+assert.match(store, /mobileApiUnavailable/);
+assert.match(store, /await this\.createThread\(\)/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
 assert.match(config, /deepseek-flash/);

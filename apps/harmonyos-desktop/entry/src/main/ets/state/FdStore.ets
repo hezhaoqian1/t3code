@@ -90,7 +90,20 @@ export class FdStore {
     } catch (error) {
       // The native shell remains usable while the mobile API is being rolled out.
       // A thread 404 must not discard a successfully loaded Skill/model catalog.
-      if (!skillsLoaded || this.lastError.length === 0) {
+      const mobileApiUnavailable = error instanceof FdRuntimeError &&
+        (error.code === 'http_404' || error.code === 'http_405');
+      if (mobileApiUnavailable) {
+        // Legacy Agent turns create a conversation lazily. Keep a real UUID
+        // shell so the user can send text while the mobile API rolls out.
+        try {
+          await this.createThread();
+          this.lastError = '';
+        } catch (fallbackError) {
+          this.lastError = fallbackError instanceof FdRuntimeError
+            ? fallbackError.message
+            : '兼容任务暂不可用';
+        }
+      } else if (!skillsLoaded || this.lastError.length === 0) {
         this.lastError = error instanceof FdRuntimeError ? error.message : '任务列表暂不可用';
       }
     }
