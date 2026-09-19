@@ -88,6 +88,7 @@ assert.match(
   store,
   /this\.activeTurnId = '';[\s\S]*this\.activeThread\.state = 'error';[\s\S]*throw error/,
 );
+assert.match(store, /incomplete_stream/);
 assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
 assert.match(store, /this\.models/);

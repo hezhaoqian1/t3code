@@ -312,10 +312,17 @@ export class FdStore {
       this.activeThread.state = 'error';
       throw error;
     }
-    if (!terminalEvent) this.activeTurnId = receipt.turnId;
     if (receipt.events.length === 0) {
+      this.activeTurnId = '';
       this.activeThread.state = 'error';
       this.lastError = 'FD Runtime 没有返回任务事件';
+      throw new FdRuntimeError('empty_stream', this.lastError);
+    }
+    if (!terminalEvent) {
+      this.activeTurnId = '';
+      this.activeThread.state = 'error';
+      this.lastError = 'FD Runtime 流在终止事件前断开';
+      throw new FdRuntimeError('incomplete_stream', this.lastError);
     }
     return receipt.streamUrl;
   }
