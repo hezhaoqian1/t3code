@@ -138,9 +138,12 @@ compatible with the T3 vocabulary:
 - `turn.completed`, `turn.failed`, `turn.interrupted`
 - `thread.synchronized`
 
-The server owns ordering and deduplication. The client applies an event only when
-its sequence is newer than the last applied sequence, then persists the resulting
-visible snapshot. Reconnect is a catch-up operation, not a second turn.
+The server owns ordering within a turn. The current mobile SSE adapter resets its
+sequence at the start of each turn and does not yet expose a persisted replay
+cursor; the client therefore deduplicates against a per-turn cursor and never
+mistakes it for the durable thread sequence. Once the replay endpoint is deployed,
+the client will switch the stream scope to the T3 thread cursor. Reconnect is a
+catch-up operation, not a second turn.
 
 `POST /turns/{turnId}/interrupt` is explicit. A send while another turn is active
 is placed in a device-side queue and receives its own idempotency key; it does not
@@ -328,6 +331,10 @@ The current production gateway was checked from this worktree on `2026-09-19`:
   `200` (the current account has four Skills and one thread). The native client
   keeps the compatibility adapter enabled for older gateways and the legacy
   text-only route.
+- A live second turn on the same thread returned a fresh per-turn sequence
+  (`1,2,...`) and completed successfully. This is why the native reducer keeps
+  a separate per-turn cursor; treating that sequence as thread-global would drop
+  the second turn's progress events.
 - The repository machine has no DevEco/Harmony SDK or `hvigorw` wrapper. The
   ArkUI build remains pending on a Harmony-capable build host; T3 server, desktop,
   contracts, and native static checks pass in this worktree.

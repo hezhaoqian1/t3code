@@ -42,7 +42,6 @@ assert.match(index, /buildSkillSheet/);
 assert.match(index, /buildQueueSheet/);
 assert.match(index, /buildPreviewSheet/);
 assert.match(index, /connectThreadStream/);
-assert.match(index, /this\.handleStreamEvent\(_event\)/);
 assert.match(
   index,
   /this\.store\.activeTurnId\.length > 0 \|\| this\.store\.activeThread\.state === 'working'/,
@@ -83,6 +82,13 @@ assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
 assert.match(transfer, /wholeDigest\.digest/);
 assert.match(transfer, /uploadPickedAttachment/);
 assert.match(store, /activeTurnId/);
+assert.match(store, /private streamSequence: number = 0/);
+assert.match(store, /this\.applyEvent\(event, 'turn'\)/);
+assert.match(
+  store,
+  /applyEvent\(event: FdStreamEvent, sequenceScope: 'turn' \| 'thread' = 'thread'\)/,
+);
+assert.match(store, /event\.sequence <= this\.streamSequence/);
 assert.match(store, /FdRuntimeClient, FdRuntimeError, FdTurnReceipt/);
 assert.match(store, /activeTurnId\.length > 0 \|\| this\.activeThread\.state === 'working'/);
 assert.match(
@@ -97,7 +103,6 @@ assert.match(store, /incomplete_stream/);
 assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
 assert.match(store, /this\.models/);
-assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /loadOlderHistory/);
 assert.match(store, /this\.activeThread = \{[\s\S]*\.\.\.local[\s\S]*hasMoreHistory: false/);
 assert.match(store, /mobileApiUnavailable/);
@@ -108,5 +113,7 @@ assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
 assert.match(config, /deepseek-flash/);
 assert.match(moduleJson5, /ohos\.permission\.INTERNET/);
 assert.match(moduleJson5, /deviceTypes/);
+assert.match(index, /this\.store\.applyEvent\(event, 'thread'\)/);
+assert.match(index, /FdStore owns the reducer/);
 
 console.log(`Harmony native static checks passed (${requiredFiles.length} files).`);

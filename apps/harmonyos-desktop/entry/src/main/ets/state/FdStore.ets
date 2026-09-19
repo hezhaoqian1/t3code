@@ -25,6 +25,9 @@ export class FdStore {
   selectedSkillVersionId: number = 0;
   selectedModel: string = 'deepseek-flash';
   activeTurnId: string = '';
+  // The mobile SSE adapter numbers events per turn. Keep that cursor
+  // separate from the durable thread cursor used by a future replay stream.
+  private streamSequence: number = 0;
   loading: boolean = false;
   signedIn: boolean = false;
   accountName: string = '';
@@ -62,6 +65,7 @@ export class FdStore {
     this.activeThread = sampleThread();
     this.queuedTurns = [];
     this.activeTurnId = '';
+    this.streamSequence = 0;
     this.selectedSkillVersionId = 0;
     this.lastError = '';
   }
@@ -116,6 +120,7 @@ export class FdStore {
   async openThread(threadId: string): Promise<void> {
     const local = this.threads.find((thread: FdThreadShell) => thread.id === threadId);
     if (local === undefined) return;
+    this.streamSequence = 0;
     // Build the selected shell before trying the mobile detail endpoint. The
     // legacy history fallback must keep sends scoped to the clicked thread.
     this.activeThread = {
@@ -175,6 +180,7 @@ export class FdStore {
       this.selectedModel = this.activeThread.model;
       this.selectedSkillVersionId = 0;
       this.queuedTurns = [];
+      this.streamSequence = 0;
       return;
     }
     const detail = await this.client.createThread(this.selectedModel);
@@ -194,6 +200,7 @@ export class FdStore {
     this.selectedSkillVersionId = detail.skillVersionId ?? 0;
     this.queuedTurns = [];
     this.activeTurnId = '';
+    this.streamSequence = 0;
   }
 
   selectSkill(versionId: number): void {
@@ -278,6 +285,7 @@ export class FdStore {
     this.activeThread.latestMessage = turn.text;
     this.activeThread.state = 'working';
     this.activeThread.updatedAt = isoNow();
+    this.streamSequence = 0;
     if (!this.client.isAuthenticated) {
       const assistant: FdMessage = {
         id: createClientId('message'),
@@ -304,7 +312,7 @@ export class FdStore {
         turn.skillVersionId,
         (event: FdStreamEvent): void => {
           if (event.type === 'turn.started') this.activeTurnId = event.turnId;
-          this.applyEvent(event);
+          this.applyEvent(event, 'turn');
           if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
             terminalEvent = true;
           }
@@ -314,26 +322,34 @@ export class FdStore {
     } catch (error) {
       this.activeTurnId = '';
       this.activeThread.state = 'error';
+      this.streamSequence = 0;
       throw error;
     }
     if (receipt.events.length === 0) {
       this.activeTurnId = '';
       this.activeThread.state = 'error';
+      this.streamSequence = 0;
       this.lastError = 'FD Runtime 没有返回任务事件';
       throw new FdRuntimeError('empty_stream', this.lastError);
     }
     if (!terminalEvent) {
       this.activeTurnId = '';
       this.activeThread.state = 'error';
+      this.streamSequence = 0;
       this.lastError = 'FD Runtime 流在终止事件前断开';
       throw new FdRuntimeError('incomplete_stream', this.lastError);
     }
     return receipt.streamUrl;
   }
 
-  applyEvent(event: FdStreamEvent): void {
-    if (event.sequence <= this.activeThread.sequence) return;
-    this.activeThread.sequence = event.sequence;
+  applyEvent(event: FdStreamEvent, sequenceScope: 'turn' | 'thread' = 'thread'): void {
+    if (sequenceScope === 'turn') {
+      if (event.sequence <= this.streamSequence) return;
+      this.streamSequence = event.sequence;
+    } else {
+      if (event.sequence <= this.activeThread.sequence) return;
+      this.activeThread.sequence = event.sequence;
+    }
     switch (event.type) {
       case 'thread.snapshot':
         this.activeThread = event.detail;

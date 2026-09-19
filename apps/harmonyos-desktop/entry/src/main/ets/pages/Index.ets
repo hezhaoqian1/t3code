@@ -140,7 +140,7 @@ struct Index {
   }
 
   private handleStreamEvent(event: FdStreamEvent): void {
-    this.store.applyEvent(event);
+    this.store.applyEvent(event, 'thread');
     this.syncFromStore();
     if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
       const immediateId = this.pendingImmediateTurnId;
@@ -181,7 +181,10 @@ struct Index {
     this.store.removeQueued(turn.id);
     try {
       const streamUrl = await this.store.startTurn(turn, (_event: FdStreamEvent): void => {
-        this.handleStreamEvent(_event);
+        // FdStore owns the reducer for the synchronous SSE response. This
+        // callback only refreshes the view; applying the event again here
+        // would duplicate deltas when the per-turn cursor is reset.
+        this.syncFromStore();
       });
       this.syncFromStore();
       if (streamUrl.length > 0) this.connectStream();
