@@ -42,6 +42,12 @@ export interface FdTurnReceipt {
   events: Array<FdStreamEvent>;
 }
 
+export interface FdHistoryPage {
+  messages: Array<FdMessage>;
+  hasMoreHistory: boolean;
+  historyCursor?: string;
+}
+
 export interface FdStreamHandle {
   close(): void;
 }
@@ -173,6 +179,22 @@ export class FdRuntimeClient {
         attachments: []
       } as FdMessage;
     });
+  }
+
+  async getThreadHistory(threadId: string, before: string, limit: number = 200): Promise<FdHistoryPage> {
+    const query = `?before=${encodeURIComponent(before)}&limit=${Math.max(1, Math.min(500, Math.floor(limit)))}`;
+    const root = await this.request(
+      `${FD_RUNTIME_API_PREFIX}/threads/${encodeURIComponent(threadId)}/history${query}`,
+      'GET'
+    );
+    const data = object(root['data'] ?? root);
+    const messages = arrayValue(data['messages']).map((raw: Object) => parseMessage(object(raw)));
+    const cursor = stringValue(data['cursor'] ?? data['historyCursor'] ?? data['history_cursor'] ?? data['next_before']);
+    return {
+      messages,
+      hasMoreHistory: data['truncated'] === true || data['hasMoreHistory'] === true || data['has_more_history'] === true,
+      ...(cursor.length === 0 ? {} : { historyCursor: cursor })
+    };
   }
 
   async startTurn(
@@ -578,15 +600,7 @@ function parseThreadDetail(value: JsonObject): FdThreadDetail {
   const rawMessages = arrayValue(value['messages']);
   for (const raw of rawMessages) {
     const item = object(raw);
-    messages.push({
-      id: stringValue(item['id']),
-      role: stringValue(item['role']) as FdMessage['role'] || 'assistant',
-      text: stringValue(item['text']),
-      createdAt: stringValue(item['createdAt'] ?? item['created_at']) || isoNow(),
-      updatedAt: stringValue(item['updatedAt'] ?? item['updated_at']) || isoNow(),
-      streaming: item['streaming'] === true,
-      attachments: []
-    } as FdMessage);
+    messages.push(parseMessage(item));
   }
   return {
     ...shell,
@@ -598,6 +612,24 @@ function parseThreadDetail(value: JsonObject): FdThreadDetail {
     hasMoreHistory: value['hasMoreHistory'] === true || value['has_more_history'] === true,
     historyCursor: stringValue(value['historyCursor'] ?? value['history_cursor']) || undefined
   } as FdThreadDetail;
+}
+
+function parseMessage(item: JsonObject): FdMessage {
+  return {
+    id: identifierValue(item['id']) || createClientId('message'),
+    role: stringValue(item['role']) as FdMessage['role'] || 'assistant',
+    text: stringValue(item['text']),
+    createdAt: stringValue(item['createdAt'] ?? item['created_at']) || isoNow(),
+    updatedAt: stringValue(item['updatedAt'] ?? item['updated_at']) || isoNow(),
+    streaming: item['streaming'] === true,
+    attachments: []
+  } as FdMessage;
+}
+
+function identifierValue(value: Object): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
 }
 
 function parseStreamEvent(value: JsonObject): FdStreamEvent {

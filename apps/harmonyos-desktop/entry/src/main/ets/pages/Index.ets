@@ -48,6 +48,7 @@ struct Index {
   @State private previewUrl: string = '';
   @State private previewName: string = '';
   @State private previewMimeType: string = '';
+  @State private historyBusy: boolean = false;
 
   aboutToAppear(): void {
     this.syncFromStore();
@@ -102,6 +103,21 @@ struct Index {
   private async openThread(threadId: string): Promise<void> {
     await this.store.openThread(threadId);
     this.syncFromStore();
+  }
+
+  private async loadOlderHistory(): Promise<void> {
+    if (this.historyBusy || !this.store.activeThread.hasMoreHistory) return;
+    this.historyBusy = true;
+    this.errorText = '';
+    try {
+      await this.store.loadOlderHistory();
+      this.syncFromStore();
+    } catch (error) {
+      this.errorText = error instanceof FdRuntimeError ? error.message : '更早历史加载失败';
+      this.syncFromStore();
+    } finally {
+      this.historyBusy = false;
+    }
   }
 
   private connectStream(): void {
@@ -453,6 +469,13 @@ struct Index {
       Divider().color('#DFE7EA');
       Scroll() {
         Column() {
+          if (this.store.activeThread.hasMoreHistory) {
+            Text(this.historyBusy ? '正在加载更早历史...' : '加载更早历史')
+              .fontSize(12)
+              .fontColor('#176B87')
+              .padding({ top: 10, bottom: 10 })
+              .onClick(() => this.loadOlderHistory());
+          }
           ForEach(this.messages, (message: FdMessage) => {
             Row() {
               Column() {

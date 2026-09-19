@@ -124,6 +124,20 @@ export class FdStore {
     }
   }
 
+  async loadOlderHistory(): Promise<boolean> {
+    const cursor = this.activeThread.historyCursor;
+    if (!this.client.isAuthenticated || !this.activeThread.hasMoreHistory || cursor === undefined || cursor.length === 0) {
+      return false;
+    }
+    const page = await this.client.getThreadHistory(this.activeThread.id, cursor);
+    const existing = new Set(this.activeThread.messages.map((message: FdMessage) => message.id));
+    const older = page.messages.filter((message: FdMessage) => !existing.has(message.id));
+    this.activeThread.messages = [...older, ...this.activeThread.messages];
+    this.activeThread.hasMoreHistory = page.hasMoreHistory;
+    this.activeThread.historyCursor = page.historyCursor;
+    return older.length > 0;
+  }
+
   async createThread(): Promise<void> {
     if (!this.client.isAuthenticated) {
       this.activeThread = sampleThread();
