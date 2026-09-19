@@ -1712,7 +1712,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
 
       expect(generatedModelSelection).toEqual({
         instanceId: "fd-deepseek",
-        model: "deepseek-v4-flash",
+        model: "deepseek-flash",
       });
     }),
   );

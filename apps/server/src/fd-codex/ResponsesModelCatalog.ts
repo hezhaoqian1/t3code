@@ -112,7 +112,14 @@ export function resolveFdResponsesModelConfig(slug: string): ResponsesCodexModel
     if (canonicalSlug === "deepseek-flash" && canonicalSlug !== normalized) {
       // Keep the legacy desktop route stable while new sessions use the
       // canonical Flash model's native image input.
-      return { ...known, slug, name: slug, shortName: slug, supportsVision: false, visionRoute: "fd-preprocessor" };
+      return {
+        ...known,
+        slug,
+        name: slug,
+        shortName: slug,
+        supportsVision: false,
+        visionRoute: "fd-preprocessor",
+      };
     }
     return known;
   }

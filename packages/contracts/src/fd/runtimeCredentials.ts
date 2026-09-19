@@ -40,7 +40,10 @@ export function isFdRuntimeModel(value: string): value is FdRuntimeModel {
 }
 
 export function isFdRuntimeSelectableModel(value: string): value is FdRuntimeSelectableModel {
-  return FD_RUNTIME_SELECTABLE_MODELS.some((model) => model === value) || value === FD_RUNTIME_LEGACY_DEFAULT_MODEL;
+  return (
+    FD_RUNTIME_SELECTABLE_MODELS.some((model) => model === value) ||
+    value === FD_RUNTIME_LEGACY_DEFAULT_MODEL
+  );
 }
 
 export const FdRuntimeNewApiOrigin = Schema.String.check(

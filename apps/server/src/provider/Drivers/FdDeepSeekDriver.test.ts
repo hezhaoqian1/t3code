@@ -463,8 +463,8 @@ describe("FdDeepSeekDriver", () => {
         expect.arrayContaining([
           expect.objectContaining({
             slug: FD_RESPONSES_MODEL,
-            name: "DeepSeek V4 Flash",
-            shortName: "V4 Flash",
+            name: "DeepSeek V4.1 Flash",
+            shortName: "Flash",
             isDefault: true,
             isCustom: false,
           }),
@@ -481,7 +481,7 @@ describe("FdDeepSeekDriver", () => {
             shortName: "Qwen Flash",
             isDefault: false,
             isCustom: false,
-            capabilities: expect.objectContaining({ supportsVision: false }),
+            capabilities: expect.objectContaining({ supportsVision: true }),
           }),
           expect.objectContaining({
             slug: "glm-5.2",
@@ -538,7 +538,7 @@ describe("FdDeepSeekDriver", () => {
                     },
                   ],
                   model_capabilities: {
-                    "deepseek-v4-flash": {
+                    [FD_RESPONSES_MODEL]: {
                       fd_skills: true,
                       fd_skill_protocol: "enterprise-agent-v1",
                     },
@@ -608,7 +608,7 @@ describe("FdDeepSeekDriver", () => {
                   },
                 ],
                 model_capabilities: {
-                  "deepseek-v4-flash": {
+                  [FD_RESPONSES_MODEL]: {
                     fd_skills: true,
                     fd_skill_protocol: "enterprise-agent-v1",
                   },
@@ -693,7 +693,7 @@ describe("FdDeepSeekDriver", () => {
                 data: {
                   skills: [],
                   model_capabilities: {
-                    "deepseek-v4-flash": {
+                    [FD_RESPONSES_MODEL]: {
                       fd_skills: true,
                       fd_skill_protocol: "enterprise-agent-v1",
                     },
@@ -793,7 +793,7 @@ describe("FdDeepSeekDriver", () => {
                     },
                   ],
                   model_capabilities: {
-                    "deepseek-v4-flash": {
+                    [FD_RESPONSES_MODEL]: {
                       fd_skills: true,
                       fd_skill_protocol: "enterprise-agent-v1",
                     },
@@ -853,7 +853,7 @@ describe("FdDeepSeekDriver", () => {
                         description: "查询管理部授权数据",
                       },
                     ],
-                    model_capabilities: { "deepseek-v4-flash": capability },
+                    model_capabilities: { [FD_RESPONSES_MODEL]: capability },
                   },
                 }),
                 { status: 200, headers: { "Content-Type": "application/json" } },
