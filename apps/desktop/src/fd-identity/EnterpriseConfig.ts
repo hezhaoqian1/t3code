@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { constants } from "node:fs";
-import { lstat, open } from "node:fs/promises";
-import { join } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import * as Schema from "effect/Schema";
 
@@ -20,6 +20,9 @@ const EnterpriseConfigSchema = Schema.Struct({
     Schema.isMaxLength(MAX_PUBLIC_URL_LENGTH),
   ),
 }).annotate({ parseOptions: { onExcessProperty: "error" } });
+const decodeEnterpriseConfig = Schema.decodeUnknownSync(
+  Schema.fromJsonString(EnterpriseConfigSchema),
+);
 
 export interface FdEnterpriseConfig {
   readonly newApiOrigin: string;
@@ -33,10 +36,10 @@ export async function loadFdEnterpriseConfig(input: {
   readonly env?: Readonly<Record<string, string | undefined>>;
 }): Promise<FdEnterpriseConfig> {
   const configPath = input.isPackaged
-    ? join(input.resourcesPath, "enterprise-config.json")
-    : join(input.rootDir, "apps", "desktop", "resources", "enterprise-config.json");
+    ? NodePath.join(input.resourcesPath, "enterprise-config.json")
+    : NodePath.join(input.rootDir, "apps", "desktop", "resources", "enterprise-config.json");
   const raw = (await readBoundedRegularFile(configPath)).toString("utf8");
-  const config = Schema.decodeUnknownSync(Schema.fromJsonString(EnterpriseConfigSchema))(raw);
+  const config = decodeEnterpriseConfig(raw);
   const publicOrigin = validatePublicHttpsUrl(config.newApiOrigin).origin;
   const publicManifest = validatePublicHttpsUrl(config.updateManifestUrl).href;
   if (
@@ -84,7 +87,7 @@ function validateLoopbackDevelopmentUrl(value: string): URL {
 }
 
 async function readBoundedRegularFile(path: string): Promise<Buffer> {
-  const beforeOpen = await lstat(path);
+  const beforeOpen = await NodeFSP.lstat(path);
   if (
     !beforeOpen.isFile() ||
     beforeOpen.isSymbolicLink() ||
@@ -92,7 +95,7 @@ async function readBoundedRegularFile(path: string): Promise<Buffer> {
   ) {
     throw new Error("FD enterprise config file is invalid");
   }
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const handle = await NodeFSP.open(path, NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW);
   try {
     const opened = await handle.stat();
     if (!opened.isFile() || opened.size > MAX_ENTERPRISE_CONFIG_BYTES) {

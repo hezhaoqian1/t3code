@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off - Release verification runs as a standalone Node CLI.
 
-import { createHash } from "node:crypto";
-import { readFile, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import { parseUpdateManifest, serializeUpdateManifest } from "./lib/update-manifest.ts";
 
 async function sha512Base64(filePath: string): Promise<string> {
-  return createHash("sha512")
-    .update(await readFile(filePath))
+  return NodeCrypto.createHash("sha512")
+    .update(await NodeFSP.readFile(filePath))
     .digest("base64");
 }
 
@@ -18,33 +18,39 @@ export async function finalizeUpdateManifest(
   version: string,
   assetNames: ReadonlyArray<string>,
 ): Promise<void> {
-  const manifestPath = resolve(manifestPathArg);
-  const source = parseUpdateManifest(await readFile(manifestPath, "utf8"), manifestPath, "desktop");
+  const manifestPath = NodePath.resolve(manifestPathArg);
+  const source = parseUpdateManifest(
+    await NodeFSP.readFile(manifestPath, "utf8"),
+    manifestPath,
+    "desktop",
+  );
   if (source.version !== version) {
     throw new Error(
-      `${basename(manifestPath)} declares version ${source.version}, expected ${version}.`,
+      `${NodePath.basename(manifestPath)} declares version ${source.version}, expected ${version}.`,
     );
   }
   if (
     new Set(assetNames).size !== assetNames.length ||
-    assetNames.some((name) => basename(name) !== name)
+    assetNames.some((name) => NodePath.basename(name) !== name)
   ) {
     throw new Error("Update manifest assets must be unique base names.");
   }
-  const assetRoot = dirname(manifestPath);
+  const assetRoot = NodePath.dirname(manifestPath);
   const files = await Promise.all(
     assetNames.map(async (url) => {
-      const assetPath = join(assetRoot, url);
-      const assetStat = await stat(assetPath);
+      const assetPath = NodePath.join(assetRoot, url);
+      const assetStat = await NodeFSP.stat(assetPath);
       if (!assetStat.isFile()) throw new Error(`Update asset is not a file: ${url}`);
       return { url, sha512: await sha512Base64(assetPath), size: assetStat.size };
     }),
   );
-  await writeFile(
+  await NodeFSP.writeFile(
     manifestPath,
     serializeUpdateManifest(
       { ...source, files },
-      { platformLabel: basename(manifestPath) === "latest-mac.yml" ? "macOS" : "Windows" },
+      {
+        platformLabel: NodePath.basename(manifestPath) === "latest-mac.yml" ? "macOS" : "Windows",
+      },
     ),
   );
 }
