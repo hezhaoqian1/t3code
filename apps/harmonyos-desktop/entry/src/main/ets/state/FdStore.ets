@@ -277,21 +277,28 @@ export class FdStore {
       return '';
     }
     let terminalEvent = false;
-    const receipt = await this.client.startTurn(
-      this.activeThread.id,
-      turn.text,
-      turn.attachments,
-      turn.model,
-      turn.skillVersionId,
-      (event: FdStreamEvent): void => {
-        if (event.type === 'turn.started') this.activeTurnId = event.turnId;
-        this.applyEvent(event);
-        if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
-          terminalEvent = true;
+    let receipt: FdTurnReceipt;
+    try {
+      receipt = await this.client.startTurn(
+        this.activeThread.id,
+        turn.text,
+        turn.attachments,
+        turn.model,
+        turn.skillVersionId,
+        (event: FdStreamEvent): void => {
+          if (event.type === 'turn.started') this.activeTurnId = event.turnId;
+          this.applyEvent(event);
+          if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
+            terminalEvent = true;
+          }
+          if (onEvent !== undefined) onEvent(event);
         }
-        if (onEvent !== undefined) onEvent(event);
-      }
-    );
+      );
+    } catch (error) {
+      this.activeTurnId = '';
+      this.activeThread.state = 'error';
+      throw error;
+    }
     if (!terminalEvent) this.activeTurnId = receipt.turnId;
     if (receipt.events.length === 0) {
       this.activeThread.state = 'error';

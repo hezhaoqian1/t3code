@@ -79,6 +79,10 @@ assert.match(transfer, /wholeDigest\.digest/);
 assert.match(transfer, /uploadPickedAttachment/);
 assert.match(store, /activeTurnId/);
 assert.match(store, /activeTurnId\.length > 0 \|\| this\.activeThread\.state === 'working'/);
+assert.match(
+  store,
+  /this\.activeTurnId = '';[\s\S]*this\.activeThread\.state = 'error';[\s\S]*throw error/,
+);
 assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
 assert.match(store, /this\.models/);
