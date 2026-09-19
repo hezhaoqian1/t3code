@@ -735,6 +735,12 @@ function parseLegacySseBlock(block: string, currentSequence: number): { event?: 
     }
     if (eventName === 'turn.failed') return { sequence: nextSequence, event: { type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
     if (eventName === 'turn.interrupted') return { sequence: nextSequence, event: { type: 'turn.interrupted', sequence, message: stringValue(value['message']) || undefined } };
+    if (eventName === 'skill.authorized') return { sequence: nextSequence, event: { type: 'skill.authorized', sequence, skillVersionId: numberValue(value['skill_version_id'] ?? value['skillVersionId'], 0) } };
+    if (eventName === 'thread.synchronized') return { sequence: nextSequence, event: { type: 'thread.synchronized', sequence } };
+    if (eventName === 'thread.snapshot') return { sequence: nextSequence, event: { type: 'thread.snapshot', sequence, detail: parseThreadDetail(object(value['detail'] ?? value)), resumeToken: stringValue(value['resume_token'] ?? value['resumeToken']) || undefined } };
+    if (eventName === 'attachment.processing') return { sequence: nextSequence, event: { type: 'attachment.processing', sequence, attachmentId: stringValue(value['attachment_id'] ?? value['attachmentId']), progress: numberValue(value['progress'], 0) } };
+    if (eventName === 'attachment.ready') return { sequence: nextSequence, event: { type: 'attachment.ready', sequence, attachmentId: stringValue(value['attachment_id'] ?? value['attachmentId']), previewUrl: stringValue(value['preview_url'] ?? value['previewUrl']) || undefined } };
+    if (eventName === 'attachment.failed') return { sequence: nextSequence, event: { type: 'attachment.failed', sequence, attachmentId: stringValue(value['attachment_id'] ?? value['attachmentId']), message: stringValue(value['message']) || '附件处理失败' } };
     if (eventName === 'tool.started') return { sequence: nextSequence, event: { type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };
     if (eventName === 'tool.completed') return { sequence: nextSequence, event: { type: 'tool.completed', sequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' } };
     return { sequence: currentSequence };
