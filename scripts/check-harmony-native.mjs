@@ -83,7 +83,12 @@ assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
 assert.match(transfer, /wholeDigest\.digest/);
 assert.match(transfer, /uploadPickedAttachment/);
 assert.match(store, /activeTurnId/);
+assert.match(store, /FdRuntimeClient, FdRuntimeError, FdTurnReceipt/);
 assert.match(store, /activeTurnId\.length > 0 \|\| this\.activeThread\.state === 'working'/);
+assert.match(
+  store,
+  /logout\(\): void \{[\s\S]*this\.queuedTurns = \[\];[\s\S]*this\.activeTurnId = '';/,
+);
 assert.match(
   store,
   /this\.activeTurnId = '';[\s\S]*this\.activeThread\.state = 'error';[\s\S]*throw error/,

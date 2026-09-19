@@ -13,7 +13,7 @@ import {
   sampleThread,
   sampleThreadShells
 } from '../data/FdModels';
-import { FdRuntimeClient, FdRuntimeError } from '../network/FdRuntimeClient';
+import { FdRuntimeClient, FdRuntimeError, FdTurnReceipt } from '../network/FdRuntimeClient';
 
 export class FdStore {
   readonly client: FdRuntimeClient;
@@ -61,6 +61,7 @@ export class FdStore {
     this.models = ['deepseek-flash'];
     this.activeThread = sampleThread();
     this.queuedTurns = [];
+    this.activeTurnId = '';
     this.selectedSkillVersionId = 0;
     this.lastError = '';
   }
