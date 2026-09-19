@@ -196,10 +196,19 @@ try {
 
   NodeFS.rmSync(NodePath.resolve(tempRoot, "pnpm-lock.yaml"), { force: true });
 
-  NodeChildProcess.execFileSync("vp", ["install", "--lockfile-only", "--ignore-scripts"], {
-    cwd: tempRoot,
-    stdio: "inherit",
-  });
+  // Windows exposes the Vite+ CLI through a .CMD shim. Node's spawn APIs do
+  // not resolve extensionless shims the same way a shell does.
+  const vitePlusCommand = process.platform === "win32" ? "vp.CMD" : "vp";
+  NodeChildProcess.execFileSync(
+    vitePlusCommand,
+    ["install", "--lockfile-only", "--ignore-scripts"],
+    {
+      cwd: tempRoot,
+      stdio: "inherit",
+      // .CMD shims must be launched through cmd.exe on Windows.
+      shell: process.platform === "win32",
+    },
+  );
 
   const lockfile = NodeFS.readFileSync(NodePath.resolve(tempRoot, "pnpm-lock.yaml"), "utf8");
   assertContains(lockfile, "lockfileVersion:", "Expected pnpm-lock.yaml to be regenerated.");
@@ -288,11 +297,40 @@ try {
   const mergedPreviewWindowsManifestPath = NodePath.resolve(tempRoot, "release-assets/preview.yml");
   const { arm64Path: winDebugArm64Path, x64Path: winDebugX64Path } =
     writeWindowsBuilderDebugFixtures(tempRoot);
-  NodeChildProcess.execFileSync(
-    "bash",
-    [
-      "-lc",
-      `
+  if (process.platform === "win32") {
+    const releaseAssetsDirectory = NodePath.resolve(tempRoot, "release-assets");
+    const mergeManifestScript = NodePath.resolve(repoRoot, "scripts/merge-update-manifests.ts");
+    const windowsX64Manifests = NodeFS.readdirSync(releaseAssetsDirectory).filter(
+      (name) => name.endsWith("-win-x64.yml") && !name.startsWith("builder-debug-"),
+    );
+    if (!windowsX64Manifests.length) {
+      throw new Error("No Windows updater manifests found to merge.");
+    }
+    for (const x64Name of windowsX64Manifests) {
+      const arm64Name = x64Name.replace(/-win-x64\.yml$/u, "-win-arm64.yml");
+      const x64Manifest = NodePath.resolve(releaseAssetsDirectory, x64Name);
+      const arm64Manifest = NodePath.resolve(releaseAssetsDirectory, arm64Name);
+      const outputManifest = NodePath.resolve(
+        releaseAssetsDirectory,
+        x64Name.replace(/-win-x64\.yml$/u, ".yml"),
+      );
+      if (!NodeFS.existsSync(arm64Manifest)) {
+        throw new Error(`Missing matching arm64 Windows manifest for ${x64Manifest}`);
+      }
+      NodeChildProcess.execFileSync(
+        process.execPath,
+        [mergeManifestScript, "--platform", "win", arm64Manifest, x64Manifest, outputManifest],
+        { cwd: repoRoot, stdio: "inherit" },
+      );
+      NodeFS.rmSync(arm64Manifest, { force: true });
+      NodeFS.rmSync(x64Manifest, { force: true });
+    }
+  } else {
+    NodeChildProcess.execFileSync(
+      "bash",
+      [
+        "-lc",
+        `
         release_assets_dir=${JSON.stringify(NodePath.resolve(tempRoot, "release-assets"))}
         shopt -s nullglob
         found_windows_manifest=false
@@ -321,12 +359,13 @@ try {
           exit 1
         fi
       `,
-    ],
-    {
-      cwd: repoRoot,
-      stdio: "inherit",
-    },
-  );
+      ],
+      {
+        cwd: repoRoot,
+        stdio: "inherit",
+      },
+    );
+  }
 
   const mergedWindowsManifest = NodeFS.readFileSync(mergedWindowsManifestPath, "utf8");
   assertContains(
