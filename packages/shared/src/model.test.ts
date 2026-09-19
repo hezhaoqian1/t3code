@@ -148,10 +148,10 @@ describe("descriptor helpers", () => {
 });
 
 describe("model slug normalization", () => {
-  it("preserves the exact FD model slug without expanding aliases", () => {
+  it("maps the legacy FD Flash aliases to the canonical model", () => {
     const fdDeepSeek = ProviderDriverKind.make("fd-deepseek");
 
-    expect(normalizeModelSlug(" deepseek-v4-flash ", fdDeepSeek)).toBe("deepseek-v4-flash");
+    expect(normalizeModelSlug(" deepseek-v4-flash ", fdDeepSeek)).toBe("deepseek-flash");
     expect(normalizeModelSlug("flash", fdDeepSeek)).toBe("flash");
     expect(normalizeCustomModelSlug(" deepseek-v4-flash ")).toBe("deepseek-v4-flash");
   });
