@@ -3,9 +3,11 @@
 Date: `2026-09-19`
 
 Status: native ArkUI foundation, the FD Runtime mobile read/recovery contract,
-turn SSE, resumable attachment transfer, scoped preview, and text/image model
-input are implemented in dedicated worktrees. PDF/Office server-side parsing
-and a real Harmony SDK build remain pending.
+turn SSE, resumable attachment transfer, scoped preview, and model-aware
+attachment input are implemented in dedicated worktrees. The production
+gateway now parses text PDFs and Office files, falls back to OCR/vision for
+image-only PDF pages, and exposes the resulting attachment context to the
+runtime. A real Harmony SDK build remains pending.
 
 ## Decision
 
@@ -40,9 +42,10 @@ SSE and explicit interrupt routes, plus resumable attachment upload and scoped
 preview routes. These routes are a thin adapter over the existing `fd_desktop`
 binding, encrypted workspace history, and Skill authorization. They do not
 duplicate the long-lived history store or expose provider/tool internals.
-Uploaded text files and images can be prepared for an Agent turn; PDF/Office
-files can be stored and previewed but still return an explicit unsupported
-error when sent as Agent context until server-side extraction is implemented.
+Uploaded text files, images, PDFs, and Office files can be prepared for an
+Agent turn. The gateway selects text extraction, OCR, or visual input according
+to the attachment and model; unsupported combinations still return an explicit
+capability error instead of silently dropping the file.
 
 ## Ownership
 
@@ -158,11 +161,11 @@ the active turn is still running.
    chunk size and limits. `PUT /attachments/{id}/parts/{index}` uploads chunks;
    each part is checksum-verified and retryable. `POST /attachments/{id}/complete`
    finalizes the object.
-4. The current gateway reports upload completion as `ready` for the transfer
-   layer. It does not yet run PDF/Office extraction or OCR; those files remain
-   previewable but are rejected as model context with a precise unsupported
-   response. The processing-state vocabulary is reserved for the parser/OCR
-   worker that will be added later.
+4. The gateway reports upload completion as `ready` for the transfer layer and
+   prepares the file on the server. Text PDFs and Office files use server-side
+   extraction; image-only PDF pages use the OCR/vision fallback. The runtime
+   keeps processing failures explicit and reports the exact unsupported reason
+   when the selected model cannot accept the prepared input.
 5. The turn contains only attachment IDs and a user-visible name. The runtime
    decides whether to use native model image input, DeepSeek visual preprocessing,
    OCR, or text extraction based on the selected model and policy.
@@ -278,8 +281,9 @@ and recovery rules. They do not share a DOM UI or assume the same runtime is loc
 
 ### Phase 3: files and production hardening
 
-- Implement server-side checksum negotiation, resumable chunk retry, processing progress,
-  server OCR/vision routing, signed previews, and queue editing.
+- Extend the deployed checksum negotiation, resumable chunk retry, processing
+  progress, OCR/vision routing, signed previews, and queue editing with device
+  performance budgets and failure recovery.
 - Add device-size performance budgets, encrypted cache expiry, accessibility, and
   telemetry with no user text or secrets.
 - Release alongside Windows/macOS only after the same end-to-end acceptance matrix
