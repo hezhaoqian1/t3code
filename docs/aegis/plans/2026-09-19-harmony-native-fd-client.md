@@ -322,9 +322,12 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 - A minimal `POST /api/agent/turns` with an existing managed model token and
   `client: fd_desktop` returned progress, `turn.started`, `assistant.delta`, and
   `turn.completed` events.
-- `GET /api/mobile/v1/threads` currently returns `404`, so the native client keeps
-  the compatibility adapter enabled and does not claim the new mobile protocol is
-  deployed yet.
+- The deployed gateway release is `546556bae2b0279b0d634c8ec2d529c5b6d49e4f`.
+  Unauthenticated `GET /api/mobile/v1/threads` returns `401`; with the supplied
+  administrator session, bootstrap, Skill catalog, and thread shells return
+  `200` (the current account has four Skills and one thread). The native client
+  keeps the compatibility adapter enabled for older gateways and the legacy
+  text-only route.
 - The repository machine has no DevEco/Harmony SDK or `hvigorw` wrapper. The
   ArkUI build remains pending on a Harmony-capable build host; T3 server, desktop,
   contracts, and native static checks pass in this worktree.
@@ -333,7 +336,7 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 
 The native client is being developed in the dedicated worktree
 `t3code/.worktrees/harmony-native-fd-client` on branch
-`codex/fix-t3-main-regressions`. The current head is `1b41229d4`, which includes
+`codex/fix-t3-main-regressions`. The current head is `177be1185`, which includes
 the native ArkUI foundation, compatibility fixes, the legacy model alias fix,
 and the optimized PDF visual-routing tests. The Gateway adapter was merged to
 `main` by PR #102 as commit `363a5273` (source commit `d63ef04`); the follow-up
@@ -356,10 +359,10 @@ thread Skill recovery fix was merged by PR #103 as commit `18350475`:
   from the durable turn record. The response exposes only the version selector,
   not Skill instructions, tool arguments, or provider data.
 
-The Gateway mobile endpoints are merged in source control, but they have not
-been deployed to production from this worktree. The production gateway currently
-returns `404` for `/api/mobile/v1/threads` until the single-host release is
-published.
+The Gateway mobile endpoints are merged in source control by PR #105
+(`546556bae2b0279b0d634c8ec2d529c5b6d49e4f`) and are deployed to production.
+The native client can use the authenticated mobile endpoints; it retains the
+legacy adapter during rollout so older installations remain usable.
 The existing legacy Skill/history/SSE compatibility path remains available for
 text-only smoke tests.
 
