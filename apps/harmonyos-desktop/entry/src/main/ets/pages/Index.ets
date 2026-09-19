@@ -169,7 +169,7 @@ struct Index {
       this.syncFromStore();
       return;
     }
-    const wasWorking = this.store.activeThread.state === 'working';
+    const wasWorking = this.store.activeTurnId.length > 0 || this.store.activeThread.state === 'working';
     const queued = this.store.enqueueTurn(text.length === 0 ? '请分析附件。' : text);
     this.store.clearAttachments();
     this.draft = '';
@@ -194,7 +194,7 @@ struct Index {
   }
 
   private async startNextQueuedTurn(): Promise<void> {
-    if (this.store.activeThread.state === 'working') return;
+    if (this.store.activeTurnId.length > 0 || this.store.activeThread.state === 'working') return;
     const next = this.store.queuedTurns[0];
     if (next === undefined) {
       this.syncFromStore();

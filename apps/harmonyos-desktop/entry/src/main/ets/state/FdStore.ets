@@ -212,6 +212,7 @@ export class FdStore {
   }
 
   enqueueTurn(text: string): FdQueuedTurn {
+    const turnIsRunning = this.activeTurnId.length > 0 || this.activeThread.state === 'working';
     const turn: FdQueuedTurn = {
       id: createClientId('queued'),
       text,
@@ -221,7 +222,7 @@ export class FdStore {
       createdAt: isoNow()
     };
     this.queuedTurns.push(turn);
-    this.activeThread.state = 'queued';
+    if (!turnIsRunning) this.activeThread.state = 'queued';
     return turn;
   }
 

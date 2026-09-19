@@ -43,6 +43,10 @@ assert.match(index, /buildQueueSheet/);
 assert.match(index, /buildPreviewSheet/);
 assert.match(index, /connectThreadStream/);
 assert.match(index, /this\.handleStreamEvent\(_event\)/);
+assert.match(
+  index,
+  /this\.store\.activeTurnId\.length > 0 \|\| this\.store\.activeThread\.state === 'working'/,
+);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);
 assert.doesNotMatch(
   index,
@@ -74,6 +78,7 @@ assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
 assert.match(transfer, /wholeDigest\.digest/);
 assert.match(transfer, /uploadPickedAttachment/);
 assert.match(store, /activeTurnId/);
+assert.match(store, /activeTurnId\.length > 0 \|\| this\.activeThread\.state === 'working'/);
 assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
 assert.match(store, /this\.models/);
