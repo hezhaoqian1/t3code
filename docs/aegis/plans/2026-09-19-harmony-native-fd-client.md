@@ -333,10 +333,11 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 
 The native client is being developed in the dedicated worktree
 `t3code/.worktrees/harmony-native-fd-client` on branch
-`codex/fix-t3-main-regressions`. The current head is `f69a6c5e1`, which includes
-the compatibility-mode history fix and the native ArkUI foundation. The Gateway
-adapter was merged to `main` by PR #102 as commit `363a5273` (source commit
-`d63ef04`):
+`codex/fix-t3-main-regressions`. The current head is `1b41229d4`, which includes
+the native ArkUI foundation, compatibility fixes, the legacy model alias fix,
+and the optimized PDF visual-routing tests. The Gateway adapter was merged to
+`main` by PR #102 as commit `363a5273` (source commit `d63ef04`); the follow-up
+thread Skill recovery fix was merged by PR #103 as commit `18350475`:
 
 - A native ArkUI entry point for task list, thread history, streaming progress,
   Skill selection/deselection, queue editing, attachment chips, and preview.
@@ -351,6 +352,9 @@ adapter was merged to `main` by PR #102 as commit `363a5273` (source commit
   them with progress, finalizes the server attachment, and replaces the local
   temporary ID. A 404/405 mobile API response is surfaced as an actionable error;
   the attachment is never silently sent through the legacy text-only endpoint.
+- Mobile thread shells and details restore the latest authorized `skillVersionId`
+  from the durable turn record. The response exposes only the version selector,
+  not Skill instructions, tool arguments, or provider data.
 
 The Gateway mobile endpoints are merged in source control, but they have not
 been deployed to production from this worktree. The production gateway currently
@@ -358,3 +362,11 @@ returns `404` for `/api/mobile/v1/threads` until the single-host release is
 published.
 The existing legacy Skill/history/SSE compatibility path remains available for
 text-only smoke tests.
+
+Focused validation currently passes: Harmony static checks, T3 desktop
+typecheck, the 39-case legacy-token compatibility suite, the 15-case visual
+attachment/PDF suite, the 12-case web queue/model suite, the 12-case
+shared/contracts suite, and Gateway mobile Service/Controller tests. Full
+desktop tests still contain Windows-only path/symlink assumptions that cannot
+be reproduced on this host; those failures are recorded separately from the
+Harmony changes.
