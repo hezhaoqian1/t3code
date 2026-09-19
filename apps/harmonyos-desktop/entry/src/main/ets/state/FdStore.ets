@@ -13,7 +13,7 @@ import {
   sampleThread,
   sampleThreadShells
 } from '../data/FdModels';
-import { FdRuntimeClient, FdRuntimeError } from '../network/FdRuntimeClient';
+import { FdRuntimeClient, FdRuntimeError, FdTurnReceipt } from '../network/FdRuntimeClient';
 
 export class FdStore {
   readonly client: FdRuntimeClient;
@@ -25,6 +25,9 @@ export class FdStore {
   selectedSkillVersionId: number = 0;
   selectedModel: string = 'deepseek-flash';
   activeTurnId: string = '';
+  // The mobile SSE adapter numbers events per turn. Keep that cursor
+  // separate from the durable thread cursor used by a future replay stream.
+  private streamSequence: number = 0;
   loading: boolean = false;
   signedIn: boolean = false;
   accountName: string = '';
@@ -61,6 +64,8 @@ export class FdStore {
     this.models = ['deepseek-flash'];
     this.activeThread = sampleThread();
     this.queuedTurns = [];
+    this.activeTurnId = '';
+    this.streamSequence = 0;
     this.selectedSkillVersionId = 0;
     this.lastError = '';
   }
@@ -90,7 +95,23 @@ export class FdStore {
     } catch (error) {
       // The native shell remains usable while the mobile API is being rolled out.
       // A thread 404 must not discard a successfully loaded Skill/model catalog.
-      if (!skillsLoaded || this.lastError.length === 0) {
+      const mobileApiUnavailable = error instanceof FdRuntimeError &&
+        (error.code === 'http_404' || error.code === 'http_405');
+      if (mobileApiUnavailable) {
+        // Legacy Agent turns create a conversation lazily. Keep a real UUID
+        // shell so the user can send text while the mobile API rolls out.
+        try {
+          // Do not leak constructor-only demo rows into an authenticated
+          // account when the compatibility route is active.
+          this.threads = [];
+          await this.createThread();
+          this.lastError = '';
+        } catch (fallbackError) {
+          this.lastError = fallbackError instanceof FdRuntimeError
+            ? fallbackError.message
+            : '兼容任务暂不可用';
+        }
+      } else if (!skillsLoaded || this.lastError.length === 0) {
         this.lastError = error instanceof FdRuntimeError ? error.message : '任务列表暂不可用';
       }
     }
@@ -99,17 +120,26 @@ export class FdStore {
   async openThread(threadId: string): Promise<void> {
     const local = this.threads.find((thread: FdThreadShell) => thread.id === threadId);
     if (local === undefined) return;
+    this.streamSequence = 0;
+    // Build the selected shell before trying the mobile detail endpoint. The
+    // legacy history fallback must keep sends scoped to the clicked thread.
+    this.activeThread = {
+      ...local,
+      messages: [],
+      activities: [],
+      attachments: [],
+      sequence: 0,
+      hasMoreHistory: false
+    } as FdThreadDetail;
     try {
       this.activeThread = await this.client.getThread(threadId);
     } catch (_error) {
       try {
         const history = await this.client.getLegacyHistory(threadId);
-        if (history.length > 0) {
-          const last = history[history.length - 1];
-          this.activeThread.messages = history;
-          if (last !== undefined) this.activeThread.latestMessage = last.text;
-          this.activeThread.updatedAt = isoNow();
-        }
+        this.activeThread.messages = history;
+        const last = history[history.length - 1];
+        if (last !== undefined) this.activeThread.latestMessage = last.text;
+        this.activeThread.updatedAt = isoNow();
       } catch (_historyError) {
         // The mobile history endpoint is optional during the compatibility rollout.
       }
@@ -150,6 +180,7 @@ export class FdStore {
       this.selectedModel = this.activeThread.model;
       this.selectedSkillVersionId = 0;
       this.queuedTurns = [];
+      this.streamSequence = 0;
       return;
     }
     const detail = await this.client.createThread(this.selectedModel);
@@ -169,6 +200,7 @@ export class FdStore {
     this.selectedSkillVersionId = detail.skillVersionId ?? 0;
     this.queuedTurns = [];
     this.activeTurnId = '';
+    this.streamSequence = 0;
   }
 
   selectSkill(versionId: number): void {
@@ -204,6 +236,7 @@ export class FdStore {
   }
 
   enqueueTurn(text: string): FdQueuedTurn {
+    const turnIsRunning = this.activeTurnId.length > 0 || this.activeThread.state === 'working';
     const turn: FdQueuedTurn = {
       id: createClientId('queued'),
       text,
@@ -213,7 +246,7 @@ export class FdStore {
       createdAt: isoNow()
     };
     this.queuedTurns.push(turn);
-    this.activeThread.state = 'queued';
+    if (!turnIsRunning) this.activeThread.state = 'queued';
     return turn;
   }
 
@@ -252,6 +285,7 @@ export class FdStore {
     this.activeThread.latestMessage = turn.text;
     this.activeThread.state = 'working';
     this.activeThread.updatedAt = isoNow();
+    this.streamSequence = 0;
     if (!this.client.isAuthenticated) {
       const assistant: FdMessage = {
         id: createClientId('message'),
@@ -268,32 +302,54 @@ export class FdStore {
       return '';
     }
     let terminalEvent = false;
-    const receipt = await this.client.startTurn(
-      this.activeThread.id,
-      turn.text,
-      turn.attachments,
-      turn.model,
-      turn.skillVersionId,
-      (event: FdStreamEvent): void => {
-        if (event.type === 'turn.started') this.activeTurnId = event.turnId;
-        this.applyEvent(event);
-        if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
-          terminalEvent = true;
+    let receipt: FdTurnReceipt;
+    try {
+      receipt = await this.client.startTurn(
+        this.activeThread.id,
+        turn.text,
+        turn.attachments,
+        turn.model,
+        turn.skillVersionId,
+        (event: FdStreamEvent): void => {
+          if (event.type === 'turn.started') this.activeTurnId = event.turnId;
+          this.applyEvent(event, 'turn');
+          if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
+            terminalEvent = true;
+          }
+          if (onEvent !== undefined) onEvent(event);
         }
-        if (onEvent !== undefined) onEvent(event);
-      }
-    );
-    if (!terminalEvent) this.activeTurnId = receipt.turnId;
-    if (receipt.events.length === 0) {
+      );
+    } catch (error) {
+      this.activeTurnId = '';
       this.activeThread.state = 'error';
+      this.streamSequence = 0;
+      throw error;
+    }
+    if (receipt.events.length === 0) {
+      this.activeTurnId = '';
+      this.activeThread.state = 'error';
+      this.streamSequence = 0;
       this.lastError = 'FD Runtime 没有返回任务事件';
+      throw new FdRuntimeError('empty_stream', this.lastError);
+    }
+    if (!terminalEvent) {
+      this.activeTurnId = '';
+      this.activeThread.state = 'error';
+      this.streamSequence = 0;
+      this.lastError = 'FD Runtime 流在终止事件前断开';
+      throw new FdRuntimeError('incomplete_stream', this.lastError);
     }
     return receipt.streamUrl;
   }
 
-  applyEvent(event: FdStreamEvent): void {
-    if (event.sequence <= this.activeThread.sequence) return;
-    this.activeThread.sequence = event.sequence;
+  applyEvent(event: FdStreamEvent, sequenceScope: 'turn' | 'thread' = 'thread'): void {
+    if (sequenceScope === 'turn') {
+      if (event.sequence <= this.streamSequence) return;
+      this.streamSequence = event.sequence;
+    } else {
+      if (event.sequence <= this.activeThread.sequence) return;
+      this.activeThread.sequence = event.sequence;
+    }
     switch (event.type) {
       case 'thread.snapshot':
         this.activeThread = event.detail;

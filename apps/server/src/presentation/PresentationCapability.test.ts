@@ -18,7 +18,9 @@ describe("PresentationCapability", () => {
     const resolved = await resolvePresentationCapability({ packagedRoot });
     expect(resolved.id).toBe("fd-presentation-studio");
     expect(resolved.source).toBe("packaged");
-    expect(resolved.skillPath.endsWith("fd-presentation-studio/SKILL.md")).toBe(true);
+    expect(resolved.skillPath.endsWith(NodePath.join("fd-presentation-studio", "SKILL.md"))).toBe(
+      true,
+    );
   });
 
   it("rejects path traversal and malformed signatures", () => {

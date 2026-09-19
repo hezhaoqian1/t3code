@@ -42,6 +42,10 @@ assert.match(index, /buildSkillSheet/);
 assert.match(index, /buildQueueSheet/);
 assert.match(index, /buildPreviewSheet/);
 assert.match(index, /connectThreadStream/);
+assert.match(
+  index,
+  /this\.store\.activeTurnId\.length > 0 \|\| this\.store\.activeThread\.state === 'working'/,
+);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);
 assert.doesNotMatch(
   index,
@@ -56,12 +60,18 @@ assert.match(client, /parseLegacySse/);
 assert.match(client, /requestInStream/);
 assert.match(client, /dataReceive/);
 assert.match(client, /dataEnd/);
+assert.match(client, /eventName === 'turn\.interrupted'/);
+assert.match(client, /eventName === 'skill\.authorized'/);
+assert.match(client, /eventName === 'attachment\.processing'/);
+assert.match(client, /eventName === 'attachment\.ready'/);
+assert.match(client, /eventName === 'attachment\.failed'/);
 assert.match(client, /attachments_require_mobile_api/);
 assert.match(client, /uploadAttachmentPart/);
 assert.match(client, /completeAttachmentUpload/);
 assert.match(client, /threadId,/);
 assert.match(client, /supportedModels/);
 assert.match(client, /getThreadHistory/);
+assert.match(client, /legacy Agent endpoint can create the conversation/);
 assert.match(client, /historyCursor/);
 assert.match(client, /identifierValue/);
 assert.match(client, /afterSequence=/);
@@ -72,15 +82,38 @@ assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
 assert.match(transfer, /wholeDigest\.digest/);
 assert.match(transfer, /uploadPickedAttachment/);
 assert.match(store, /activeTurnId/);
+assert.match(store, /private streamSequence: number = 0/);
+assert.match(store, /this\.applyEvent\(event, 'turn'\)/);
+assert.match(
+  store,
+  /applyEvent\(event: FdStreamEvent, sequenceScope: 'turn' \| 'thread' = 'thread'\)/,
+);
+assert.match(store, /event\.sequence <= this\.streamSequence/);
+assert.match(store, /FdRuntimeClient, FdRuntimeError, FdTurnReceipt/);
+assert.match(store, /activeTurnId\.length > 0 \|\| this\.activeThread\.state === 'working'/);
+assert.match(
+  store,
+  /logout\(\): void \{[\s\S]*this\.queuedTurns = \[\];[\s\S]*this\.activeTurnId = '';/,
+);
+assert.match(
+  store,
+  /this\.activeTurnId = '';[\s\S]*this\.activeThread\.state = 'error';[\s\S]*throw error/,
+);
+assert.match(store, /incomplete_stream/);
 assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
 assert.match(store, /this\.models/);
-assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /loadOlderHistory/);
+assert.match(store, /this\.activeThread = \{[\s\S]*\.\.\.local[\s\S]*hasMoreHistory: false/);
+assert.match(store, /mobileApiUnavailable/);
+assert.match(store, /this\.threads = \[\]/);
+assert.match(store, /await this\.createThread\(\)/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
 assert.match(config, /deepseek-flash/);
 assert.match(moduleJson5, /ohos\.permission\.INTERNET/);
 assert.match(moduleJson5, /deviceTypes/);
+assert.match(index, /this\.store\.applyEvent\(event, 'thread'\)/);
+assert.match(index, /FdStore owns the reducer/);
 
 console.log(`Harmony native static checks passed (${requiredFiles.length} files).`);

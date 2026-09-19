@@ -3,6 +3,9 @@ import * as Schema from "effect/Schema";
 
 import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
 
+const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
+const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
 describe("FD server settings", () => {
   it("does not expose provider, model, credential, or update settings", () => {
     expect("providers" in DEFAULT_SERVER_SETTINGS).toBe(false);
@@ -13,7 +16,7 @@ describe("FD server settings", () => {
   });
 
   it("drops retired provider settings from persisted input", () => {
-    const decoded = Schema.decodeUnknownSync(ServerSettings)({
+    const decoded = decodeServerSettings({
       providers: { codex: { binaryPath: "private" } },
       providerInstances: { custom: { driver: "codex" } },
       textGenerationModelSelection: { instanceId: "codex", model: "other" },
@@ -28,7 +31,7 @@ describe("FD server settings", () => {
   });
 
   it("does not accept model/provider fields in settings patches", () => {
-    const decoded = Schema.decodeUnknownSync(ServerSettingsPatch)({
+    const decoded = decodeServerSettingsPatch({
       textGenerationModelSelection: { instanceId: "codex", model: "other" },
       providers: { codex: { enabled: true } },
       providerInstances: { custom: { driver: "codex" } },

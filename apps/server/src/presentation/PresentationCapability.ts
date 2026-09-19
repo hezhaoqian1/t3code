@@ -91,7 +91,7 @@ async function hashDirectory(root: string, maxBytes: number): Promise<string> {
   while (pending.length > 0) {
     const current = pending.shift()!;
     const entries = await NodeFS.readdir(current, { withFileTypes: true, encoding: "utf8" });
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       const file = safeRoot(root, NodePath.join(current, entry.name));
       const stat = await NodeFS.stat(file);
       if (stat.isDirectory()) {
@@ -101,7 +101,8 @@ async function hashDirectory(root: string, maxBytes: number): Promise<string> {
       if (!stat.isFile()) continue;
       total += stat.size;
       if (total > maxBytes) throw new Error("presentation-package-too-large");
-      hash.update(NodePath.relative(root, file));
+      // Keep package hashes identical on Windows and POSIX hosts.
+      hash.update(NodePath.relative(root, file).split(NodePath.sep).join("/"));
       hash.update(await NodeFS.readFile(file));
     }
   }

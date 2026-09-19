@@ -1,8 +1,8 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFS from "node:fs";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import { FdAccountUserSummary } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -124,7 +124,7 @@ export class CredentialVault {
         KEY_BYTES,
       );
       ciphertext = decodeBoundedBase64(envelope.ciphertext, MAX_VAULT_PLAINTEXT_BYTES);
-      const decipher = createDecipheriv("aes-256-gcm", key, nonce);
+      const decipher = NodeCrypto.createDecipheriv("aes-256-gcm", key, nonce);
       decipher.setAAD(vaultAad(deviceId));
       decipher.setAuthTag(authTag);
       plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
@@ -149,13 +149,13 @@ export class CredentialVault {
     let key: Buffer | undefined;
     let plaintext: Buffer | undefined;
     try {
-      key = randomBytes(KEY_BYTES);
+      key = NodeCrypto.randomBytes(KEY_BYTES);
       plaintext = Buffer.from(JSON.stringify(state), "utf8");
       if (plaintext.byteLength > MAX_VAULT_PLAINTEXT_BYTES) {
         throw new CredentialVaultCorruptError();
       }
-      const nonce = randomBytes(NONCE_BYTES);
-      const cipher = createCipheriv("aes-256-gcm", key, nonce);
+      const nonce = NodeCrypto.randomBytes(NONCE_BYTES);
+      const cipher = NodeCrypto.createCipheriv("aes-256-gcm", key, nonce);
       cipher.setAAD(vaultAad(deviceId));
       const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
       const protectedKey = this.#protector.protect(key.toString("base64"));
@@ -180,7 +180,7 @@ export class CredentialVault {
   }
 
   async clear(): Promise<void> {
-    await rm(this.#credentialPath(), { force: true });
+    await NodeFSP.rm(this.#credentialPath(), { force: true });
     await this.clearRevocationIntent();
   }
 
@@ -203,7 +203,7 @@ export class CredentialVault {
   }
 
   async clearRevocationIntent(): Promise<void> {
-    await rm(this.#revocationIntentPath(), { force: true });
+    await NodeFSP.rm(this.#revocationIntentPath(), { force: true });
   }
 
   async deviceId(): Promise<string> {
@@ -224,7 +224,7 @@ export class CredentialVault {
         throw new CredentialVaultCorruptError();
       }
     }
-    const identity = decodeIdentity({ version: VAULT_VERSION, deviceId: randomUUID() });
+    const identity = decodeIdentity({ version: VAULT_VERSION, deviceId: NodeCrypto.randomUUID() });
     await atomicWrite(
       this.#devicePath(),
       Buffer.from(JSON.stringify(identity), "utf8"),
@@ -234,15 +234,15 @@ export class CredentialVault {
   }
 
   #devicePath(): string {
-    return join(this.#root, "device.v1.json");
+    return NodePath.join(this.#root, "device.v1.json");
   }
 
   #credentialPath(): string {
-    return join(this.#root, "account.v1.json");
+    return NodePath.join(this.#root, "account.v1.json");
   }
 
   #revocationIntentPath(): string {
-    return join(this.#root, "revocation-intent.v1");
+    return NodePath.join(this.#root, "revocation-intent.v1");
   }
 }
 
@@ -269,13 +269,13 @@ function decodeBoundedBase64(value: string, maxBytes: number): Buffer {
 }
 
 async function readOptionalBoundedFile(path: string, maxBytes: number): Promise<Buffer | null> {
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let handle: Awaited<ReturnType<typeof NodeFSP.open>> | undefined;
   try {
-    const beforeOpen = await lstat(path);
+    const beforeOpen = await NodeFSP.lstat(path);
     if (!beforeOpen.isFile() || beforeOpen.isSymbolicLink() || beforeOpen.size > maxBytes) {
       throw new CredentialVaultCorruptError();
     }
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await NodeFSP.open(path, NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW);
     const opened = await handle.stat();
     if (!opened.isFile() || opened.size > maxBytes) throw new CredentialVaultCorruptError();
     const bytes = await handle.readFile();
@@ -292,15 +292,15 @@ async function readOptionalBoundedFile(path: string, maxBytes: number): Promise<
 
 async function atomicWrite(path: string, contents: Buffer, maxBytes: number): Promise<void> {
   if (contents.byteLength > maxBytes) throw new CredentialVaultCorruptError();
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  await chmod(dirname(path), 0o700);
-  const temporary = `${path}.${randomUUID()}.tmp`;
-  await writeFile(temporary, contents, { mode: 0o600, flag: "wx" });
+  await NodeFSP.mkdir(NodePath.dirname(path), { recursive: true, mode: 0o700 });
+  await NodeFSP.chmod(NodePath.dirname(path), 0o700);
+  const temporary = `${path}.${NodeCrypto.randomUUID()}.tmp`;
+  await NodeFSP.writeFile(temporary, contents, { mode: 0o600, flag: "wx" });
   try {
-    await rename(temporary, path);
-    await chmod(path, 0o600);
+    await NodeFSP.rename(temporary, path);
+    await NodeFSP.chmod(path, 0o600);
   } finally {
-    await rm(temporary, { force: true });
+    await NodeFSP.rm(temporary, { force: true });
   }
 }
 

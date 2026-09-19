@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "@effect/vitest";
 
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
+import { FD_RESPONSES_MODEL } from "../fd-agent/FdResponsesProtocol.ts";
 
 import {
   FdEnterpriseAgentClient,
@@ -21,7 +22,7 @@ const credentials: FdServerRuntimeCredentialProjection = {
   policy: {
     version: 1,
     capability: "general_assistant",
-    model: "deepseek-v4-flash",
+    model: FD_RESPONSES_MODEL,
     expiresAt: 4_102_444_800,
   },
   generation: 1,
@@ -40,7 +41,7 @@ function stream(text: string): ReadableStream<Uint8Array> {
 }
 
 const terminalStream = [
-  `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-v4-flash"}\n\n`,
+  `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"${FD_RESPONSES_MODEL}"}\n\n`,
   `event: assistant.delta\ndata: {"turn_id":"${enterpriseTurnId}","delta":"done"}\n\n`,
   `event: turn.completed\ndata: {"turn_id":"${enterpriseTurnId}","message":{"id":10,"conversation_id":0,"role":"assistant","text":"done","created_at":1786320000},"tool_calls":0,"usage":{"input_tokens":2,"output_tokens":1}}\n\n`,
 ].join("");
@@ -90,7 +91,7 @@ describe("FdEnterpriseAgentClient", () => {
     const body = JSON.parse(String(init.body));
     expect(body).toEqual({
       client_thread_id: "550e8400-e29b-41d4-a716-446655440000",
-      model: "deepseek-v4-flash",
+      model: FD_RESPONSES_MODEL,
       token_id: 45,
       skill_version_ids: [10004],
       message: "hello",
@@ -118,7 +119,7 @@ describe("FdEnterpriseAgentClient", () => {
           },
         ],
         model_capabilities: {
-          "deepseek-v4-flash": {
+          [FD_RESPONSES_MODEL]: {
             fd_skills: true,
             fd_skill_protocol: "enterprise-agent-v1",
             view_policy: "secret",
@@ -143,7 +144,7 @@ describe("FdEnterpriseAgentClient", () => {
     await catalog.refresh();
     expect(catalog.authorized).toBe(true);
     expect(catalog.supportsModel("deepseek-v4-pro")).toBe(false);
-    expect(catalog.supportsModel("deepseek-v4-flash")).toBe(true);
+    expect(catalog.supportsModel(FD_RESPONSES_MODEL)).toBe(true);
     expect(catalog.findVersion(10004)?.name).toBe("company-database-query");
     expect(catalog.findVersion(10004, "deepseek-v4-pro")).toBeUndefined();
   });

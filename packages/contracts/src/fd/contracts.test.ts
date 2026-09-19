@@ -9,9 +9,15 @@ import {
   FdServerRuntimeCredentialProjection,
 } from "./runtimeCredentials.ts";
 
+const decodeFdAccountState = Schema.decodeUnknownSync(FdAccountState);
+const decodeFdAccountLoginResponse = Schema.decodeUnknownSync(FdAccountLoginResponse);
+const decodeFdServerRuntimeCredentialProjection = Schema.decodeUnknownSync(
+  FdServerRuntimeCredentialProjection,
+);
+
 describe("FD account contracts", () => {
   it("accepts every public account state without credential material", () => {
-    const decode = Schema.decodeUnknownSync(FdAccountState);
+    const decode = decodeFdAccountState;
     expect(decode({ status: "checking" })).toEqual({ status: "checking" });
     expect(decode({ status: "anonymous" })).toEqual({ status: "anonymous" });
     expect(
@@ -24,7 +30,7 @@ describe("FD account contracts", () => {
       }),
     ).toMatchObject({ status: "authenticated", profile: { id: 31 } });
     expect(
-      Schema.decodeUnknownSync(FdAccountState)({
+      decodeFdAccountState({
         status: "authenticated",
         policyVersion: 1,
         profile: { id: 31, username: "employee", displayName: null },
@@ -61,7 +67,7 @@ describe("FD account contracts", () => {
   });
 
   it("keeps login failures renderer-safe", () => {
-    const decode = Schema.decodeUnknownSync(FdAccountLoginResponse);
+    const decode = decodeFdAccountLoginResponse;
     expect(
       decode({
         ok: false,
@@ -104,12 +110,10 @@ describe("FD runtime credential contracts", () => {
   });
 
   it("accepts only the minimum server projection", () => {
-    expect(Schema.decodeUnknownSync(FdServerRuntimeCredentialProjection)(projection)).toEqual(
-      projection,
-    );
+    expect(decodeFdServerRuntimeCredentialProjection(projection)).toEqual(projection);
     for (const secretField of ["refreshCookie", "password", "sessionId"]) {
       expect(() =>
-        Schema.decodeUnknownSync(FdServerRuntimeCredentialProjection)({
+        decodeFdServerRuntimeCredentialProjection({
           ...projection,
           [secretField]: "forbidden",
         }),

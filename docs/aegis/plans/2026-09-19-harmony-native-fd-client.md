@@ -138,9 +138,12 @@ compatible with the T3 vocabulary:
 - `turn.completed`, `turn.failed`, `turn.interrupted`
 - `thread.synchronized`
 
-The server owns ordering and deduplication. The client applies an event only when
-its sequence is newer than the last applied sequence, then persists the resulting
-visible snapshot. Reconnect is a catch-up operation, not a second turn.
+The server owns ordering within a turn. The current mobile SSE adapter resets its
+sequence at the start of each turn and does not yet expose a persisted replay
+cursor; the client therefore deduplicates against a per-turn cursor and never
+mistakes it for the durable thread sequence. Once the replay endpoint is deployed,
+the client will switch the stream scope to the T3 thread cursor. Reconnect is a
+catch-up operation, not a second turn.
 
 `POST /turns/{turnId}/interrupt` is explicit. A send while another turn is active
 is placed in a device-side queue and receives its own idempotency key; it does not
@@ -322,19 +325,29 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 - A minimal `POST /api/agent/turns` with an existing managed model token and
   `client: fd_desktop` returned progress, `turn.started`, `assistant.delta`, and
   `turn.completed` events.
-- `GET /api/mobile/v1/threads` currently returns `404`, so the native client keeps
-  the compatibility adapter enabled and does not claim the new mobile protocol is
-  deployed yet.
+- The deployed gateway release is `546556bae2b0279b0d634c8ec2d529c5b6d49e4f`.
+  Unauthenticated `GET /api/mobile/v1/threads` returns `401`; with the supplied
+  administrator session, bootstrap, Skill catalog, and thread shells return
+  `200` (the current account has four Skills and one thread). The native client
+  keeps the compatibility adapter enabled for older gateways and the legacy
+  text-only route.
+- A live second turn on the same thread returned a fresh per-turn sequence
+  (`1,2,...`) and completed successfully. This is why the native reducer keeps
+  a separate per-turn cursor; treating that sequence as thread-global would drop
+  the second turn's progress events.
 - The repository machine has no DevEco/Harmony SDK or `hvigorw` wrapper. The
   ArkUI build remains pending on a Harmony-capable build host; T3 server, desktop,
   contracts, and native static checks pass in this worktree.
 
 ## Worktree implementation status
 
-The T3 worktree branch `codex/fix-t3-main-regressions` currently contains the
-native client changes (commit `3033fa019`), while the Gateway worktree branch
-`codex/fd-gateway-harmony-mobile` contains the server adapter changes (commit
-`bc04ba8`):
+The native client is being developed in the dedicated worktree
+`t3code/.worktrees/harmony-native-fd-client` on branch
+`codex/fix-t3-main-regressions`. The current head is `90420c330`, which includes
+the native ArkUI foundation, compatibility fixes, the legacy model alias fix,
+and the optimized PDF visual-routing tests. The Gateway adapter was merged to
+`main` by PR #102 as commit `363a5273` (source commit `d63ef04`); the follow-up
+thread Skill recovery fix was merged by PR #103 as commit `18350475`:
 
 - A native ArkUI entry point for task list, thread history, streaming progress,
   Skill selection/deselection, queue editing, attachment chips, and preview.
@@ -349,9 +362,21 @@ native client changes (commit `3033fa019`), while the Gateway worktree branch
   them with progress, finalizes the server attachment, and replaces the local
   temporary ID. A 404/405 mobile API response is surfaced as an actionable error;
   the attachment is never silently sent through the legacy text-only endpoint.
+- Mobile thread shells and details restore the latest authorized `skillVersionId`
+  from the durable turn record. The response exposes only the version selector,
+  not Skill instructions, tool arguments, or provider data.
 
-The Gateway branch contains the mobile endpoints, but they have not been
-deployed to production from this worktree. The production gateway may still
-return `404` for `/api/mobile/v1/threads` until that branch is released.
+The Gateway mobile endpoints are merged in source control by PR #105
+(`546556bae2b0279b0d634c8ec2d529c5b6d49e4f`) and are deployed to production.
+The native client can use the authenticated mobile endpoints; it retains the
+legacy adapter during rollout so older installations remain usable.
 The existing legacy Skill/history/SSE compatibility path remains available for
 text-only smoke tests.
+
+Focused validation currently passes: Harmony static checks, T3 desktop
+typecheck, the 39-case legacy-token compatibility suite, the 15-case visual
+attachment/PDF suite, the 12-case web queue/model suite, the 12-case
+shared/contracts suite, and Gateway mobile Service/Controller tests. Full
+desktop tests still contain Windows-only path/symlink assumptions that cannot
+be reproduced on this host; those failures are recorded separately from the
+Harmony changes.

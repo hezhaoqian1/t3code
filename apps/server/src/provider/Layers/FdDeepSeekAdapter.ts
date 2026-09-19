@@ -291,8 +291,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
 ) {
   const instanceId = options.instanceId ?? FD_DEEPSEEK_INSTANCE_ID;
   const isSupportedResponsesModel =
-    options.isSupportedModel ??
-    ((model: string) => isFdResponsesModelAdvertised(model));
+    options.isSupportedModel ?? ((model: string) => isFdResponsesModelAdvertised(model));
   const now = options.now ?? (() => new Date());
   let nextId = 0;
   const randomId = options.randomId ?? (() => `fd-${++nextId}`);

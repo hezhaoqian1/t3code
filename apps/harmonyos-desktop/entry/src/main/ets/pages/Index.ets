@@ -140,7 +140,7 @@ struct Index {
   }
 
   private handleStreamEvent(event: FdStreamEvent): void {
-    this.store.applyEvent(event);
+    this.store.applyEvent(event, 'thread');
     this.syncFromStore();
     if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
       const immediateId = this.pendingImmediateTurnId;
@@ -169,7 +169,7 @@ struct Index {
       this.syncFromStore();
       return;
     }
-    const wasWorking = this.store.activeThread.state === 'working';
+    const wasWorking = this.store.activeTurnId.length > 0 || this.store.activeThread.state === 'working';
     const queued = this.store.enqueueTurn(text.length === 0 ? '请分析附件。' : text);
     this.store.clearAttachments();
     this.draft = '';
@@ -181,6 +181,9 @@ struct Index {
     this.store.removeQueued(turn.id);
     try {
       const streamUrl = await this.store.startTurn(turn, (_event: FdStreamEvent): void => {
+        // FdStore owns the reducer for the synchronous SSE response. This
+        // callback only refreshes the view; applying the event again here
+        // would duplicate deltas when the per-turn cursor is reset.
         this.syncFromStore();
       });
       this.syncFromStore();
@@ -194,7 +197,7 @@ struct Index {
   }
 
   private async startNextQueuedTurn(): Promise<void> {
-    if (this.store.activeThread.state === 'working') return;
+    if (this.store.activeTurnId.length > 0 || this.store.activeThread.state === 'working') return;
     const next = this.store.queuedTurns[0];
     if (next === undefined) {
       this.syncFromStore();

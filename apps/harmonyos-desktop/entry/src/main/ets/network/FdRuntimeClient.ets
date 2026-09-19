@@ -154,11 +154,34 @@ export class FdRuntimeClient {
   }
 
   async createThread(model: string): Promise<FdThreadDetail> {
-    const root = await this.request(`${FD_RUNTIME_API_PREFIX}/threads`, 'POST', {
-      clientThreadId: createUuid(),
-      model: model.length > 0 ? model : FD_DEFAULT_MODEL
-    });
-    return parseThreadDetail(object(root['data'] ?? root));
+    const selectedModel = model.length > 0 ? model : FD_DEFAULT_MODEL;
+    const clientThreadId = createUuid();
+    try {
+      const root = await this.request(`${FD_RUNTIME_API_PREFIX}/threads`, 'POST', {
+        clientThreadId,
+        model: selectedModel
+      });
+      return parseThreadDetail(object(root['data'] ?? root));
+    } catch (error) {
+      if (!(error instanceof FdRuntimeError) || (error.code !== 'http_404' && error.code !== 'http_405')) throw error;
+      // During rollout the legacy Agent endpoint can create the conversation
+      // lazily on the first text turn. Keep that compatibility path scoped to
+      // a fresh UUID; attachments still require the mobile API below.
+      return {
+        id: clientThreadId,
+        title: '新建任务',
+        model: selectedModel,
+        state: 'idle',
+        latestMessage: '',
+        updatedAt: isoNow(),
+        hasPendingApprovals: false,
+        messages: [],
+        activities: [],
+        attachments: [],
+        sequence: 0,
+        hasMoreHistory: false
+      } as FdThreadDetail;
+    }
   }
 
   async getLegacyHistory(threadId: string): Promise<Array<FdMessage>> {
@@ -711,6 +734,13 @@ function parseLegacySseBlock(block: string, currentSequence: number): { event?: 
       return { sequence: nextSequence, event: { type: 'turn.completed', sequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || stringValue(message['id']) || stableMessageId, text: stringValue(value['text']) || stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
     }
     if (eventName === 'turn.failed') return { sequence: nextSequence, event: { type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
+    if (eventName === 'turn.interrupted') return { sequence: nextSequence, event: { type: 'turn.interrupted', sequence, message: stringValue(value['message']) || undefined } };
+    if (eventName === 'skill.authorized') return { sequence: nextSequence, event: { type: 'skill.authorized', sequence, skillVersionId: numberValue(value['skill_version_id'] ?? value['skillVersionId'], 0) } };
+    if (eventName === 'thread.synchronized') return { sequence: nextSequence, event: { type: 'thread.synchronized', sequence } };
+    if (eventName === 'thread.snapshot') return { sequence: nextSequence, event: { type: 'thread.snapshot', sequence, detail: parseThreadDetail(object(value['detail'] ?? value)), resumeToken: stringValue(value['resume_token'] ?? value['resumeToken']) || undefined } };
+    if (eventName === 'attachment.processing') return { sequence: nextSequence, event: { type: 'attachment.processing', sequence, attachmentId: stringValue(value['attachment_id'] ?? value['attachmentId']), progress: numberValue(value['progress'], 0) } };
+    if (eventName === 'attachment.ready') return { sequence: nextSequence, event: { type: 'attachment.ready', sequence, attachmentId: stringValue(value['attachment_id'] ?? value['attachmentId']), previewUrl: stringValue(value['preview_url'] ?? value['previewUrl']) || undefined } };
+    if (eventName === 'attachment.failed') return { sequence: nextSequence, event: { type: 'attachment.failed', sequence, attachmentId: stringValue(value['attachment_id'] ?? value['attachmentId']), message: stringValue(value['message']) || '附件处理失败' } };
     if (eventName === 'tool.started') return { sequence: nextSequence, event: { type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };
     if (eventName === 'tool.completed') return { sequence: nextSequence, event: { type: 'tool.completed', sequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' } };
     return { sequence: currentSequence };

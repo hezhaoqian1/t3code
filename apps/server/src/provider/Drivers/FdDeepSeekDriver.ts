@@ -278,8 +278,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       const adapter = yield* makeFdDeepSeekAdapter({
         instanceId,
         isSupportedModel: (model) =>
-          isFdResponsesModelAdvertised(model) ||
-          authorizedDynamicModels.has(model),
+          isFdResponsesModelAdvertised(model) || authorizedDynamicModels.has(model),
         kernel,
         ordinaryAdapter,
         ordinarySessionInput: (input) =>
