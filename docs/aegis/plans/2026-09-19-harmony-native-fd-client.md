@@ -332,9 +332,8 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 ## Worktree implementation status
 
 The T3 worktree branch `codex/fix-t3-main-regressions` currently contains the
-native client changes (commit `3033fa019`), while the Gateway worktree branch
-`codex/fd-gateway-harmony-mobile` contains the server adapter changes (commit
-`bc04ba8`):
+native client changes through commit `bc6f66510`. The Gateway adapter was merged
+to `main` by PR #102 as commit `363a5273` (source commit `d63ef04`):
 
 - A native ArkUI entry point for task list, thread history, streaming progress,
   Skill selection/deselection, queue editing, attachment chips, and preview.
@@ -350,8 +349,9 @@ native client changes (commit `3033fa019`), while the Gateway worktree branch
   temporary ID. A 404/405 mobile API response is surfaced as an actionable error;
   the attachment is never silently sent through the legacy text-only endpoint.
 
-The Gateway branch contains the mobile endpoints, but they have not been
-deployed to production from this worktree. The production gateway may still
-return `404` for `/api/mobile/v1/threads` until that branch is released.
+The Gateway mobile endpoints are merged in source control, but they have not
+been deployed to production from this worktree. The production gateway currently
+returns `404` for `/api/mobile/v1/threads` until the single-host release is
+published.
 The existing legacy Skill/history/SSE compatibility path remains available for
 text-only smoke tests.
