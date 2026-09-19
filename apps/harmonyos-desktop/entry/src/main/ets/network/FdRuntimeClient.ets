@@ -241,7 +241,7 @@ export class FdRuntimeClient {
       { requestId: createClientId('interrupt') }
     );
     const data = object(root['data'] ?? root);
-    return data['interrupted'] === true;
+    return data['interrupted'] !== false;
   }
 
   async createAttachmentUpload(
@@ -703,16 +703,16 @@ function parseLegacySseBlock(block: string, currentSequence: number): { event?: 
     const turnId = stringValue(value['turn_id'] ?? value['turnId']);
     const stableMessageId = stringValue(value['message_id'] ?? value['messageId']) ||
       (turnId.length > 0 ? `assistant-${turnId}` : createClientId('message'));
-    if (eventName === 'turn.started') return { sequence: nextSequence, event: { type: 'turn.started', sequence, turnId, model: stringValue(value['model']) } };
-    if (eventName === 'turn.progress') return { sequence: nextSequence, event: { type: 'turn.progress', sequence, phase: stringValue(value['phase']), message: stringValue(value['message']) } };
-    if (eventName === 'assistant.delta') return { sequence: nextSequence, event: { type: 'assistant.delta', sequence, messageId: stableMessageId, delta: stringValue(value['delta']) } };
+    if (eventName === 'turn.started') return { sequence: nextSequence, event: { type: 'turn.started', sequence: nextSequence, turnId, model: stringValue(value['model']) } };
+    if (eventName === 'turn.progress') return { sequence: nextSequence, event: { type: 'turn.progress', sequence: nextSequence, phase: stringValue(value['phase']), message: stringValue(value['message']) } };
+    if (eventName === 'assistant.delta') return { sequence: nextSequence, event: { type: 'assistant.delta', sequence: nextSequence, messageId: stableMessageId, delta: stringValue(value['delta']) } };
     if (eventName === 'turn.completed') {
       const message = object(value['message'] ?? value);
-      return { sequence: nextSequence, event: { type: 'turn.completed', sequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || stringValue(message['id']) || stableMessageId, text: stringValue(value['text']) || stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
+      return { sequence: nextSequence, event: { type: 'turn.completed', sequence: nextSequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || stringValue(message['id']) || stableMessageId, text: stringValue(value['text']) || stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
     }
-    if (eventName === 'turn.failed') return { sequence: nextSequence, event: { type: 'turn.failed', sequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
-    if (eventName === 'tool.started') return { sequence: nextSequence, event: { type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };
-    if (eventName === 'tool.completed') return { sequence: nextSequence, event: { type: 'tool.completed', sequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' } };
+    if (eventName === 'turn.failed') return { sequence: nextSequence, event: { type: 'turn.failed', sequence: nextSequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
+    if (eventName === 'tool.started') return { sequence: nextSequence, event: { type: 'tool.started', sequence: nextSequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };
+    if (eventName === 'tool.completed') return { sequence: nextSequence, event: { type: 'tool.completed', sequence: nextSequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' } };
     return { sequence: currentSequence };
   } catch (_error) {
     throw new FdRuntimeError('invalid_stream', 'FD Agent 返回了无法解析的事件');

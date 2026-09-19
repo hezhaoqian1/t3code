@@ -78,9 +78,8 @@ export class FdStore {
     }
     try {
       const threads = await this.client.listThreads();
-      // A successful empty response is authoritative. Keeping the offline
-      // sample row after sign-in makes a real account appear to have history
-      // and sends the first message to a non-existent local thread.
+      // An authenticated empty list is authoritative. Do not leave the
+      // offline demo row visible or send a new turn to its local ID.
       this.threads = threads;
       if (threads.length > 0) {
         await this.openThread(threads[0].id);
@@ -356,7 +355,7 @@ export class FdStore {
         this.activeTurnId = '';
         break;
       case 'attachment.processing': {
-        const item = this.activeThread.attachments.find((attachment: FdAttachment) => attachment.attachmentId === event.attachmentId);
+        const item = this.findAttachment(event.attachmentId);
         if (item !== undefined) {
           item.state = 'processing';
           item.progress = event.progress;
@@ -364,7 +363,7 @@ export class FdStore {
         break;
       }
       case 'attachment.ready': {
-        const item = this.activeThread.attachments.find((attachment: FdAttachment) => attachment.attachmentId === event.attachmentId);
+        const item = this.findAttachment(event.attachmentId);
         if (item !== undefined) {
           item.state = 'ready';
           item.progress = 100;
@@ -373,7 +372,7 @@ export class FdStore {
         break;
       }
       case 'attachment.failed': {
-        const item = this.activeThread.attachments.find((attachment: FdAttachment) => attachment.attachmentId === event.attachmentId);
+        const item = this.findAttachment(event.attachmentId);
         if (item !== undefined) {
           item.state = 'failed';
           item.errorMessage = event.message;
@@ -389,5 +388,19 @@ export class FdStore {
       case 'thread.synchronized':
         break;
     }
+  }
+
+  private findAttachment(attachmentId: string): FdAttachment | undefined {
+    const pending = this.activeThread.attachments.find(
+      (attachment: FdAttachment) => attachment.attachmentId === attachmentId
+    );
+    if (pending !== undefined) return pending;
+    for (const message of this.activeThread.messages) {
+      const attached = message.attachments.find(
+        (attachment: FdAttachment) => attachment.attachmentId === attachmentId
+      );
+      if (attached !== undefined) return attached;
+    }
+    return undefined;
   }
 }

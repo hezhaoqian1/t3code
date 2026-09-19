@@ -313,7 +313,9 @@ and recovery rules. They do not share a DOM UI or assume the same runtime is loc
 
 ## Validation snapshot
 
-The current production gateway was checked from this worktree on `2026-09-19`:
+The production gateway was checked again on `2026-09-20`. The active release
+is `bb381adb5aa0e56e4e30a644b2b84efa31ee6de7`; it includes the mobile
+runtime adapter and the five-minute attachment-stream flush fixes.
 
 - `POST /api/user/login`, `GET /api/user/self`, `GET /api/status`, and
   `GET /api/fd-skills/self` returned `200` for the supplied administrator account.
@@ -322,36 +324,41 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 - A minimal `POST /api/agent/turns` with an existing managed model token and
   `client: fd_desktop` returned progress, `turn.started`, `assistant.delta`, and
   `turn.completed` events.
-- `GET /api/mobile/v1/threads` currently returns `404`, so the native client keeps
-  the compatibility adapter enabled and does not claim the new mobile protocol is
-  deployed yet.
-- The repository machine has no DevEco/Harmony SDK or `hvigorw` wrapper. The
-  ArkUI build remains pending on a Harmony-capable build host; T3 server, desktop,
-  contracts, and native static checks pass in this worktree.
+- The mobile thread, attachment and turn endpoints were exercised through the
+  real FD Runtime with the supplied administrator account. A cold 26-page PDF
+  produced an SSE stream with attachment progress, turn events and a durable
+  response whose page references covered pages 1 through 26.
+- The repository machine has no DevEco/Harmony SDK, `hvigorw` wrapper, Harmony
+  emulator or connected device. The ArkUI source therefore passes the native
+  static contract check here, while HAP compilation and device UI acceptance
+  remain a required step on a Harmony-capable build host.
 
 ## Worktree implementation status
 
-The T3 worktree branch `codex/fix-t3-main-regressions` currently contains the
-native client changes (commit `3033fa019`), while the Gateway worktree branch
-`codex/fd-gateway-harmony-mobile` contains the server adapter changes (commit
-`bc04ba8`):
+The isolated release worktree branch `codex/harmony-native-release` contains:
 
 - A native ArkUI entry point for task list, thread history, streaming progress,
   Skill selection/deselection, queue editing, attachment chips, and preview.
 - A reducer in `FdStore` that applies monotonically increasing stream sequences,
-  keeps volatile assistant deltas separate from durable snapshots, and starts
-  queued turns only after an explicit terminal event.
+  reconciles legacy streams that omit message IDs, keeps volatile assistant
+  deltas separate from durable snapshots, and starts queued turns only after an
+  explicit terminal event.
 - A compatibility client for the existing gateway plus the versioned
   `/api/mobile/v1` contract. The model selector uses the gateway's advertised
   capability keys when available, so adding a model does not require an app
   rebuild.
 - A picker URI transfer adapter that opens the URI, reads bounded chunks, uploads
   them with progress, finalizes the server attachment, and replaces the local
-  temporary ID. A 404/405 mobile API response is surfaced as an actionable error;
-  the attachment is never silently sent through the legacy text-only endpoint.
+  temporary ID. Attachments are removed from the composer after enqueueing but
+  remain attached to the durable user message so parser events can still update
+  their state.
+- Queue entries can be edited, deleted, reordered, or sent immediately. An
+  immediate send requests interruption of the active turn and waits for the
+  terminal event before starting the selected entry. A 404/405 mobile API
+  response is surfaced as an actionable error; attachments are never silently
+  sent through the legacy text-only endpoint.
 
-The Gateway branch contains the mobile endpoints, but they have not been
-deployed to production from this worktree. The production gateway may still
-return `404` for `/api/mobile/v1/threads` until that branch is released.
-The existing legacy Skill/history/SSE compatibility path remains available for
-text-only smoke tests.
+The gateway is deployed independently from the T3 client worktree. This branch
+does not alter the Windows/macOS Electron renderer or release manifests. The
+legacy Skill/history/SSE compatibility path remains available for text-only
+smoke tests while Harmony uses the versioned mobile contract.

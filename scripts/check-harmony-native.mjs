@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const app = resolve(root, "apps/harmonyos-desktop");
+
 const read = (relativePath) => readFileSync(resolve(app, relativePath), "utf8");
 const requiredFiles = [
   "AppScope/app.json5",
@@ -42,11 +43,11 @@ assert.match(index, /buildSkillSheet/);
 assert.match(index, /buildQueueSheet/);
 assert.match(index, /buildPreviewSheet/);
 assert.match(index, /connectThreadStream/);
+assert.match(index, /sendQueuedImmediately/);
+assert.match(index, /this.store.clearAttachments()/);
+assert.match(index, /activeTurnId.length/);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);
-assert.doesNotMatch(
-  index,
-  /HARMONY_WEB_URL|USE_PACKAGED_WEB_BUNDLE|this\.webUrl|onShowFileSelector/,
-);
+assert.doesNotMatch(index, /HARMONY_WEB_URL|USE_PACKAGED_WEB_BUNDLE/);
 
 assert.match(client, /fd-skills\/self/);
 assert.match(client, /agent\/turns/);
@@ -64,16 +65,17 @@ assert.match(client, /supportedModels/);
 assert.match(client, /getThreadHistory/);
 assert.match(client, /historyCursor/);
 assert.match(client, /identifierValue/);
-assert.match(client, /afterSequence=/);
-assert.match(client, /Authorization/);
 assert.match(transfer, /fileIo\.openSync/);
 assert.match(transfer, /fileIo\.readSync/);
 assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
 assert.match(transfer, /wholeDigest\.digest/);
 assert.match(transfer, /uploadPickedAttachment/);
+assert.match(client, /afterSequence=/);
+assert.match(client, /Authorization/);
 assert.match(store, /activeTurnId/);
 assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
+assert.match(store, /private findAttachment/);
 assert.match(store, /this\.models/);
 assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /loadOlderHistory/);

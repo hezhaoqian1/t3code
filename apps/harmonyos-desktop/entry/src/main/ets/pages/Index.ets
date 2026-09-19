@@ -69,7 +69,7 @@ struct Index {
     this.selectedSkillVersionId = this.store.selectedSkillVersionId;
     this.selectedModel = this.store.selectedModel;
     if (this.store.lastError.length > 0) this.errorText = this.store.lastError;
-    if (this.store.activeThread.state === 'working') this.statusText = '正在处理';
+    if (this.store.activeThread.state === 'working' || this.store.activeTurnId.length > 0) this.statusText = '正在处理';
     else if (this.store.activeThread.state === 'queued') this.statusText = `排队中 (${this.queuedTurns.length})`;
     else this.statusText = this.signedIn ? '已连接 FD Runtime' : '离线演示模式';
   }
@@ -86,6 +86,7 @@ struct Index {
       this.loginError = '';
       this.password = '';
       this.syncFromStore();
+      if (this.store.activeThread.state === 'working') this.connectStream();
       promptAction.showToast({ message: '已连接 FD Runtime' });
     } catch (error) {
       this.loginError = error instanceof FdRuntimeError ? error.message : '登录失败';
@@ -105,6 +106,7 @@ struct Index {
   private async openThread(threadId: string): Promise<void> {
     await this.store.openThread(threadId);
     this.syncFromStore();
+    if (this.store.activeThread.state === 'working') this.connectStream();
   }
 
   private async loadOlderHistory(): Promise<void> {
@@ -169,7 +171,7 @@ struct Index {
       this.syncFromStore();
       return;
     }
-    const wasWorking = this.store.activeThread.state === 'working';
+    const wasWorking = this.store.activeThread.state === 'working' || this.store.activeTurnId.length > 0;
     const queued = this.store.enqueueTurn(text.length === 0 ? '请分析附件。' : text);
     this.store.clearAttachments();
     this.draft = '';
@@ -185,7 +187,18 @@ struct Index {
       });
       this.syncFromStore();
       if (streamUrl.length > 0) this.connectStream();
-      else this.startNextQueuedTurn();
+      else {
+        const immediateId = this.pendingImmediateTurnId;
+        this.pendingImmediateTurnId = '';
+        if (immediateId.length > 0) {
+          const immediate = this.store.queuedTurns.find((queued: FdQueuedTurn) => queued.id === immediateId);
+          if (immediate !== undefined) {
+            await this.startQueuedTurn(immediate);
+            return;
+          }
+        }
+        await this.startNextQueuedTurn();
+      }
     } catch (error) {
       this.errorText = error instanceof FdRuntimeError ? error.message : '任务发送失败';
       this.store.activeThread.state = 'error';
@@ -194,7 +207,7 @@ struct Index {
   }
 
   private async startNextQueuedTurn(): Promise<void> {
-    if (this.store.activeThread.state === 'working') return;
+    if (this.store.activeThread.state === 'working' || this.store.activeTurnId.length > 0) return;
     const next = this.store.queuedTurns[0];
     if (next === undefined) {
       this.syncFromStore();
@@ -203,33 +216,37 @@ struct Index {
     await this.startQueuedTurn(next);
   }
 
-  private async interruptCurrentTurn(): Promise<void> {
+  private async interruptCurrentTurn(): Promise<boolean> {
     if (this.store.activeTurnId.length === 0 || !this.store.client.isAuthenticated) {
       this.errorText = '当前任务只能在连接 FD Runtime 后中断';
-      return;
+      this.syncFromStore();
+      return false;
     }
     try {
       const interrupted = await this.store.client.interruptTurn(this.store.activeThread.id, this.store.activeTurnId);
       if (!interrupted) {
-        this.pendingImmediateTurnId = '';
         this.errorText = '当前任务已经结束，请重新发送排队消息';
-      } else {
-        this.statusText = '正在停止当前任务...';
+        this.syncFromStore();
+        return false;
       }
+      this.statusText = '正在停止当前任务...';
       this.syncFromStore();
+      return true;
     } catch (error) {
       this.errorText = error instanceof FdRuntimeError ? error.message : '中断失败';
+      this.syncFromStore();
+      return false;
     }
   }
 
   private async sendQueuedImmediately(turn: FdQueuedTurn): Promise<void> {
-    if (this.store.activeThread.state !== 'working') {
+    if (this.store.activeThread.state !== 'working' && this.store.activeTurnId.length === 0) {
       await this.startQueuedTurn(turn);
       return;
     }
     this.pendingImmediateTurnId = turn.id;
     this.errorText = '正在停止当前任务，完成后立即发送所选消息';
-    await this.interruptCurrentTurn();
+    if (!(await this.interruptCurrentTurn())) this.pendingImmediateTurnId = '';
   }
 
   private editQueued(turn: FdQueuedTurn, value: string): void {
