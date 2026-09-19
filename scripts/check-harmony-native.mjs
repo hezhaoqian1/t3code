@@ -68,6 +68,7 @@ assert.match(client, /completeAttachmentUpload/);
 assert.match(client, /threadId,/);
 assert.match(client, /supportedModels/);
 assert.match(client, /getThreadHistory/);
+assert.match(client, /legacy Agent endpoint can create the conversation/);
 assert.match(client, /historyCursor/);
 assert.match(client, /identifierValue/);
 assert.match(client, /afterSequence=/);

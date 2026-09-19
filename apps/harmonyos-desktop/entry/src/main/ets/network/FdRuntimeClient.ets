@@ -154,11 +154,34 @@ export class FdRuntimeClient {
   }
 
   async createThread(model: string): Promise<FdThreadDetail> {
-    const root = await this.request(`${FD_RUNTIME_API_PREFIX}/threads`, 'POST', {
-      clientThreadId: createUuid(),
-      model: model.length > 0 ? model : FD_DEFAULT_MODEL
-    });
-    return parseThreadDetail(object(root['data'] ?? root));
+    const selectedModel = model.length > 0 ? model : FD_DEFAULT_MODEL;
+    const clientThreadId = createUuid();
+    try {
+      const root = await this.request(`${FD_RUNTIME_API_PREFIX}/threads`, 'POST', {
+        clientThreadId,
+        model: selectedModel
+      });
+      return parseThreadDetail(object(root['data'] ?? root));
+    } catch (error) {
+      if (!(error instanceof FdRuntimeError) || (error.code !== 'http_404' && error.code !== 'http_405')) throw error;
+      // During rollout the legacy Agent endpoint can create the conversation
+      // lazily on the first text turn. Keep that compatibility path scoped to
+      // a fresh UUID; attachments still require the mobile API below.
+      return {
+        id: clientThreadId,
+        title: '新建任务',
+        model: selectedModel,
+        state: 'idle',
+        latestMessage: '',
+        updatedAt: isoNow(),
+        hasPendingApprovals: false,
+        messages: [],
+        activities: [],
+        attachments: [],
+        sequence: 0,
+        hasMoreHistory: false
+      } as FdThreadDetail;
+    }
   }
 
   async getLegacyHistory(threadId: string): Promise<Array<FdMessage>> {
