@@ -42,6 +42,7 @@ assert.match(index, /buildSkillSheet/);
 assert.match(index, /buildQueueSheet/);
 assert.match(index, /buildPreviewSheet/);
 assert.match(index, /connectThreadStream/);
+assert.match(index, /this\.handleStreamEvent\(_event\)/);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);
 assert.doesNotMatch(
   index,

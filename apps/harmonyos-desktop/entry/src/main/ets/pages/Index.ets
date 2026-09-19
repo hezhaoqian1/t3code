@@ -181,7 +181,7 @@ struct Index {
     this.store.removeQueued(turn.id);
     try {
       const streamUrl = await this.store.startTurn(turn, (_event: FdStreamEvent): void => {
-        this.syncFromStore();
+        this.handleStreamEvent(_event);
       });
       this.syncFromStore();
       if (streamUrl.length > 0) this.connectStream();
