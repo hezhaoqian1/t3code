@@ -331,9 +331,12 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 
 ## Worktree implementation status
 
-The T3 worktree branch `codex/fix-t3-main-regressions` currently contains the
-native client changes through commit `bc6f66510`. The Gateway adapter was merged
-to `main` by PR #102 as commit `363a5273` (source commit `d63ef04`):
+The native client is being developed in the dedicated worktree
+`t3code/.worktrees/harmony-native-fd-client` on branch
+`codex/fix-t3-main-regressions`. The current head is `f69a6c5e1`, which includes
+the compatibility-mode history fix and the native ArkUI foundation. The Gateway
+adapter was merged to `main` by PR #102 as commit `363a5273` (source commit
+`d63ef04`):
 
 - A native ArkUI entry point for task list, thread history, streaming progress,
   Skill selection/deselection, queue editing, attachment chips, and preview.
