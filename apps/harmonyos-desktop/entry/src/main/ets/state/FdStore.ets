@@ -99,17 +99,25 @@ export class FdStore {
   async openThread(threadId: string): Promise<void> {
     const local = this.threads.find((thread: FdThreadShell) => thread.id === threadId);
     if (local === undefined) return;
+    // Build the selected shell before trying the mobile detail endpoint. The
+    // legacy history fallback must keep sends scoped to the clicked thread.
+    this.activeThread = {
+      ...local,
+      messages: [],
+      activities: [],
+      attachments: [],
+      sequence: 0,
+      hasMoreHistory: false
+    } as FdThreadDetail;
     try {
       this.activeThread = await this.client.getThread(threadId);
     } catch (_error) {
       try {
         const history = await this.client.getLegacyHistory(threadId);
-        if (history.length > 0) {
-          const last = history[history.length - 1];
-          this.activeThread.messages = history;
-          if (last !== undefined) this.activeThread.latestMessage = last.text;
-          this.activeThread.updatedAt = isoNow();
-        }
+        this.activeThread.messages = history;
+        const last = history[history.length - 1];
+        if (last !== undefined) this.activeThread.latestMessage = last.text;
+        this.activeThread.updatedAt = isoNow();
       } catch (_historyError) {
         // The mobile history endpoint is optional during the compatibility rollout.
       }
