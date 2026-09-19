@@ -343,7 +343,7 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 
 The native client is being developed in the dedicated worktree
 `t3code/.worktrees/harmony-native-fd-client` on branch
-`codex/fix-t3-main-regressions`. The current head is `177be1185`, which includes
+`codex/fix-t3-main-regressions`. The current head is `90420c330`, which includes
 the native ArkUI foundation, compatibility fixes, the legacy model alias fix,
 and the optimized PDF visual-routing tests. The Gateway adapter was merged to
 `main` by PR #102 as commit `363a5273` (source commit `d63ef04`); the follow-up
