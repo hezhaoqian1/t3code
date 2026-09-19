@@ -1,0 +1,8 @@
+{
+  modelVersion: "5.0.4",
+  license: "Apache-2.0",
+  devDependencies: {
+    "@ohos/hvigor": "5.0.4",
+    "@ohos/hvigor-ohos-plugin": "5.0.4",
+  },
+}
