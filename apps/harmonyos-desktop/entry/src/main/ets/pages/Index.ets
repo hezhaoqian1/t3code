@@ -30,6 +30,9 @@ struct Index {
   private previewController: webview.WebviewController = new webview.WebviewController();
   private pendingImmediateTurnId: string = '';
   private queueAdvanceInFlight: boolean = false;
+  private streamRetryTimer: number = -1;
+  private streamGeneration: number = 0;
+  private streamRetryAttempt: number = 0;
 
   @State private signedIn: boolean = false;
   @State private accountName: string = '';
@@ -63,6 +66,10 @@ struct Index {
   aboutToAppear(): void {
     this.syncFromStore();
     void this.restoreSession();
+  }
+
+  aboutToDisappear(): void {
+    this.stopStream();
   }
 
   private async restoreSession(): Promise<void> {
@@ -128,14 +135,14 @@ struct Index {
   }
 
   private async logout(): Promise<void> {
-    this.stream?.close();
-    this.stream = undefined;
+    this.stopStream();
     this.pendingImmediateTurnId = '';
     await this.store.logout();
     this.syncFromStore();
   }
 
   private async openThread(threadId: string): Promise<void> {
+    this.stopStream();
     await this.store.openThread(threadId);
     this.syncFromStore();
     if (this.store.activeThread.state === 'working') this.connectStream();
@@ -156,22 +163,64 @@ struct Index {
     }
   }
 
-  private connectStream(): void {
+  private connectStream(resetRetry: boolean = true): void {
     if (!this.store.client.isAuthenticated || !this.store.client.supportsReplayStream ||
       !this.store.remoteWorkspaceReady || this.store.activeThread.id === 'local-demo-thread') return;
+    if (resetRetry) {
+      this.clearStreamRetry();
+    } else if (this.streamRetryTimer >= 0) {
+      clearTimeout(this.streamRetryTimer);
+      this.streamRetryTimer = -1;
+    }
+    const generation = ++this.streamGeneration;
     this.stream?.close();
     this.stream = this.store.client.connectThreadStream(
       this.store.activeThread.id,
       this.store.activeThread.sequence,
       this.store.activeThread.resumeToken ?? '',
-      (event: FdStreamEvent) => this.handleStreamEvent(event),
+      (event: FdStreamEvent) => {
+        if (generation !== this.streamGeneration) return;
+        this.streamRetryAttempt = 0;
+        this.handleStreamEvent(event);
+      },
       (message: string) => {
+        if (generation !== this.streamGeneration) return;
         if (this.store.activeThread.state === 'working') {
           this.statusText = message;
           this.errorText = message;
+          this.scheduleStreamReconnect(generation);
         }
       }
     );
+  }
+
+  private stopStream(): void {
+    this.streamGeneration += 1;
+    this.clearStreamRetry();
+    this.stream?.close();
+    this.stream = undefined;
+  }
+
+  private clearStreamRetry(): void {
+    if (this.streamRetryTimer >= 0) {
+      clearTimeout(this.streamRetryTimer);
+      this.streamRetryTimer = -1;
+    }
+    this.streamRetryAttempt = 0;
+  }
+
+  private scheduleStreamReconnect(generation: number): void {
+    if (generation !== this.streamGeneration || this.streamRetryTimer >= 0 ||
+      !this.store.client.supportsReplayStream || !this.store.remoteWorkspaceReady ||
+      this.store.activeThread.state !== 'working') return;
+    const attempt = this.streamRetryAttempt;
+    this.streamRetryAttempt = Math.min(attempt + 1, 5);
+    const delay = Math.min(30_000, 750 * Math.pow(2, attempt));
+    this.streamRetryTimer = setTimeout(() => {
+      this.streamRetryTimer = -1;
+      if (generation !== this.streamGeneration || this.store.activeThread.state !== 'working') return;
+      this.connectStream(false);
+    }, delay) as number;
   }
 
   private handleStreamEvent(event: FdStreamEvent): void {

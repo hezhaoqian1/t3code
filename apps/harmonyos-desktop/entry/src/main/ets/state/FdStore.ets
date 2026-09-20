@@ -485,6 +485,9 @@ export class FdStore {
       if (receipt.events.length === 0) {
         throw new FdRuntimeError('empty_stream', 'FD Runtime 没有返回任务事件');
       }
+      if (!terminalEvent) {
+        throw new FdRuntimeError('stream_incomplete', 'FD Runtime 流在任务结束前中断，请重试');
+      }
       const failed = receipt.events.find((event: FdStreamEvent) => event.type === 'turn.failed');
       if (failed !== undefined && failed.type === 'turn.failed') {
         throw new FdRuntimeError('turn_failed', failed.message);

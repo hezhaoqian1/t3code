@@ -183,15 +183,17 @@ export class FdRuntimeClient {
     const data = object(root['data'] ?? root);
     const skills = arrayValue(data['skills']);
     const capabilities = object(data['model_capabilities'] ?? {});
-    const advertisedModels = Object.keys(capabilities)
-      .filter((model: string) => model.length > 0 && model.length <= 128);
+    const advertisedModels = modelNames(capabilities);
     if (advertisedModels.length > 0) this.modelCatalog = advertisedModels;
     return skills.map((raw: Object) => {
       const item = object(raw);
-      const modelCapabilities: Array<string> = [];
-      for (const model of this.modelCatalog) {
-        const capability = object(capabilities[model] ?? {});
-        if (capability['fd_skills'] === true) modelCapabilities.push(model);
+      const declaredModels = modelNames(item['model_capabilities'] ?? item['modelCapabilities']);
+      const modelCapabilities: Array<string> = declaredModels.length > 0 ? declaredModels : [];
+      if (modelCapabilities.length === 0) {
+        for (const model of this.modelCatalog) {
+          const capability = object(capabilities[model] ?? {});
+          if (capability['fd_skills'] === true) modelCapabilities.push(model);
+        }
       }
       return {
         id: numberValue(item['id'], 0),
@@ -210,6 +212,8 @@ export class FdRuntimeClient {
     try {
       const root = await this.request(`${FD_RUNTIME_API_PREFIX}/bootstrap`, 'GET');
       const data = object(root['data'] ?? root);
+      const bootstrapModels = modelNames(data['model_capabilities'] ?? data['models'] ?? data['modelCatalog']);
+      if (bootstrapModels.length > 0) this.modelCatalog = bootstrapModels;
       const transports = arrayValue(data['stream_transports'] ?? data['streamTransports']);
       this.replayStreamAvailable = transports.some((raw: Object): boolean => {
         if (typeof raw === 'string') return raw.toLowerCase() === 'websocket';
@@ -419,7 +423,12 @@ export class FdRuntimeClient {
     );
     const data = object(root['data'] ?? root);
     const url = stringValue(data['url'] ?? data['previewUrl'] ?? data['preview_url']);
-    return url.startsWith('/') ? `${this.origin}${url}` : url;
+    if (url.length === 0) throw new FdRuntimeError('preview_url_missing', 'FD Runtime 没有返回可用的预览地址');
+    const normalized = url.startsWith('/') ? `${this.origin}${url}` : url;
+    if (normalized !== this.origin && !normalized.startsWith(`${this.origin}/`)) {
+      throw new FdRuntimeError('preview_url_unsafe', '预览地址不是 FD Runtime 的受控地址');
+    }
+    return normalized;
   }
 
   connectThreadStream(
@@ -431,6 +440,13 @@ export class FdRuntimeClient {
   ): FdStreamHandle {
     const socket = webSocket.createWebSocket();
     let lastSequence = afterSequence;
+    let intentionallyClosed = false;
+    let closedNotified = false;
+    const reportClosed = (message: string): void => {
+      if (intentionallyClosed || closedNotified) return;
+      closedNotified = true;
+      onClosed(message);
+    };
     const streamUrl = this.origin.replace(/^http/, 'ws') +
       `${FD_RUNTIME_API_PREFIX}/threads/${encodeURIComponent(threadId)}/stream` +
       `?afterSequence=${afterSequence}&resumeToken=${encodeURIComponent(resumeToken)}`;
@@ -442,15 +458,15 @@ export class FdRuntimeClient {
         lastSequence = Math.max(lastSequence, event.sequence);
         onEvent(event);
       } catch (_error) {
-        onClosed('流式事件无法解析');
+        reportClosed('流式事件无法解析');
       }
     });
-    socket.on('error', () => onClosed('流式连接失败'));
-    socket.on('close', () => onClosed('流式连接已关闭'));
+    socket.on('error', () => reportClosed('流式连接失败'));
+    socket.on('close', () => reportClosed('流式连接已关闭'));
     socket.connect(streamUrl, {
       header: { Authorization: `Bearer ${this.accessToken}` }
-    }).catch(() => onClosed('无法连接 FD Runtime 流'));
-    return { close: () => { socket.close(); } };
+    }).catch(() => reportClosed('无法连接 FD Runtime 流'));
+    return { close: () => { intentionallyClosed = true; socket.close(); } };
   }
 
   private async findRuntimeToken(): Promise<number> {
@@ -505,6 +521,7 @@ export class FdRuntimeClient {
       header: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'X-Request-ID': createClientId('request'),
         ...(this.accessToken.length === 0 ? {} : { Authorization: `Bearer ${this.accessToken}` })
       },
       expectDataType: http.HttpDataType.STRING
@@ -535,6 +552,7 @@ export class FdRuntimeClient {
         header: {
           Accept: accept,
           'Content-Type': 'application/json',
+          'X-Request-ID': createClientId('request'),
           Authorization: `Bearer ${this.accessToken}`
         },
         extraData: JSON.stringify(body),
@@ -600,6 +618,7 @@ export class FdRuntimeClient {
           header: {
             Accept: 'text/event-stream',
             'Content-Type': 'application/json',
+            'X-Request-ID': createClientId('request'),
             Authorization: `Bearer ${this.accessToken}`
           },
           extraData: JSON.stringify(body),
@@ -645,6 +664,28 @@ function object(value: Object): JsonObject {
 
 function arrayValue(value: Object): Array<Object> {
   return Array.isArray(value) ? value as Array<Object> : [];
+}
+
+function modelNames(value: Object): Array<string> {
+  if (Array.isArray(value)) {
+    const names: Array<string> = [];
+    for (const raw of value) {
+      if (typeof raw === 'string') {
+        if (raw.length > 0 && raw.length <= 128) names.push(raw);
+        continue;
+      }
+      const item = object(raw);
+      const name = stringValue(item['slug'] ?? item['model'] ?? item['id'] ?? item['name']);
+      if (name.length > 0 && name.length <= 128) names.push(name);
+    }
+    const unique: Array<string> = [];
+    for (const name of names) {
+      if (unique.indexOf(name) < 0) unique.push(name);
+    }
+    return unique;
+  }
+  if (typeof value !== 'object' || value === null) return [];
+  return Object.keys(value).filter((name: string) => name.length > 0 && name.length <= 128);
 }
 
 function stringValue(value: Object): string {

@@ -41,9 +41,12 @@ data. Credentials are read from environment variables and are never printed:
 $env:FD_HARMONY_LIVE_BASE_URL = "https://ai-api.fdsure.com"
 $env:FD_HARMONY_LIVE_USERNAME = "admin"
 $env:FD_HARMONY_LIVE_PASSWORD = "<password>"
+$env:FD_HARMONY_LIVE_REQUIRE_PREVIEW = "1"
 node scripts/test-harmony-live.mjs
 ```
 
 The check logs in, reads bootstrap, Skills, thread shells and one thread
 detail, then validates a preview URL when a ready attachment is available. It
-does not create threads, send turns, upload files, or mutate server data.
+does not create threads, send turns, upload files, or mutate server data. Set
+`FD_HARMONY_LIVE_REQUIRE_PREVIEW=1` when the environment must contain a ready
+attachment for the preview check to pass.

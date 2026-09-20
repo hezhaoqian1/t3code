@@ -27,52 +27,73 @@ const headers = { Authorization: `Bearer ${token}` };
 const bootstrap = await request("/api/mobile/v1/bootstrap", { headers });
 const skills = await request("/api/mobile/v1/skills", { headers });
 const threads = await request("/api/mobile/v1/threads", { headers });
-const rawThreadRows = threads.data?.threads ?? threads.threads;
+const bootstrapData = object(bootstrap.data ?? bootstrap);
+const bootstrapCapabilities = object(
+  bootstrapData.model_capabilities ?? bootstrapData.modelCapabilities,
+);
+const advertisedModels = Object.keys(bootstrapCapabilities);
+assert.ok(advertisedModels.includes("deepseek-flash"), "bootstrap omitted deepseek-flash");
+const rawThreadRows = object(threads.data ?? threads).threads;
 assert.ok(Array.isArray(rawThreadRows), "thread list is not an array");
 const threadRows = rawThreadRows;
-const rawSkills = skills.data?.skills ?? skills.skills;
+const rawSkills = object(skills.data ?? skills).skills;
 assert.ok(Array.isArray(rawSkills), "skill list is not an array");
+assert.ok(rawSkills.length > 0, "skill list is empty");
 
-let detailChecked = false;
+let detailCount = 0;
 let previewChecked = false;
 let previewMimeType;
-const firstThread = threadRows[0];
-if (isRecord(firstThread) && stringValue(firstThread.id).length > 0) {
-  const threadId = stringValue(firstThread.id);
+let readyAttachmentCount = 0;
+for (const candidate of threadRows.slice(0, 25)) {
+  if (!isRecord(candidate) || stringValue(candidate.id).length === 0) continue;
+  const threadId = stringValue(candidate.id);
   const detail = await request(`/api/mobile/v1/threads/${encodeURIComponent(threadId)}`, {
     headers,
   });
   const thread = isRecord(detail.data) ? detail.data : detail;
   assert.equal(stringValue(thread.id), threadId, "thread detail id does not match list shell");
   assert.ok(Array.isArray(thread.messages), "thread detail messages is not an array");
-  detailChecked = true;
+  detailCount += 1;
 
   const attachment = findReadyAttachment(thread);
-  if (attachment !== undefined && stringValue(attachment.attachmentId).length > 0) {
-    const preview = await request(
-      `/api/mobile/v1/attachments/${encodeURIComponent(stringValue(attachment.attachmentId))}/preview-url`,
-      { method: "POST", headers, body: { requestId: `harmony-live-${crypto.randomUUID()}` } },
-    );
-    const previewData = isRecord(preview.data) ? preview.data : preview;
-    const previewUrl = stringValue(
-      previewData.url ?? previewData.previewUrl ?? previewData.preview_url,
-    );
-    assert.ok(previewUrl.length > 0, "ready attachment did not return a preview URL");
-    const asset = await readPreviewPrefix(previewUrl);
-    previewMimeType = asset.contentType;
-    assert.ok(asset.status >= 200 && asset.status < 300, "preview asset request failed");
-    previewChecked = true;
-  }
+  if (attachment === undefined || stringValue(attachment.attachmentId).length === 0) continue;
+  readyAttachmentCount += 1;
+  const preview = await request(
+    `/api/mobile/v1/attachments/${encodeURIComponent(stringValue(attachment.attachmentId))}/preview-url`,
+    { method: "POST", headers, body: { requestId: `harmony-live-${crypto.randomUUID()}` } },
+  );
+  const previewData = isRecord(preview.data) ? preview.data : preview;
+  const previewUrl = stringValue(
+    previewData.url ?? previewData.previewUrl ?? previewData.preview_url,
+  );
+  assert.ok(previewUrl.length > 0, "ready attachment did not return a preview URL");
+  const parsedPreviewUrl = new URL(previewUrl, baseUrl);
+  assert.equal(
+    parsedPreviewUrl.origin,
+    new URL(baseUrl).origin,
+    "preview URL escaped gateway origin",
+  );
+  const asset = await readPreviewPrefix(parsedPreviewUrl.toString());
+  previewMimeType = asset.contentType;
+  assert.ok(asset.status >= 200 && asset.status < 300, "preview asset request failed");
+  previewChecked = true;
+  break;
+}
+assert.ok(detailCount > 0 || threadRows.length === 0, "no usable thread detail was returned");
+if (value("FD_HARMONY_LIVE_REQUIRE_PREVIEW") === "1") {
+  assert.ok(previewChecked, "no ready attachment was available for preview validation");
 }
 
 console.log(
   JSON.stringify({
     baseUrl,
     login: true,
-    bootstrap: bootstrap.success === true,
+    bootstrap: true,
+    modelCount: advertisedModels.length,
     skillCount: rawSkills.length,
     threadCount: threadRows.length,
-    detailChecked,
+    detailCount,
+    readyAttachmentCount,
     previewChecked,
     ...(previewMimeType === undefined ? {} : { previewMimeType }),
   }),
@@ -84,6 +105,7 @@ async function request(path, options = {}) {
     headers: {
       Accept: "application/json",
       ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
+      "X-Request-ID": `harmony-live-${crypto.randomUUID()}`,
       ...(options.authenticated === false ? {} : (options.headers ?? {})),
     },
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
@@ -135,6 +157,10 @@ function value(name) {
 
 function stringValue(input) {
   return typeof input === "string" ? input : "";
+}
+
+function object(input) {
+  return isRecord(input) ? input : {};
 }
 
 function isRecord(input) {
