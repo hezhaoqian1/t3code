@@ -26,6 +26,7 @@ const requiredFiles = [
   "hvigorfile.ts",
   "hvigor-config.json5",
   "oh-package.json5",
+  "../../scripts/build-harmony-native.mjs",
 ];
 
 for (const file of requiredFiles) assert.ok(existsSync(resolve(app, file)), `missing ${file}`);
