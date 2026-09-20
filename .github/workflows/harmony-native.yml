@@ -1,0 +1,40 @@
+name: Harmony Native Contract
+
+on:
+  push:
+    branches:
+      - "codex/**"
+    paths:
+      - "apps/harmonyos-desktop/**"
+      - "scripts/check-harmony-native.mjs"
+      - "scripts/build-harmony-native.mjs"
+      - ".github/workflows/harmony-native.yml"
+  pull_request:
+    paths:
+      - "apps/harmonyos-desktop/**"
+      - "scripts/check-harmony-native.mjs"
+      - "scripts/build-harmony-native.mjs"
+      - ".github/workflows/harmony-native.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Native ArkUI contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check native contract
+        run: node scripts/check-harmony-native.mjs
+
+      - name: Check build launcher syntax
+        run: node --check scripts/build-harmony-native.mjs
