@@ -43,6 +43,13 @@ export class FdStore {
       const session = await this.client.login(username, password);
       this.signedIn = true;
       this.accountName = session.userName;
+      // Do not expose the offline demo catalog while an authenticated
+      // account is loading its server-owned workspace.
+      this.threads = [];
+      this.skills = [];
+      this.activeThread = sampleThread();
+      this.queuedTurns = [];
+      this.activeTurnId = '';
       await this.refreshWorkspace();
     } catch (error) {
       this.lastError = error instanceof FdRuntimeError ? error.message : '登录失败，请检查网络';
@@ -70,10 +77,11 @@ export class FdStore {
     let skillsLoaded = false;
     try {
       const skills = await this.client.getSkills();
-      if (skills.length > 0) this.skills = skills;
+      this.skills = skills;
       this.models = this.client.supportedModels;
       skillsLoaded = true;
     } catch (error) {
+      this.skills = [];
       this.lastError = error instanceof FdRuntimeError ? error.message : 'Skill 目录暂不可用';
     }
     try {
@@ -89,6 +97,11 @@ export class FdStore {
     } catch (error) {
       // The native shell remains usable while the mobile API is being rolled out.
       // A thread 404 must not discard a successfully loaded Skill/model catalog.
+      if (this.threads.length === 0) {
+        this.activeThread = sampleThread();
+        this.queuedTurns = [];
+        this.activeTurnId = '';
+      }
       if (!skillsLoaded || this.lastError.length === 0) {
         this.lastError = error instanceof FdRuntimeError ? error.message : '任务列表暂不可用';
       }
@@ -297,6 +310,8 @@ export class FdStore {
       case 'thread.snapshot':
         this.activeThread = event.detail;
         if (event.resumeToken !== undefined) this.activeThread.resumeToken = event.resumeToken;
+        this.selectedModel = this.activeThread.model;
+        this.selectedSkillVersionId = this.activeThread.skillVersionId ?? 0;
         break;
       case 'turn.started':
         this.activeThread.state = 'working';

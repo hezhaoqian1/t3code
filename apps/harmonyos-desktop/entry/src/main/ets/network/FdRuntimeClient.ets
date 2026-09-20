@@ -10,6 +10,7 @@ import {
 import {
   FdActivity,
   FdAttachment,
+  FdAttachmentState,
   FdMessage,
   FdSession,
   FdSkill,
@@ -607,8 +608,8 @@ function parseThreadDetail(value: JsonObject): FdThreadDetail {
   return {
     ...shell,
     messages,
-    activities: [] as Array<FdActivity>,
-    attachments: [] as Array<FdAttachment>,
+    activities: arrayValue(value['activities']).map((raw: Object) => parseActivity(object(raw))),
+    attachments: arrayValue(value['attachments']).map((raw: Object) => parseAttachment(object(raw))),
     sequence: numberValue(value['sequence'] ?? value['snapshotSequence'], 0),
     resumeToken: stringValue(value['resumeToken'] ?? value['resume_token']) || undefined,
     hasMoreHistory: value['hasMoreHistory'] === true || value['has_more_history'] === true,
@@ -624,8 +625,44 @@ function parseMessage(item: JsonObject): FdMessage {
     createdAt: stringValue(item['createdAt'] ?? item['created_at']) || isoNow(),
     updatedAt: stringValue(item['updatedAt'] ?? item['updated_at']) || isoNow(),
     streaming: item['streaming'] === true,
-    attachments: []
+    attachments: arrayValue(item['attachments']).map((raw: Object) => parseAttachment(object(raw)))
   } as FdMessage;
+}
+
+function parseAttachment(item: JsonObject): FdAttachment {
+  const previewUrl = stringValue(item['previewUrl'] ?? item['preview_url']);
+  const sourceUri = stringValue(item['sourceUri'] ?? item['source_uri']);
+  const errorMessage = stringValue(item['errorMessage'] ?? item['error_message']);
+  return {
+    attachmentId: identifierValue(item['attachmentId'] ?? item['attachment_id'] ?? item['id']) || createClientId('attachment'),
+    name: stringValue(item['name']) || '附件',
+    mimeType: stringValue(item['mimeType'] ?? item['mime_type']) || 'application/octet-stream',
+    sizeBytes: numberValue(item['sizeBytes'] ?? item['size_bytes'], 0),
+    state: attachmentState(item['state']),
+    progress: Math.max(0, Math.min(100, numberValue(item['progress'], 0))),
+    ...(previewUrl.length === 0 ? {} : { previewUrl }),
+    ...(sourceUri.length === 0 ? {} : { sourceUri }),
+    ...(errorMessage.length === 0 ? {} : { errorMessage })
+  } as FdAttachment;
+}
+
+function attachmentState(value: Object): FdAttachmentState {
+  const state = stringValue(value);
+  if (state === 'selected' || state === 'uploading' || state === 'processing' || state === 'ready' || state === 'failed') {
+    return state as FdAttachmentState;
+  }
+  return 'processing';
+}
+
+function parseActivity(item: JsonObject): FdActivity {
+  const tone = stringValue(item['tone']);
+  return {
+    id: identifierValue(item['id']) || createClientId('activity'),
+    kind: stringValue(item['kind'] ?? item['type']) || 'runtime',
+    summary: stringValue(item['summary'] ?? item['message']),
+    tone: tone === 'tool' || tone === 'approval' || tone === 'error' ? tone : 'info',
+    createdAt: stringValue(item['createdAt'] ?? item['created_at']) || isoNow()
+  } as FdActivity;
 }
 
 function identifierValue(value: Object): string {
