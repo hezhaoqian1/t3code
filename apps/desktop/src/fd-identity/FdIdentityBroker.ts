@@ -201,7 +201,10 @@ export class FdIdentityBroker {
         this.#vaultState = activeState;
         this.#setState(this.#authenticatedState(credentials));
         this.#startPeriodicRefresh();
-        void this.#retryPendingRevocationsInBackground();
+        // Cleanup is deliberately detached from the login response. It must never
+        // turn a transient remote cleanup failure into an unhandled rejection that
+        // can terminate Electron after the user starts sending messages.
+        void this.#retryPendingRevocationsInBackground().catch(() => undefined);
         return {
           ok: true,
           state: this.getState() as Extract<FdAccountState, { status: "authenticated" }>,
@@ -307,10 +310,25 @@ export class FdIdentityBroker {
           this.#vaultState = { active, pendingRevocations: [current, ...remaining] };
           await this.#vault.save(this.#vaultState);
         }
-        await this.#client.revokeRuntimeTokens({
-          accessToken: current.accessToken,
-          runtimeTokenName: current.runtimeTokenName,
-        });
+        const activeForRevocation = this.#vaultState.active;
+        const legacyRevocationWouldMatchActiveToken =
+          current.runtimeTokenId === undefined &&
+          activeForRevocation !== null &&
+          activeForRevocation.user.id === current.userId &&
+          activeForRevocation.runtimeTokenName === current.runtimeTokenName;
+        const exactRevocationWouldMatchActiveToken =
+          current.runtimeTokenId !== undefined &&
+          activeForRevocation !== null &&
+          activeForRevocation.runtimeTokenId === current.runtimeTokenId;
+        if (!legacyRevocationWouldMatchActiveToken && !exactRevocationWouldMatchActiveToken) {
+          await this.#client.revokeRuntimeTokens({
+            accessToken: current.accessToken,
+            runtimeTokenName: current.runtimeTokenName,
+            ...(current.runtimeTokenId === undefined
+              ? {}
+              : { runtimeTokenId: current.runtimeTokenId }),
+          });
+        }
         current = { ...current, tokensRevoked: true };
         this.#vaultState = { active, pendingRevocations: [current, ...remaining] };
         await this.#vault.save(this.#vaultState);
@@ -475,6 +493,7 @@ export class FdIdentityBroker {
 function toPendingRevocation(credentials: StoredFdCredentials): PendingFdRevocation {
   return {
     userId: credentials.user.id,
+    runtimeTokenId: credentials.runtimeTokenId,
     accessToken: credentials.accessToken,
     accessExpiresAt: credentials.accessExpiresAt,
     sessionId: credentials.sessionId,

@@ -383,6 +383,69 @@ describe("FdIdentityBroker", () => {
     expect(storedState.pendingRevocations).toEqual([]);
   });
 
+  it("does not revoke a replacement token for a legacy pending record", async () => {
+    const active = credentials();
+    let storedState: StoredFdVaultState = {
+      active,
+      pendingRevocations: [
+        pendingCredentials({
+          userId: active.user.id,
+          runtimeTokenName: active.runtimeTokenName,
+        }),
+      ],
+    };
+    const revokeRuntimeTokens = vi.fn(async () => undefined);
+    const broker = new FdIdentityBroker({
+      vault: mockVault({
+        load: vi.fn(async () => storedState),
+        save: vi.fn(async (state: StoredFdVaultState) => {
+          storedState = state;
+        }),
+      }),
+      client: mockClient({
+        validate: vi.fn(async (value: StoredFdCredentials) => value),
+        revokeRuntimeTokens,
+      }),
+      publisher: mockPublisher(),
+      refreshIntervalMs: 0,
+    });
+
+    await broker.initialize();
+    await expect(broker.retryRevocation()).resolves.toMatchObject({ completed: true });
+    expect(revokeRuntimeTokens).not.toHaveBeenCalled();
+    expect(storedState.active).toMatchObject({ runtimeTokenId: active.runtimeTokenId });
+    expect(storedState.pendingRevocations).toEqual([]);
+  });
+
+  it("does not revoke the active token when a pending record has the same token id", async () => {
+    const active = credentials();
+    let storedState: StoredFdVaultState = {
+      active,
+      pendingRevocations: [pendingCredentials({ runtimeTokenId: active.runtimeTokenId })],
+    };
+    const revokeRuntimeTokens = vi.fn(async () => undefined);
+    const broker = new FdIdentityBroker({
+      vault: mockVault({
+        load: vi.fn(async () => storedState),
+        save: vi.fn(async (state: StoredFdVaultState) => {
+          storedState = state;
+        }),
+      }),
+      client: mockClient({
+        validate: vi.fn(async (value: StoredFdCredentials) => value),
+        revokeRuntimeTokens,
+      }),
+      publisher: mockPublisher(),
+      refreshIntervalMs: 0,
+    });
+
+    await broker.initialize();
+    await expect(broker.retryRevocation()).resolves.toMatchObject({ completed: true });
+    expect(revokeRuntimeTokens).not.toHaveBeenCalled();
+    expect(storedState.active).toMatchObject({ runtimeTokenId: active.runtimeTokenId });
+    expect(storedState.pendingRevocations).toEqual([]);
+  });
+
   it("keeps authenticated state and projection when revocation intent preflight fails", async () => {
     const active = credentials();
     const publisher = mockPublisher();
@@ -514,7 +577,13 @@ describe("FdIdentityBroker", () => {
     const authenticate = vi.fn(async () => authSession());
     const revokeRuntimeTokens = vi.fn(async () => undefined);
     const logoutSession = vi.fn(async () => undefined);
-    const client = mockClient({ validate, authenticate, revokeRuntimeTokens, logoutSession });
+    const client = mockClient({
+      validate,
+      authenticate,
+      provisionRuntimeToken: vi.fn(async () => ({ id: 42, key: "sk-runtime-replacement" })),
+      revokeRuntimeTokens,
+      logoutSession,
+    });
     const broker = new FdIdentityBroker({
       vault: mockVault({
         load: vi.fn(async () => storedState),
@@ -542,6 +611,7 @@ describe("FdIdentityBroker", () => {
     expect(authenticate).toHaveBeenCalledOnce();
     expect(revokeRuntimeTokens).toHaveBeenCalledWith({
       accessToken: "access-secret",
+      runtimeTokenId: active.runtimeTokenId,
       runtimeTokenName: active.runtimeTokenName,
     });
     expect(logoutSession).toHaveBeenCalledWith(
