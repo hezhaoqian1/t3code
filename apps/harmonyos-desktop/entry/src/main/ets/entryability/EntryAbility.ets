@@ -2,10 +2,13 @@ import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
+import { setHarmonyAbilityContext } from '../runtime/HarmonyContext';
+
 const DOMAIN = 0xFDF0;
 
 export default class EntryAbility extends UIAbility {
   onCreate(_want: Want, _launchParam: AbilityConstant.LaunchParam): void {
+    setHarmonyAbilityContext(this.context);
     hilog.info(DOMAIN, 'FangdeAI', 'Native HarmonyOS client started');
   }
 
@@ -21,4 +24,3 @@ export default class EntryAbility extends UIAbility {
     hilog.info(DOMAIN, 'FangdeAI', 'Native HarmonyOS window destroyed');
   }
 }
-

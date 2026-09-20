@@ -13,14 +13,17 @@ import {
   FdThreadShell,
   createClientId
 } from '../data/FdModels';
-import { FdRuntimeError, FdStreamHandle } from '../network/FdRuntimeClient';
+import { FdRuntimeClient, FdRuntimeError, FdStreamHandle } from '../network/FdRuntimeClient';
 import { uploadPickedAttachment } from '../network/AttachmentTransfer';
+import { createHarmonySessionStorage } from '../runtime/HarmonySessionStorage';
 import { FdStore } from '../state/FdStore';
 
 @Entry
 @Component
 struct Index {
-  private readonly store: FdStore = new FdStore();
+  private readonly store: FdStore = new FdStore(
+    new FdRuntimeClient(FD_RUNTIME_ORIGIN, createHarmonySessionStorage())
+  );
   private stream: FdStreamHandle | undefined;
   private previewController: webview.WebviewController = new webview.WebviewController();
   private pendingImmediateTurnId: string = '';
@@ -55,6 +58,20 @@ struct Index {
 
   aboutToAppear(): void {
     this.syncFromStore();
+    void this.restoreSession();
+  }
+
+  private async restoreSession(): Promise<void> {
+    try {
+      const restored = await this.store.restoreSession();
+      if (restored) {
+        this.syncFromStore();
+        if (this.store.activeThread.state === 'working') this.connectStream();
+      }
+    } catch (error) {
+      this.errorText = error instanceof FdRuntimeError ? error.message : '会话恢复失败，请重新登录';
+      this.syncFromStore();
+    }
   }
 
   private syncFromStore(): void {
@@ -104,11 +121,11 @@ struct Index {
     }
   }
 
-  private logout(): void {
+  private async logout(): Promise<void> {
     this.stream?.close();
     this.stream = undefined;
     this.pendingImmediateTurnId = '';
-    this.store.logout();
+    await this.store.logout();
     this.syncFromStore();
   }
 
@@ -455,7 +472,7 @@ struct Index {
     Column() {
       Row() {
         Text('方德 AI').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#123B4A').layoutWeight(1);
-        Text('退出').fontSize(13).fontColor('#52717B').onClick(() => this.logout());
+        Text('退出').fontSize(13).fontColor('#52717B').onClick(() => { void this.logout(); });
       }
       .width('100%')
       .padding({ left: 18, right: 18, top: 18, bottom: 18 });

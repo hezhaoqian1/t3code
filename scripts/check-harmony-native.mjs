@@ -14,6 +14,8 @@ const requiredFiles = [
   "entry/src/main/module.json5",
   "entry/src/main/resources/base/profile/main_pages.json",
   "entry/src/main/ets/entryability/EntryAbility.ets",
+  "entry/src/main/ets/runtime/HarmonyContext.ets",
+  "entry/src/main/ets/runtime/HarmonySessionStorage.ets",
   "entry/src/main/ets/config/HarmonyConfig.ets",
   "entry/src/main/ets/data/FdModels.ets",
   "entry/src/main/ets/network/FdRuntimeClient.ets",
@@ -97,8 +99,19 @@ assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /loadOlderHistory/);
 assert.match(store, /this\.skills = \[\];/);
 assert.match(store, /this\.threads = \[\];/);
+assert.match(store, /restoreSession/);
 assert.doesNotMatch(client, /unlimited_quota/);
 assert.match(client, /findRuntimeToken/);
+assert.match(client, /sessionStorage\.save/);
+assert.match(client, /sessionStorage\.load/);
+assert.match(client, /sessionStorage\.clear/);
+assert.match(client, /restoreSession/);
+assert.match(
+  read("entry/src/main/ets/runtime/HarmonySessionStorage.ets"),
+  /preferences\.getPreferences/,
+);
+assert.match(read("entry/src/main/ets/runtime/HarmonySessionStorage.ets"), /prefs\.flush/);
+assert.match(read("entry/src/main/ets/runtime/HarmonyContext.ets"), /setHarmonyAbilityContext/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
 assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
 assert.match(config, /deepseek-flash/);

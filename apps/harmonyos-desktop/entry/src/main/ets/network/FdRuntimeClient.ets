@@ -13,13 +13,15 @@ import {
   FdAttachmentState,
   FdMessage,
   FdSession,
+  FdSessionStorage,
   FdSkill,
   FdStreamEvent,
   FdThreadDetail,
   FdThreadShell,
   createClientId,
   createUuid,
-  isoNow
+  isoNow,
+  MemoryFdSessionStorage
 } from '../data/FdModels';
 import { util } from '@kit.ArkTS';
 
@@ -59,9 +61,11 @@ export class FdRuntimeClient {
   private runtimeTokenId: number = 0;
   private userName: string = '';
   private modelCatalog: Array<string> = FD_SUPPORTED_MODELS.slice();
+  private readonly sessionStorage: FdSessionStorage;
 
-  constructor(origin: string = FD_RUNTIME_ORIGIN) {
+  constructor(origin: string = FD_RUNTIME_ORIGIN, sessionStorage: FdSessionStorage = new MemoryFdSessionStorage()) {
     this.origin = origin.replace(/\/$/, '');
+    this.sessionStorage = sessionStorage;
   }
 
   get isAuthenticated(): boolean {
@@ -92,15 +96,59 @@ export class FdRuntimeClient {
     this.accessToken = token;
     this.userName = username;
     const expiresAt = numberValue(data['access_expires_at'], 0);
-    return {
+    const session = {
       accessToken: token,
       accessExpiresAt: expiresAt,
       userName: username,
       ...(this.runtimeTokenId === 0 ? {} : { runtimeTokenId: this.runtimeTokenId })
-    };
+    } as FdSession;
+    try {
+      await this.sessionStorage.save(session);
+    } catch (_error) {
+      this.clearMemorySession();
+      throw new FdRuntimeError('session_persist_failed', '登录成功但本地会话保存失败，请重试');
+    }
+    return session;
   }
 
-  logout(): void {
+  async restoreSession(): Promise<FdSession | undefined> {
+    let session: FdSession | undefined;
+    try {
+      session = await this.sessionStorage.load();
+    } catch (_error) {
+      await this.sessionStorage.clear();
+      return undefined;
+    }
+    if (session === undefined || session.accessToken.length === 0 || session.userName.length === 0) return undefined;
+    const now = Math.floor(Date.now() / 1_000);
+    if (session.accessExpiresAt > 0 && session.accessExpiresAt <= now + 30) {
+      await this.sessionStorage.clear();
+      return undefined;
+    }
+    this.accessToken = session.accessToken;
+    this.runtimeTokenId = session.runtimeTokenId ?? 0;
+    this.userName = session.userName;
+    try {
+      const root = await this.request(`${FD_LEGACY_API_PREFIX}/user/self`, 'GET');
+      if (root['success'] !== true) throw new FdRuntimeError('session_expired', '登录会话已失效，请重新登录');
+      return session;
+    } catch (_error) {
+      this.clearMemorySession();
+      await this.sessionStorage.clear();
+      return undefined;
+    }
+  }
+
+  async logout(): Promise<void> {
+    this.clearMemorySession();
+    try {
+      await this.sessionStorage.clear();
+    } catch (_error) {
+      // The memory session is already cleared; a later launch will validate or discard it.
+    }
+  }
+
+  private clearMemorySession(): void {
     this.accessToken = '';
     this.runtimeTokenId = 0;
     this.userName = '';

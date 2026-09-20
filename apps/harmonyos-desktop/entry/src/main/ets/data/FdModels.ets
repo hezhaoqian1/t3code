@@ -77,6 +77,32 @@ export interface FdSession {
   runtimeTokenId?: number;
 }
 
+/**
+ * The runtime owns credential lifecycle. The client persists only a
+ * short-lived session projection and never stores passwords or provider keys.
+ */
+export interface FdSessionStorage {
+  load(): Promise<FdSession | undefined>;
+  save(session: FdSession): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export class MemoryFdSessionStorage implements FdSessionStorage {
+  private value: FdSession | undefined;
+
+  async load(): Promise<FdSession | undefined> {
+    return this.value;
+  }
+
+  async save(session: FdSession): Promise<void> {
+    this.value = { ...session };
+  }
+
+  async clear(): Promise<void> {
+    this.value = undefined;
+  }
+}
+
 export interface FdQueuedTurn {
   id: string;
   /** Stable visible user-message id so a failed queue retry cannot duplicate it. */

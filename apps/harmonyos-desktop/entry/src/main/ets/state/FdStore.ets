@@ -62,8 +62,23 @@ export class FdStore {
     }
   }
 
-  logout(): void {
-    this.client.logout();
+  async restoreSession(): Promise<boolean> {
+    const session = await this.client.restoreSession();
+    if (session === undefined) return false;
+    this.signedIn = true;
+    this.accountName = session.userName;
+    this.remoteWorkspaceReady = false;
+    this.threads = [];
+    this.skills = [];
+    this.activeThread = sampleThread();
+    this.queuedTurns = [];
+    this.activeTurnId = '';
+    await this.refreshWorkspace();
+    return true;
+  }
+
+  async logout(): Promise<void> {
+    await this.client.logout();
     this.signedIn = false;
     this.remoteWorkspaceReady = false;
     this.accountName = '';

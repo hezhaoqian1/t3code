@@ -61,7 +61,11 @@ capability error instead of silently dropping the file.
 
 The device must never persist tool arguments/results, audit identifiers, provider
 credentials, hidden reasoning, or enterprise policy text. Visible user/assistant
-text and safe attachment metadata may be cached for offline rendering.
+text and safe attachment metadata may be cached for offline rendering. The native
+client now persists only a short-lived access-token projection in app-private
+Harmony Preferences; it never stores the password, refresh cookie, or provider key.
+Startup validates the stored expiry and calls the gateway user endpoint before
+restoring the workspace. Invalid or revoked sessions are cleared fail-closed.
 
 ## Remote protocol
 
@@ -223,8 +227,10 @@ queued turns, or the current thread snapshot.
 
 - Use TLS with certificate validation; certificate pinning is optional and must be
   operationally rotatable if enabled.
-- Store access/refresh tokens in HarmonyOS `Preferences` backed by the system secure
-  storage or an equivalent KeyStore-backed service. Never log them.
+- Store the short-lived access-token projection in HarmonyOS `Preferences` backed
+  by the app-private storage boundary; never log it. The current gateway does not
+  expose the planned mobile refresh-cookie contract, so expired sessions are
+  cleared and require sign-in rather than inventing a client-side refresh flow.
 - Bind preview URLs and attachment operations to account, thread, and attachment
   IDs. Reject path-like names and arbitrary remote URLs.
 - Treat extracted text, images, OCR output, and Skill content as untrusted model
