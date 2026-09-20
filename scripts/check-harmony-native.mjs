@@ -61,6 +61,7 @@ assert.match(index, /this.store.clearAttachments()/);
 assert.match(index, /activeTurnId.length/);
 assert.match(index, /remoteWorkspaceReady/);
 assert.match(index, /restoreQueuedTurn/);
+assert.match(index, /restoreQueuedTurn\(turn, true\)/);
 assert.match(index, /createHarmonyWorkspaceCache/);
 assert.match(index, /cachedWorkspaceLoaded/);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);

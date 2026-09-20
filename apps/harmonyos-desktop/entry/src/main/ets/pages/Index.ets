@@ -244,7 +244,7 @@ struct Index {
       }
     } catch (error) {
       this.errorText = error instanceof FdRuntimeError ? error.message : '任务发送失败';
-      this.store.restoreQueuedTurn(turn);
+      this.store.restoreQueuedTurn(turn, true);
       this.syncFromStore();
     }
   }

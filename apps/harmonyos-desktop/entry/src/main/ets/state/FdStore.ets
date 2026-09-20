@@ -386,15 +386,17 @@ export class FdStore {
 
   removeQueued(id: string): void {
     this.queuedTurns = this.queuedTurns.filter((turn: FdQueuedTurn) => turn.id !== id);
-    if (this.queuedTurns.length === 0 && this.activeThread.state === 'queued') this.activeThread.state = 'idle';
+    if (this.queuedTurns.length === 0 && (this.activeThread.state === 'queued' || this.activeThread.state === 'error')) {
+      this.activeThread.state = 'idle';
+    }
     this.persistWorkspace();
   }
 
-  restoreQueuedTurn(turn: FdQueuedTurn): void {
+  restoreQueuedTurn(turn: FdQueuedTurn, preserveError: boolean = false): void {
     if (!this.queuedTurns.some((item: FdQueuedTurn) => item.id === turn.id)) {
       this.queuedTurns = [turn, ...this.queuedTurns];
     }
-    this.activeThread.state = 'queued';
+    if (!preserveError) this.activeThread.state = 'queued';
     this.persistWorkspace();
   }
 
