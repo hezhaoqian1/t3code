@@ -145,6 +145,15 @@ The server owns ordering and deduplication. The client applies an event only whe
 its sequence is newer than the last applied sequence, then persists the resulting
 visible snapshot. Reconnect is a catch-up operation, not a second turn.
 
+The native client treats an authenticated workspace as unavailable until the remote
+thread shell and its detail snapshot have loaded. A failed refresh keeps the local
+placeholder visible for recovery, but it cannot be used as a send target. Queue entries
+retain a stable visible-message ID, attachments, model and Skill version when a turn
+fails, so retrying does not duplicate the user message. Legacy Agent fallback only
+reuses an administrator-provisioned compatibility Token; it never creates an unlimited
+quota Token. Attachment parts retry transient network, throttling and server errors
+within the same upload session, with a bounded exponential backoff.
+
 `POST /turns/{turnId}/interrupt` is explicit. A send while another turn is active
 is placed in a device-side queue and receives its own idempotency key; it does not
 interrupt the active turn. Queue entries can be edited, deleted, reordered, or

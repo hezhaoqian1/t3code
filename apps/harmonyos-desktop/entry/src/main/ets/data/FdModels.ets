@@ -79,6 +79,8 @@ export interface FdSession {
 
 export interface FdQueuedTurn {
   id: string;
+  /** Stable visible user-message id so a failed queue retry cannot duplicate it. */
+  messageId: string;
   text: string;
   attachments: Array<FdAttachment>;
   skillVersionId?: number;

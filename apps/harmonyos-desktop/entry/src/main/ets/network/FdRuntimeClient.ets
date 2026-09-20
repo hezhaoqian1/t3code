@@ -363,7 +363,7 @@ export class FdRuntimeClient {
     return { close: () => { socket.close(); } };
   }
 
-  private async findOrCreateRuntimeToken(): Promise<number> {
+  private async findRuntimeToken(): Promise<number> {
     const tokenName = 'harmony-native-fd-client';
     const search = await this.request(
       `${FD_LEGACY_API_PREFIX}/token/search?keyword=${encodeURIComponent(tokenName)}&p=1&size=100`,
@@ -372,28 +372,9 @@ export class FdRuntimeClient {
     const data = object(search['data'] ?? {});
     const items = arrayValue(data['items']);
     const existing = items.find((raw: Object) => stringValue(object(raw)['name']) === tokenName);
-    if (existing !== undefined) return numberValue(object(existing)['id'], 0);
-    const created = await this.request(`${FD_LEGACY_API_PREFIX}/token/`, 'POST', {
-      name: tokenName,
-      expired_time: -1,
-      status: 1,
-      unlimited_quota: true,
-      model_limits_enabled: true,
-      model_limits: FD_SUPPORTED_MODELS.join(',')
-    });
-    if (created['success'] !== true) {
-      throw new FdRuntimeError('token_unavailable', '无法配置鸿蒙端模型权限');
-    }
-    const refreshed = await this.request(
-      `${FD_LEGACY_API_PREFIX}/token/search?keyword=${encodeURIComponent(tokenName)}&p=1&size=100`,
-      'GET'
-    );
-    const refreshedData = object(refreshed['data'] ?? {});
-    const refreshedItems = arrayValue(refreshedData['items']);
-    const match = refreshedItems.find((raw: Object) => stringValue(object(raw)['name']) === tokenName);
-    const id = match === undefined ? 0 : numberValue(object(match)['id'], 0);
-    if (id === 0) throw new FdRuntimeError('token_unavailable', '鸿蒙端模型权限创建后无法读取');
-    return id;
+    const id = existing === undefined ? 0 : numberValue(object(existing)['id'], 0);
+    if (id > 0) return id;
+    throw new FdRuntimeError('token_unavailable', '网关未配置鸿蒙兼容 Token，请联系管理员配置后重试');
   }
 
   private async startLegacySseTurn(
@@ -403,7 +384,7 @@ export class FdRuntimeClient {
     skillVersionId?: number,
     onEvent?: (event: FdStreamEvent) => void
   ): Promise<FdTurnReceipt> {
-    if (this.runtimeTokenId === 0) this.runtimeTokenId = await this.findOrCreateRuntimeToken();
+    if (this.runtimeTokenId === 0) this.runtimeTokenId = await this.findRuntimeToken();
     const body: JsonObject = {
       client_thread_id: threadId,
       model: model.length > 0 ? model : FD_DEFAULT_MODEL,

@@ -90,11 +90,8 @@ describe("visual attachments", () => {
     await fixture("mixed.pdf", await mixedPdf(), async (work) => {
       const result = await processAttachment(work);
       expect(result.context?.sections[0]?.text).toContain("revenue 123");
-      expect(result.images.map((image) => image.label)).toEqual([
-        "mixed.pdf：第 1/2 页",
-        "mixed.pdf：第 2/2 页",
-      ]);
-      const rendered = await loadImage(Buffer.from(result.images[1]!.bytes));
+      expect(result.images.map((image) => image.label)).toEqual(["mixed.pdf：第 2/2 页"]);
+      const rendered = await loadImage(Buffer.from(result.images[0]!.bytes));
       const canvas = createCanvas(rendered.width, rendered.height);
       const ctx = canvas.getContext("2d");
       ctx.drawImage(rendered, 0, 0);

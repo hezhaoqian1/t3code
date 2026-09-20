@@ -70,7 +70,7 @@ export async function uploadPickedAttachment(
       const partDigest = cryptoFramework.createMd('SHA256');
       await partDigest.update({ data: bytes });
       const partChecksum = toHex((await partDigest.digest()).data);
-      await client.uploadAttachmentPart(upload.uploadUrl, partIndex, totalParts, buffer, partChecksum);
+      await uploadPartWithRetry(client, upload.uploadUrl, partIndex, totalParts, buffer, partChecksum);
       uploadedBytes += readLength;
       onProgress({
         state: 'uploading',
@@ -110,4 +110,41 @@ function toHex(bytes: Uint8Array): string {
   let result = '';
   for (const byte of bytes) result += byte.toString(16).padStart(2, '0');
   return result;
+}
+
+const MAX_PART_UPLOAD_ATTEMPTS = 4;
+
+async function uploadPartWithRetry(
+  client: FdRuntimeClient,
+  uploadUrl: string,
+  partIndex: number,
+  totalParts: number,
+  data: ArrayBuffer,
+  checksum: string
+): Promise<void> {
+  for (let attempt = 1; attempt <= MAX_PART_UPLOAD_ATTEMPTS; attempt += 1) {
+    try {
+      await client.uploadAttachmentPart(uploadUrl, partIndex, totalParts, data, checksum);
+      return;
+    } catch (error) {
+      if (attempt === MAX_PART_UPLOAD_ATTEMPTS || !isRetryablePartError(error)) throw error;
+      await delay(500 * Math.pow(2, attempt - 1));
+    }
+  }
+  throw new FdRuntimeError('attachment_upload_failed', '附件分片上传失败');
+}
+
+function isRetryablePartError(error: Object): boolean {
+  if (!(error instanceof FdRuntimeError)) return true;
+  return error.code === 'network_error' ||
+    error.code === 'http_408' ||
+    error.code === 'http_425' ||
+    error.code === 'http_429' ||
+    error.code.startsWith('http_5');
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise<void>((resolve: () => void) => {
+    setTimeout(resolve, milliseconds);
+  });
 }

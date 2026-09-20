@@ -115,7 +115,11 @@ describe("NativeSkillCatalog", () => {
     await writeSkill(outside, "escaped", "outside");
     const root = NodePath.join(project, ".agents", "skills");
     await NodeFS.mkdir(root, { recursive: true });
-    await NodeFS.symlink(NodePath.join(outside, "escaped"), NodePath.join(root, "escaped"));
+    await NodeFS.symlink(
+      NodePath.join(outside, "escaped"),
+      NodePath.join(root, "escaped"),
+      process.platform === "win32" ? "junction" : undefined,
+    );
 
     const snapshot = await new NativeSkillCatalog({
       projectRoot: project,

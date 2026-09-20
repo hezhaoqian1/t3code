@@ -79,6 +79,7 @@ struct Index {
       this.statusText = '正在处理';
     }
     else if (this.store.activeThread.state === 'queued') this.statusText = `排队中 (${this.queuedTurns.length})`;
+    else if (this.signedIn && !this.store.remoteWorkspaceReady) this.statusText = '任务列表暂不可用，请刷新';
     else this.statusText = this.signedIn ? '已连接 FD Runtime' : '离线演示模式';
   }
 
@@ -133,7 +134,7 @@ struct Index {
   }
 
   private connectStream(): void {
-    if (!this.store.client.isAuthenticated || this.store.activeThread.id === 'local-demo-thread') return;
+    if (!this.store.client.isAuthenticated || !this.store.remoteWorkspaceReady || this.store.activeThread.id === 'local-demo-thread') return;
     this.stream?.close();
     this.stream = this.store.client.connectThreadStream(
       this.store.activeThread.id,
@@ -169,6 +170,11 @@ struct Index {
   private async sendDraft(): Promise<void> {
     const text = this.draft.trim();
     if (text.length === 0 && this.attachments.length === 0) return;
+    if (this.store.client.isAuthenticated && !this.store.remoteWorkspaceReady) {
+      this.errorText = '任务列表暂不可用，请先刷新后再发送';
+      this.syncFromStore();
+      return;
+    }
     if (this.store.client.isAuthenticated && this.store.selectedSkillVersionId === 0) {
       this.errorText = '请选择一个 FD Skill 后再发送；取消选择后可继续编辑任务，但当前移动 Agent 不会绕过 Skill 权限。';
       this.syncFromStore();
@@ -209,12 +215,13 @@ struct Index {
       }
     } catch (error) {
       this.errorText = error instanceof FdRuntimeError ? error.message : '任务发送失败';
-      this.store.activeThread.state = 'error';
+      this.store.restoreQueuedTurn(turn);
       this.syncFromStore();
     }
   }
 
   private async startNextQueuedTurn(): Promise<void> {
+    if (!this.store.remoteWorkspaceReady && this.store.client.isAuthenticated) return;
     if (this.store.activeThread.state === 'working' || this.store.activeTurnId.length > 0) return;
     const next = this.store.queuedTurns[0];
     if (next === undefined) {
@@ -278,6 +285,11 @@ struct Index {
   }
 
   private async selectFiles(): Promise<void> {
+    if (this.store.client.isAuthenticated && !this.store.remoteWorkspaceReady) {
+      this.errorText = '任务列表暂不可用，请先刷新后再添加附件';
+      this.syncFromStore();
+      return;
+    }
     const options = new picker.DocumentSelectOptions();
     options.maxSelectNumber = 8;
     const documentPicker = new picker.DocumentViewPicker();
@@ -347,6 +359,11 @@ struct Index {
   }
 
   private async previewAttachment(item: FdAttachment): Promise<void> {
+    if (this.store.client.isAuthenticated && !this.store.remoteWorkspaceReady) {
+      this.errorText = '任务列表暂不可用，请先刷新后再预览附件';
+      this.syncFromStore();
+      return;
+    }
     if (item.previewUrl === undefined && this.store.client.isAuthenticated && item.attachmentId.length > 0) {
       try {
         item.previewUrl = await this.store.client.getPreviewUrl(item.attachmentId);

@@ -27,6 +27,8 @@ export class FdStore {
   activeTurnId: string = '';
   loading: boolean = false;
   signedIn: boolean = false;
+  /** True only after the authenticated thread shell and detail are remote-backed. */
+  remoteWorkspaceReady: boolean = false;
   accountName: string = '';
   lastError: string = '';
 
@@ -43,6 +45,7 @@ export class FdStore {
       const session = await this.client.login(username, password);
       this.signedIn = true;
       this.accountName = session.userName;
+      this.remoteWorkspaceReady = false;
       // Do not expose the offline demo catalog while an authenticated
       // account is loading its server-owned workspace.
       this.threads = [];
@@ -62,18 +65,21 @@ export class FdStore {
   logout(): void {
     this.client.logout();
     this.signedIn = false;
+    this.remoteWorkspaceReady = false;
     this.accountName = '';
     this.threads = sampleThreadShells();
     this.skills = sampleSkills();
     this.models = ['deepseek-flash'];
     this.activeThread = sampleThread();
     this.queuedTurns = [];
+    this.activeTurnId = '';
     this.selectedSkillVersionId = 0;
     this.lastError = '';
   }
 
   async refreshWorkspace(): Promise<void> {
     this.lastError = '';
+    this.remoteWorkspaceReady = false;
     let skillsLoaded = false;
     try {
       const skills = await this.client.getSkills();
@@ -90,13 +96,18 @@ export class FdStore {
       // offline demo row visible or send a new turn to its local ID.
       this.threads = threads;
       if (threads.length > 0) {
-        await this.openThread(threads[0].id);
+        const first = threads[0];
+        if (first === undefined || !(await this.openThread(first.id))) {
+          throw new FdRuntimeError('thread_unavailable', '任务详情暂不可用，请稍后重试');
+        }
+        this.remoteWorkspaceReady = true;
       } else {
         await this.createThread();
       }
     } catch (error) {
       // The native shell remains usable while the mobile API is being rolled out.
       // A thread 404 must not discard a successfully loaded Skill/model catalog.
+      this.remoteWorkspaceReady = false;
       if (this.threads.length === 0) {
         this.activeThread = sampleThread();
         this.queuedTurns = [];
@@ -108,22 +119,35 @@ export class FdStore {
     }
   }
 
-  async openThread(threadId: string): Promise<void> {
+  async openThread(threadId: string): Promise<boolean> {
     const local = this.threads.find((thread: FdThreadShell) => thread.id === threadId);
-    if (local === undefined) return;
+    if (local === undefined) return false;
     try {
       this.activeThread = await this.client.getThread(threadId);
     } catch (_error) {
       try {
         const history = await this.client.getLegacyHistory(threadId);
         if (history.length > 0) {
+          // The legacy endpoint returns messages only. Rebuild the target
+          // detail from its shell so a fallback never keeps the previous
+          // thread id, model, or title as the send target.
+          this.activeThread = {
+            ...local,
+            messages: history,
+            activities: [],
+            attachments: [],
+            sequence: 0,
+            hasMoreHistory: false
+          } as FdThreadDetail;
           const last = history[history.length - 1];
-          this.activeThread.messages = history;
           if (last !== undefined) this.activeThread.latestMessage = last.text;
           this.activeThread.updatedAt = isoNow();
+        } else {
+          return false;
         }
       } catch (_historyError) {
         // The mobile history endpoint is optional during the compatibility rollout.
+        return false;
       }
     }
     this.selectedModel = this.activeThread.model;
@@ -139,6 +163,7 @@ export class FdStore {
         }
       }
     }
+    return true;
   }
 
   async loadOlderHistory(): Promise<boolean> {
@@ -165,6 +190,7 @@ export class FdStore {
       return;
     }
     const detail = await this.client.createThread(this.selectedModel);
+    this.remoteWorkspaceReady = true;
     this.activeThread = detail;
     const shell: FdThreadShell = {
       id: detail.id,
@@ -218,6 +244,7 @@ export class FdStore {
   enqueueTurn(text: string): FdQueuedTurn {
     const turn: FdQueuedTurn = {
       id: createClientId('queued'),
+      messageId: createClientId('message'),
       text,
       attachments: this.activeThread.attachments.slice(),
       skillVersionId: this.selectedSkillVersionId === 0 ? undefined : this.selectedSkillVersionId,
@@ -239,6 +266,13 @@ export class FdStore {
     if (this.queuedTurns.length === 0 && this.activeThread.state === 'queued') this.activeThread.state = 'idle';
   }
 
+  restoreQueuedTurn(turn: FdQueuedTurn): void {
+    if (!this.queuedTurns.some((item: FdQueuedTurn) => item.id === turn.id)) {
+      this.queuedTurns = [turn, ...this.queuedTurns];
+    }
+    this.activeThread.state = 'queued';
+  }
+
   moveQueued(id: string, direction: number): void {
     const index = this.queuedTurns.findIndex((turn: FdQueuedTurn) => turn.id === id);
     const target = index + direction;
@@ -251,8 +285,11 @@ export class FdStore {
   }
 
   async startTurn(turn: FdQueuedTurn, onEvent?: (event: FdStreamEvent) => void): Promise<string> {
+    if (this.client.isAuthenticated && !this.remoteWorkspaceReady) {
+      throw new FdRuntimeError('workspace_unavailable', '远端任务列表尚未就绪，请刷新后重试');
+    }
     const userMessage: FdMessage = {
-      id: createClientId('message'),
+      id: turn.messageId,
       role: 'user',
       text: turn.text,
       createdAt: isoNow(),
@@ -260,7 +297,14 @@ export class FdStore {
       streaming: false,
       attachments: turn.attachments.slice()
     };
-    this.activeThread.messages.push(userMessage);
+    const existing = this.activeThread.messages.find((message: FdMessage) => message.id === turn.messageId);
+    if (existing === undefined) {
+      this.activeThread.messages.push(userMessage);
+    } else {
+      existing.text = turn.text;
+      existing.attachments = turn.attachments.slice();
+      existing.updatedAt = userMessage.updatedAt;
+    }
     this.activeThread.latestMessage = turn.text;
     this.activeThread.state = 'working';
     this.activeThread.updatedAt = isoNow();
@@ -297,8 +341,11 @@ export class FdStore {
     );
     if (!terminalEvent) this.activeTurnId = receipt.turnId;
     if (receipt.events.length === 0) {
-      this.activeThread.state = 'error';
-      this.lastError = 'FD Runtime 没有返回任务事件';
+      throw new FdRuntimeError('empty_stream', 'FD Runtime 没有返回任务事件');
+    }
+    const failed = receipt.events.find((event: FdStreamEvent) => event.type === 'turn.failed');
+    if (failed !== undefined && failed.type === 'turn.failed') {
+      throw new FdRuntimeError('turn_failed', failed.message);
     }
     return receipt.streamUrl;
   }
@@ -309,6 +356,7 @@ export class FdStore {
     switch (event.type) {
       case 'thread.snapshot':
         this.activeThread = event.detail;
+        this.remoteWorkspaceReady = this.client.isAuthenticated;
         if (event.resumeToken !== undefined) this.activeThread.resumeToken = event.resumeToken;
         this.selectedModel = this.activeThread.model;
         this.selectedSkillVersionId = this.activeThread.skillVersionId ?? 0;
