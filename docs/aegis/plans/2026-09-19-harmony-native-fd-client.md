@@ -326,12 +326,14 @@ and recovery rules. They do not share a DOM UI or assume the same runtime is loc
 
 ## Validation snapshot
 
-The production gateway was checked again on `2026-09-20`. The active release
-is `bb381adb5aa0e56e4e30a644b2b84efa31ee6de7`; it includes the mobile
-runtime adapter and the five-minute attachment-stream flush fixes.
+The production gateway was checked again on `2026-09-20`. The active gateway
+reports version `1d1516d`; it includes the mobile runtime adapter and the
+five-minute attachment-stream flush fixes.
 
 - `POST /api/user/login`, `GET /api/user/self`, `GET /api/status`, and
   `GET /api/fd-skills/self` returned `200` for the supplied administrator account.
+- `GET /api/mobile/v1/bootstrap` remains account-protected and is checked with
+  the authenticated mobile session rather than as an anonymous health probe.
 - The catalog returned four Skills and seven model capability entries, including
   `deepseek-flash`, `kimi-k3`, Qwen, and GLM under `enterprise-agent-v1`.
 - A minimal `POST /api/agent/turns` with an existing managed model token and
