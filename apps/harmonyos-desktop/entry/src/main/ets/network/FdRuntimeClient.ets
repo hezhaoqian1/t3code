@@ -61,6 +61,7 @@ export class FdRuntimeClient {
   private runtimeTokenId: number = 0;
   private userName: string = '';
   private modelCatalog: Array<string> = FD_SUPPORTED_MODELS.slice();
+  private replayStreamAvailable: boolean = false;
   private readonly sessionStorage: FdSessionStorage;
 
   constructor(origin: string = FD_RUNTIME_ORIGIN, sessionStorage: FdSessionStorage = new MemoryFdSessionStorage()) {
@@ -78,6 +79,10 @@ export class FdRuntimeClient {
 
   get supportedModels(): Array<string> {
     return this.modelCatalog.slice();
+  }
+
+  get supportsReplayStream(): boolean {
+    return this.replayStreamAvailable;
   }
 
   async login(username: string, password: string): Promise<FdSession> {
@@ -152,6 +157,7 @@ export class FdRuntimeClient {
 
   async logout(): Promise<void> {
     this.clearMemorySession();
+    this.replayStreamAvailable = false;
     try {
       await this.sessionStorage.clear();
     } catch (_error) {
@@ -166,6 +172,7 @@ export class FdRuntimeClient {
   }
 
   async getSkills(): Promise<Array<FdSkill>> {
+    await this.loadBootstrap();
     let root: JsonObject;
     try {
       root = await this.request(`${FD_RUNTIME_API_PREFIX}/skills`, 'GET');
@@ -198,6 +205,24 @@ export class FdRuntimeClient {
     });
   }
 
+  /** Keep the replay socket dormant until bootstrap advertises one. */
+  private async loadBootstrap(): Promise<void> {
+    try {
+      const root = await this.request(`${FD_RUNTIME_API_PREFIX}/bootstrap`, 'GET');
+      const data = object(root['data'] ?? root);
+      const transports = arrayValue(data['stream_transports'] ?? data['streamTransports']);
+      this.replayStreamAvailable = transports.some((raw: Object): boolean => {
+        if (typeof raw === 'string') return raw.toLowerCase() === 'websocket';
+        const item = object(raw);
+        const name = stringValue(item['type'] ?? item['name'] ?? item['transport']).toLowerCase();
+        return name === 'websocket' && item['enabled'] !== false;
+      });
+    } catch (_error) {
+      // Older gateways expose the normal Skills/SSE path without replay.
+      this.replayStreamAvailable = false;
+    }
+  }
+
   async listThreads(): Promise<Array<FdThreadShell>> {
     const root = await this.request(`${FD_RUNTIME_API_PREFIX}/threads`, 'GET');
     const data = object(root['data'] ?? root);
@@ -215,6 +240,8 @@ export class FdRuntimeClient {
 
   async createThread(model: string): Promise<FdThreadDetail> {
     const root = await this.request(`${FD_RUNTIME_API_PREFIX}/threads`, 'POST', {
+      requestId: createClientId('request'),
+      idempotencyKey: createClientId('thread'),
       clientThreadId: createUuid(),
       model: model.length > 0 ? model : FD_DEFAULT_MODEL
     });
@@ -298,7 +325,7 @@ export class FdRuntimeClient {
     const root = await this.request(
       `${FD_RUNTIME_API_PREFIX}/threads/${encodeURIComponent(threadId)}/turns/${encodeURIComponent(turnId)}/interrupt`,
       'POST',
-      { requestId: createClientId('interrupt') }
+      { requestId: createClientId('interrupt'), idempotencyKey: createClientId('interrupt') }
     );
     const data = object(root['data'] ?? root);
     return data['interrupted'] !== false;
@@ -403,13 +430,17 @@ export class FdRuntimeClient {
     onClosed: (message: string) => void
   ): FdStreamHandle {
     const socket = webSocket.createWebSocket();
+    let lastSequence = afterSequence;
     const streamUrl = this.origin.replace(/^http/, 'ws') +
       `${FD_RUNTIME_API_PREFIX}/threads/${encodeURIComponent(threadId)}/stream` +
       `?afterSequence=${afterSequence}&resumeToken=${encodeURIComponent(resumeToken)}`;
     socket.on('message', (value: string | ArrayBuffer) => {
       try {
         const raw = typeof value === 'string' ? value : String(value);
-        onEvent(parseStreamEvent(object(JSON.parse(raw))));
+        const event = parseStreamEvent(object(JSON.parse(raw)));
+        if (event.sequence <= 0) event.sequence = lastSequence + 1;
+        lastSequence = Math.max(lastSequence, event.sequence);
+        onEvent(event);
       } catch (_error) {
         onClosed('流式事件无法解析');
       }
@@ -717,6 +748,9 @@ function parseStreamEvent(value: JsonObject): FdStreamEvent {
   const turnId = stringValue(value['turnId'] ?? value['turn_id']);
   const stableMessageId = stringValue(value['messageId'] ?? value['message_id']) ||
     (turnId.length > 0 ? `assistant-${turnId}` : createClientId('message'));
+  if (type === 'thread.message-sent') return {
+    type: 'thread.message-sent', sequence, message: parseMessage(object(value['message'] ?? value))
+  };
   if (type === 'assistant.delta') return {
     type: 'assistant.delta', sequence, messageId: stableMessageId, delta: stringValue(value['delta'])
   };
@@ -740,6 +774,31 @@ function parseStreamEvent(value: JsonObject): FdStreamEvent {
   };
   if (type === 'skill.authorized') return {
     type: 'skill.authorized', sequence, skillVersionId: numberValue(value['skillVersionId'] ?? value['skill_version_id'], 0)
+  };
+  if (type === 'tool.started') return {
+    type: 'tool.started', sequence, tool: stringValue(value['tool']), label: stringValue(value['label'])
+  };
+  if (type === 'tool.completed') return {
+    type: 'tool.completed', sequence, tool: stringValue(value['tool']),
+    status: value['status'] === 'succeeded' ? 'succeeded' : 'failed'
+  };
+  if (type === 'attachment.processing') return {
+    type: 'attachment.processing', sequence,
+    attachmentId: identifierValue(value['attachmentId'] ?? value['attachment_id']),
+    progress: Math.max(0, Math.min(100, numberValue(value['progress'], 0)))
+  };
+  if (type === 'attachment.ready') return {
+    type: 'attachment.ready', sequence,
+    attachmentId: identifierValue(value['attachmentId'] ?? value['attachment_id']),
+    previewUrl: stringValue(value['previewUrl'] ?? value['preview_url']) || undefined
+  };
+  if (type === 'attachment.failed') return {
+    type: 'attachment.failed', sequence,
+    attachmentId: identifierValue(value['attachmentId'] ?? value['attachment_id']),
+    message: stringValue(value['message']) || '附件解析失败'
+  };
+  if (type === 'assistant.reasoning') return {
+    type: 'assistant.reasoning', sequence, message: stringValue(value['message'] ?? value['delta'])
   };
   if (type === 'thread.snapshot') return {
     type: 'thread.snapshot', sequence, detail: parseThreadDetail(object(value['detail'] ?? value)), resumeToken: stringValue(value['resumeToken'] ?? value['resume_token']) || undefined
@@ -788,6 +847,14 @@ function parseLegacySseBlock(block: string, currentSequence: number): { event?: 
     if (eventName === 'turn.started') return { sequence: nextSequence, event: { type: 'turn.started', sequence: nextSequence, turnId, model: stringValue(value['model']) } };
     if (eventName === 'turn.progress') return { sequence: nextSequence, event: { type: 'turn.progress', sequence: nextSequence, phase: stringValue(value['phase']), message: stringValue(value['message']) } };
     if (eventName === 'assistant.delta') return { sequence: nextSequence, event: { type: 'assistant.delta', sequence: nextSequence, messageId: stableMessageId, delta: stringValue(value['delta']) } };
+    if (eventName === 'thread.message-sent') return {
+      sequence: nextSequence,
+      event: { type: 'thread.message-sent', sequence: nextSequence, message: parseMessage(object(value['message'] ?? value)) }
+    };
+    if (eventName === 'assistant.reasoning') return {
+      sequence: nextSequence,
+      event: { type: 'assistant.reasoning', sequence: nextSequence, message: stringValue(value['message'] ?? value['delta']) }
+    };
     if (eventName === 'turn.completed') {
       const message = object(value['message'] ?? value);
       return { sequence: nextSequence, event: { type: 'turn.completed', sequence: nextSequence, messageId: stringValue(value['message_id'] ?? value['messageId']) || stringValue(message['id']) || stableMessageId, text: stringValue(value['text']) || stringValue(message['text']), resumeToken: stringValue(value['resume_token']) || undefined } };
@@ -795,6 +862,30 @@ function parseLegacySseBlock(block: string, currentSequence: number): { event?: 
     if (eventName === 'turn.failed') return { sequence: nextSequence, event: { type: 'turn.failed', sequence: nextSequence, message: stringValue(value['message']) || '任务失败', retryable: value['retryable'] === true } };
     if (eventName === 'tool.started') return { sequence: nextSequence, event: { type: 'tool.started', sequence: nextSequence, tool: stringValue(value['tool']), label: stringValue(value['label']) } };
     if (eventName === 'tool.completed') return { sequence: nextSequence, event: { type: 'tool.completed', sequence: nextSequence, tool: stringValue(value['tool']), status: value['status'] === 'succeeded' ? 'succeeded' : 'failed' } };
+    if (eventName === 'attachment.processing') return {
+      sequence: nextSequence,
+      event: {
+        type: 'attachment.processing', sequence: nextSequence,
+        attachmentId: identifierValue(value['attachment_id'] ?? value['attachmentId']),
+        progress: Math.max(0, Math.min(100, numberValue(value['progress'], 0)))
+      }
+    };
+    if (eventName === 'attachment.ready') return {
+      sequence: nextSequence,
+      event: {
+        type: 'attachment.ready', sequence: nextSequence,
+        attachmentId: identifierValue(value['attachment_id'] ?? value['attachmentId']),
+        previewUrl: stringValue(value['preview_url'] ?? value['previewUrl']) || undefined
+      }
+    };
+    if (eventName === 'attachment.failed') return {
+      sequence: nextSequence,
+      event: {
+        type: 'attachment.failed', sequence: nextSequence,
+        attachmentId: identifierValue(value['attachment_id'] ?? value['attachmentId']),
+        message: stringValue(value['message']) || '附件解析失败'
+      }
+    };
     return { sequence: currentSequence };
   } catch (_error) {
     throw new FdRuntimeError('invalid_stream', 'FD Agent 返回了无法解析的事件');

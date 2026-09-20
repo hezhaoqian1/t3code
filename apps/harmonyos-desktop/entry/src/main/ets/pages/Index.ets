@@ -27,6 +27,7 @@ struct Index {
   private stream: FdStreamHandle | undefined;
   private previewController: webview.WebviewController = new webview.WebviewController();
   private pendingImmediateTurnId: string = '';
+  private queueAdvanceInFlight: boolean = false;
 
   @State private signedIn: boolean = false;
   @State private accountName: string = '';
@@ -151,7 +152,8 @@ struct Index {
   }
 
   private connectStream(): void {
-    if (!this.store.client.isAuthenticated || !this.store.remoteWorkspaceReady || this.store.activeThread.id === 'local-demo-thread') return;
+    if (!this.store.client.isAuthenticated || !this.store.client.supportsReplayStream ||
+      !this.store.remoteWorkspaceReady || this.store.activeThread.id === 'local-demo-thread') return;
     this.stream?.close();
     this.stream = this.store.client.connectThreadStream(
       this.store.activeThread.id,
@@ -171,16 +173,26 @@ struct Index {
     this.store.applyEvent(event);
     this.syncFromStore();
     if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
+      void this.advanceQueueAfterTerminal();
+    }
+  }
+
+  private async advanceQueueAfterTerminal(): Promise<void> {
+    if (this.queueAdvanceInFlight) return;
+    this.queueAdvanceInFlight = true;
+    try {
       const immediateId = this.pendingImmediateTurnId;
       this.pendingImmediateTurnId = '';
       if (immediateId.length > 0) {
         const immediate = this.store.queuedTurns.find((turn: FdQueuedTurn) => turn.id === immediateId);
         if (immediate !== undefined) {
-          this.startQueuedTurn(immediate);
+          await this.startQueuedTurn(immediate);
           return;
         }
       }
-      this.startNextQueuedTurn();
+      await this.startNextQueuedTurn();
+    } finally {
+      this.queueAdvanceInFlight = false;
     }
   }
 
@@ -218,17 +230,12 @@ struct Index {
       });
       this.syncFromStore();
       if (streamUrl.length > 0) this.connectStream();
-      else {
-        const immediateId = this.pendingImmediateTurnId;
-        this.pendingImmediateTurnId = '';
-        if (immediateId.length > 0) {
-          const immediate = this.store.queuedTurns.find((queued: FdQueuedTurn) => queued.id === immediateId);
-          if (immediate !== undefined) {
-            await this.startQueuedTurn(immediate);
-            return;
-          }
-        }
-        await this.startNextQueuedTurn();
+      else if (!this.store.client.isAuthenticated) await this.startNextQueuedTurn();
+      else if (this.store.activeThread.state === 'idle' && this.store.activeTurnId.length === 0) {
+        // requestSse has already delivered the terminal event. Advance only
+        // after FdStore has finished validating the receipt; failed turns are
+        // restored by the catch path below and must not race the next item.
+        await this.advanceQueueAfterTerminal();
       }
     } catch (error) {
       this.errorText = error instanceof FdRuntimeError ? error.message : '任务发送失败';

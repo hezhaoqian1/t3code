@@ -116,6 +116,7 @@ export interface FdQueuedTurn {
 
 export type FdStreamEvent =
   | { type: 'thread.snapshot'; sequence: number; detail: FdThreadDetail; resumeToken?: string }
+  | { type: 'thread.message-sent'; sequence: number; message: FdMessage }
   | { type: 'thread.synchronized'; sequence: number }
   | { type: 'turn.started'; sequence: number; turnId: string; model: string }
   | { type: 'turn.progress'; sequence: number; phase: string; message: string }
@@ -125,6 +126,7 @@ export type FdStreamEvent =
   | { type: 'attachment.processing'; sequence: number; attachmentId: string; progress: number }
   | { type: 'attachment.ready'; sequence: number; attachmentId: string; previewUrl?: string }
   | { type: 'attachment.failed'; sequence: number; attachmentId: string; message: string }
+  | { type: 'assistant.reasoning'; sequence: number; message: string }
   | { type: 'assistant.delta'; sequence: number; messageId: string; delta: string }
   | { type: 'turn.completed'; sequence: number; messageId: string; text: string; resumeToken?: string }
   | { type: 'turn.failed'; sequence: number; message: string; retryable: boolean }

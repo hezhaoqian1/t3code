@@ -376,6 +376,17 @@ export class FdStore {
         this.selectedModel = this.activeThread.model;
         this.selectedSkillVersionId = this.activeThread.skillVersionId ?? 0;
         break;
+      case 'thread.message-sent': {
+        const existing = this.activeThread.messages.find((item: FdMessage) => item.id === event.message.id);
+        if (existing === undefined) this.activeThread.messages.push(event.message);
+        else {
+          existing.text = event.message.text;
+          existing.attachments = event.message.attachments;
+          existing.updatedAt = event.message.updatedAt;
+        }
+        this.activeThread.latestMessage = event.message.text;
+        break;
+      }
       case 'turn.started':
         this.activeThread.state = 'working';
         this.activeThread.activities.push({
@@ -457,6 +468,10 @@ export class FdStore {
         }
         break;
       }
+      case 'assistant.reasoning':
+        // Reasoning is a volatile stream overlay. It is intentionally not
+        // copied into the durable activity list or message history.
+        break;
       case 'tool.started':
       case 'tool.completed':
         this.activeThread.activities.push({

@@ -132,7 +132,9 @@ Skill version's context to another.
 The response is an accepted receipt with `turnId` and the stream URL. The current
 mobile rollout enables authenticated SSE for the turn endpoint. The client keeps
 a WebSocket replay adapter, but does not open it until bootstrap advertises a
-deployed replay endpoint; this avoids connecting to an unreleased route. A client
+deployed replay endpoint; this avoids connecting to an unreleased route. The
+current production gateway advertises only turn SSE, so restored turns stay on
+the validated SSE path. A client
 sends `afterSequence` and `resumeToken` when replay is available. Events are
 compatible with the T3 vocabulary:
 
@@ -187,6 +189,14 @@ the active turn is still running.
    The client renders PDF pages, images, plain text, and supported Office output
    through native preview surfaces. Unsupported or unsafe types download only
    after an explicit user action.
+
+The deployed attachment endpoints use strict JSON decoding. Their request
+bodies therefore remain exactly the deployed contract (`threadId`, `name`,
+`mimeType`, `sizeBytes`, optional `sha256`; then `totalParts` and `sha256`; then
+the preview `requestId`). Turn creation carries the required `requestId` and
+`idempotencyKey`; attachment idempotency fields will be added only when the
+gateway accepts them, so a native client update cannot break the existing
+upload path.
 
 Limits are server-advertised and model-aware. The client must display a precise
 reason for rejection (size, type, quota, scan failure, OCR unavailable) instead of
@@ -352,7 +362,11 @@ five-minute attachment-stream flush fixes.
 - The repository machine has no DevEco/Harmony SDK, `hvigorw` wrapper, Harmony
   emulator or connected device. The ArkUI source therefore passes the native
   static contract check here, while HAP compilation and device UI acceptance
-  remain a required step on a Harmony-capable build host.
+  remain a required step on a Harmony-capable build host. The live gateway
+  smoke test also covered login, bootstrap, model discovery, text SSE, a
+  26-page scanned PDF upload/complete/analysis, durable history, and signed
+  preview authorization; the response enumerated pages 1 through 26 and the
+  preview accepted the bound thread while rejecting a tampered one.
 
 ## Worktree implementation status
 
