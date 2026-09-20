@@ -124,6 +124,7 @@ assert.match(store, /editQueued/);
 assert.match(store, /private findAttachment/);
 assert.match(store, /attachment_unavailable/);
 assert.match(store, /stream_incomplete/);
+assert.match(store, /settleStreamingMessages/);
 assert.match(store, /FD Runtime 连接中断，请重试/);
 assert.match(store, /this\.models/);
 assert.match(store, /this\.applyEvent\(event\)/);

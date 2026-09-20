@@ -495,6 +495,7 @@ export class FdStore {
       this.persistWorkspace();
       return receipt.streamUrl;
     } catch (error) {
+      this.settleStreamingMessages();
       this.activeThread.state = 'error';
       this.activeTurnId = '';
       this.lastError = error instanceof FdRuntimeError ? error.message : 'FD Runtime 连接中断，请重试';
@@ -573,11 +574,13 @@ export class FdStore {
         break;
       }
       case 'turn.failed':
+        this.settleStreamingMessages();
         this.activeThread.state = 'error';
         this.lastError = event.message;
         this.activeTurnId = '';
         break;
       case 'turn.interrupted':
+        this.settleStreamingMessages();
         this.activeThread.state = 'idle';
         this.activeTurnId = '';
         break;
@@ -636,5 +639,14 @@ export class FdStore {
       if (attached !== undefined) return attached;
     }
     return undefined;
+  }
+
+  private settleStreamingMessages(): void {
+    for (const message of this.activeThread.messages) {
+      if (message.streaming) {
+        message.streaming = false;
+        message.updatedAt = isoNow();
+      }
+    }
   }
 }
