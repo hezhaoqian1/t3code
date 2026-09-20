@@ -81,7 +81,11 @@ export class FdStore {
 
   async restoreSession(): Promise<boolean> {
     const session = await this.client.restoreSession();
-    if (session === undefined) return false;
+    if (session === undefined) {
+      await this.clearWorkspaceCache();
+      this.cachedWorkspaceLoaded = false;
+      return false;
+    }
     this.signedIn = true;
     this.accountName = session.userName;
     this.remoteWorkspaceReady = false;
