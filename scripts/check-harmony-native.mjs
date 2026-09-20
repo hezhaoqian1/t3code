@@ -113,6 +113,7 @@ assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
 assert.match(store, /private findAttachment/);
 assert.match(store, /attachment_unavailable/);
+assert.match(store, /FD Runtime 连接中断，请重试/);
 assert.match(store, /this\.models/);
 assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /case 'thread.message-sent'/);

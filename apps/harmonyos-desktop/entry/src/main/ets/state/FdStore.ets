@@ -455,31 +455,39 @@ export class FdStore {
       return '';
     }
     let terminalEvent = false;
-    const receipt = await this.client.startTurn(
-      this.activeThread.id,
-      turn.text,
-      turn.attachments,
-      turn.model,
-      turn.skillVersionId,
-      (event: FdStreamEvent): void => {
-        if (event.type === 'turn.started') this.activeTurnId = event.turnId;
-        this.applyEvent(event);
-        if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
-          terminalEvent = true;
+    try {
+      const receipt = await this.client.startTurn(
+        this.activeThread.id,
+        turn.text,
+        turn.attachments,
+        turn.model,
+        turn.skillVersionId,
+        (event: FdStreamEvent): void => {
+          if (event.type === 'turn.started') this.activeTurnId = event.turnId;
+          this.applyEvent(event);
+          if (event.type === 'turn.completed' || event.type === 'turn.failed' || event.type === 'turn.interrupted') {
+            terminalEvent = true;
+          }
+          if (onEvent !== undefined) onEvent(event);
         }
-        if (onEvent !== undefined) onEvent(event);
+      );
+      if (!terminalEvent) this.activeTurnId = receipt.turnId;
+      if (receipt.events.length === 0) {
+        throw new FdRuntimeError('empty_stream', 'FD Runtime 没有返回任务事件');
       }
-    );
-    if (!terminalEvent) this.activeTurnId = receipt.turnId;
-    if (receipt.events.length === 0) {
-      throw new FdRuntimeError('empty_stream', 'FD Runtime 没有返回任务事件');
+      const failed = receipt.events.find((event: FdStreamEvent) => event.type === 'turn.failed');
+      if (failed !== undefined && failed.type === 'turn.failed') {
+        throw new FdRuntimeError('turn_failed', failed.message);
+      }
+      this.persistWorkspace();
+      return receipt.streamUrl;
+    } catch (error) {
+      this.activeThread.state = 'error';
+      this.activeTurnId = '';
+      this.lastError = error instanceof FdRuntimeError ? error.message : 'FD Runtime 连接中断，请重试';
+      this.persistWorkspace();
+      throw error;
     }
-    const failed = receipt.events.find((event: FdStreamEvent) => event.type === 'turn.failed');
-    if (failed !== undefined && failed.type === 'turn.failed') {
-      throw new FdRuntimeError('turn_failed', failed.message);
-    }
-    this.persistWorkspace();
-    return receipt.streamUrl;
   }
 
   applyEvent(event: FdStreamEvent): void {
