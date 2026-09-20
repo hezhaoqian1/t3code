@@ -414,10 +414,18 @@ export class FdStore {
 
   async startTurn(turn: FdQueuedTurn, onEvent?: (event: FdStreamEvent) => void): Promise<string> {
     if (this.client.isAuthenticated && !this.remoteWorkspaceReady) {
-      throw new FdRuntimeError('workspace_unavailable', '远端任务列表尚未就绪，请刷新后重试');
+      const error = new FdRuntimeError('workspace_unavailable', '远端任务列表尚未就绪，请刷新后重试');
+      this.activeThread.state = 'error';
+      this.lastError = error.message;
+      this.persistWorkspace();
+      throw error;
     }
     if (turn.attachments.some((attachment: FdAttachment) => attachment.state !== 'ready')) {
-      throw new FdRuntimeError('attachment_unavailable', '队列中的附件需要重新选择或等待解析完成');
+      const error = new FdRuntimeError('attachment_unavailable', '队列中的附件需要重新选择或等待解析完成');
+      this.activeThread.state = 'error';
+      this.lastError = error.message;
+      this.persistWorkspace();
+      throw error;
     }
     const userMessage: FdMessage = {
       id: turn.messageId,
