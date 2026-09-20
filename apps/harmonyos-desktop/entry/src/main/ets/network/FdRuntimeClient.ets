@@ -106,6 +106,11 @@ export class FdRuntimeClient {
       await this.sessionStorage.save(session);
     } catch (_error) {
       this.clearMemorySession();
+      try {
+        await this.sessionStorage.clear();
+      } catch (_clearError) {
+        // Do not replace the original persistence error with cleanup noise.
+      }
       throw new FdRuntimeError('session_persist_failed', '登录成功但本地会话保存失败，请重试');
     }
     return session;
@@ -132,7 +137,13 @@ export class FdRuntimeClient {
       const root = await this.request(`${FD_LEGACY_API_PREFIX}/user/self`, 'GET');
       if (root['success'] !== true) throw new FdRuntimeError('session_expired', '登录会话已失效，请重新登录');
       return session;
-    } catch (_error) {
+    } catch (error) {
+      // Keep a valid local session through a temporary offline launch. The
+      // next workspace refresh will expose the unavailable state and retry;
+      // only an explicit auth rejection should force sign-in.
+      if (error instanceof FdRuntimeError && isTransientSessionValidationError(error.code)) {
+        return session;
+      }
       this.clearMemorySession();
       await this.sessionStorage.clear();
       return undefined;
@@ -736,6 +747,11 @@ function parseStreamEvent(value: JsonObject): FdStreamEvent {
   if (type === 'thread.synchronized') return { type: 'thread.synchronized', sequence };
   if (type === 'turn.interrupted') return { type: 'turn.interrupted', sequence, message: stringValue(value['message']) || undefined };
   throw new FdRuntimeError('invalid_event', 'FD Runtime 返回了未知事件');
+}
+
+function isTransientSessionValidationError(code: string): boolean {
+  return code === 'network_error' || code === 'http_408' || code === 'http_425' ||
+    code === 'http_429' || code.startsWith('http_5');
 }
 
 function parseLegacySse(raw: string): Array<FdStreamEvent> {

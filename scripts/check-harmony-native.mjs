@@ -106,6 +106,7 @@ assert.match(client, /sessionStorage\.save/);
 assert.match(client, /sessionStorage\.load/);
 assert.match(client, /sessionStorage\.clear/);
 assert.match(client, /restoreSession/);
+assert.match(client, /isTransientSessionValidationError/);
 assert.match(
   read("entry/src/main/ets/runtime/HarmonySessionStorage.ets"),
   /preferences\.getPreferences/,
