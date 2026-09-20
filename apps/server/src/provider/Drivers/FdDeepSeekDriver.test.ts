@@ -42,6 +42,7 @@ import {
   resolveFdDeepSeekAttachments,
   resolveFdLocalToolContext,
   resolveFdOrdinarySessionInput,
+  shouldAdvertiseFdModelSlug,
 } from "./FdDeepSeekDriver.ts";
 
 const unused = () => Effect.die("unused test service");
@@ -109,6 +110,21 @@ afterEach(() => {
 });
 
 describe("FdDeepSeekDriver", () => {
+  it("hides internal DeepSeek permission variants without blocking real dynamic models", () => {
+    for (const slug of [
+      "deepseek-v4-flash-max",
+      "deepseek-v4-flash-none",
+      "deepseek-v4-pro-max",
+      "deepseek-v4-pro-none",
+    ]) {
+      expect(shouldAdvertiseFdModelSlug(slug)).toBe(false);
+    }
+
+    expect(shouldAdvertiseFdModelSlug("future-admin-model")).toBe(true);
+    expect(shouldAdvertiseFdModelSlug("deepseek-v4-flash")).toBe(true);
+    expect(shouldAdvertiseFdModelSlug("deepseek-v4-pro")).toBe(true);
+  });
+
   it.effect("preserves task and selected workspace paths in every runtime mode", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

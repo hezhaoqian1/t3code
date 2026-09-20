@@ -67,6 +67,11 @@ export type FdDeepSeekDriverEnv =
   | WorkspaceFileSystem.WorkspaceFileSystem;
 
 const FD_IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
+const FD_INTERNAL_DEEPSEEK_VARIANT = /^deepseek-v4-(?:flash|pro)-(?:max|none)$/i;
+
+export function shouldAdvertiseFdModelSlug(slug: string): boolean {
+  return !FD_INTERNAL_DEEPSEEK_VARIANT.test(slug.trim());
+}
 
 async function fetchFdUserModelSlugs(
   credentials: FdServerRuntimeCredentialProjection,
@@ -354,7 +359,11 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
         const modelCatalog = [
           ...FD_RESPONSES_MODEL_CATALOG,
           ...dynamicSlugs
-            .filter((slug) => !isFdResponsesModelAdvertised(slug))
+            .filter(
+              (slug) =>
+                shouldAdvertiseFdModelSlug(slug) &&
+                !isFdResponsesModelAdvertised(slug),
+            )
             .map(modelConfigForSlug),
         ];
         return {

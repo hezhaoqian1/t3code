@@ -1361,6 +1361,8 @@ function ChatViewContent(props: ChatViewProps) {
   const attachmentPreviewPromotionInFlightByMessageIdRef = useRef<Record<string, true>>({});
   const sendInFlightRef = useRef(false);
   const drainingQueuedMessageRef = useRef(false);
+  const queueDrainRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [queueDrainAttempt, setQueueDrainAttempt] = useState(0);
   const terminalUiOpenByThreadRef = useRef<Record<string, boolean>>({});
 
   useLayoutEffect(() => {
@@ -4662,7 +4664,7 @@ function ChatViewContent(props: ChatViewProps) {
     }
     if (
       !activeThread ||
-      isSendBusy ||
+      (isSendBusy && queuedMessageId === undefined) ||
       isConnecting ||
       threadDetailLoading ||
       sendInFlightRef.current
@@ -5176,39 +5178,83 @@ function ChatViewContent(props: ChatViewProps) {
   const activeQueueKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
   const queuedMessages = activeQueueKey ? (queuedMessagesByThread[activeQueueKey] ?? []) : [];
 
+  useEffect(
+    () => () => {
+      if (queueDrainRetryRef.current !== null) {
+        clearTimeout(queueDrainRetryRef.current);
+        queueDrainRetryRef.current = null;
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
-    if (
+    if (queueDrainRetryRef.current !== null) {
+      clearTimeout(queueDrainRetryRef.current);
+      queueDrainRetryRef.current = null;
+    }
+
+    const next = queuedMessages[0];
+    if (!activeQueueKey || !next || next.status === "failed") {
+      return;
+    }
+
+    const sendContext = composerRef.current?.getSendContext();
+    // The local dispatch flag can lag the server's completed turn by one
+    // render. A settled queue item is safe to start once the runtime is no
+    // longer running, even while that presentation-only flag catches up.
+    const localDispatchBlocking = isSendBusy && !latestTurnSettled;
+    const blocked =
       phase === "running" ||
       isPreparingAttachments ||
-      isSendBusy ||
+      localDispatchBlocking ||
       isConnecting ||
       threadDetailLoading ||
       activeEnvironmentUnavailable !== null ||
       activePendingProgress !== null ||
-      !activeQueueKey ||
-      queuedMessages.length === 0 ||
-      queuedMessages[0]?.status === "failed" ||
       (composerRef.current?.getSendContext()?.images.length ?? 0) > 0 ||
       (composerRef.current?.getSendContext()?.documents.length ?? 0) > 0 ||
       drainingQueuedMessageRef.current ||
-      sendInFlightRef.current
-    ) {
+      sendInFlightRef.current;
+    if (blocked) {
+      const hasComposerAttachments =
+        (sendContext?.images.length ?? 0) > 0 || (sendContext?.documents.length ?? 0) > 0;
+      const retryableTransientBlock =
+        phase !== "running" &&
+        activeEnvironmentUnavailable === null &&
+        !hasComposerAttachments &&
+        (localDispatchBlocking || isConnecting || threadDetailLoading);
+      if (retryableTransientBlock) {
+        // Completion and session-ready events can arrive in separate store
+        // updates. Retry after the transient guard clears so a queue does not
+        // depend on an unrelated render to start draining.
+        queueDrainRetryRef.current = setTimeout(() => {
+          queueDrainRetryRef.current = null;
+          setQueueDrainAttempt((attempt) => attempt + 1);
+        }, 350);
+      }
       return;
     }
-    const next = queuedMessages[0];
-    if (!next) return;
+
     drainingQueuedMessageRef.current = true;
     void (async () => {
       // Preserve text typed after the queued item was created. Attachments are
       // deliberately excluded from queueing while a turn is active.
       const draftText = promptRef.current;
-      await onSend(undefined, undefined, next.text, next.id);
-      if (promptRef.current.length === 0 && draftText.length > 0) {
-        promptRef.current = draftText;
-        setComposerDraftPrompt(composerDraftTarget, draftText);
-        composerRef.current?.resetCursorState({ prompt: draftText });
+      try {
+        await onSend(undefined, undefined, next.text, next.id);
+        if (promptRef.current.length === 0 && draftText.length > 0) {
+          promptRef.current = draftText;
+          setComposerDraftPrompt(composerDraftTarget, draftText);
+          composerRef.current?.resetCursorState({ prompt: draftText });
+        }
+      } finally {
+        drainingQueuedMessageRef.current = false;
+        const remaining = useSendQueueStore.getState().byThreadKey[activeQueueKey] ?? [];
+        if (remaining[0]?.id === next.id && remaining[0]?.status !== "failed") {
+          setQueueDrainAttempt((attempt) => attempt + 1);
+        }
       }
-      drainingQueuedMessageRef.current = false;
     })();
   }, [
     activeEnvironmentUnavailable,
@@ -5217,9 +5263,11 @@ function ChatViewContent(props: ChatViewProps) {
     composerDraftTarget,
     isPreparingAttachments,
     isConnecting,
+    latestTurnSettled,
     isSendBusy,
     onSend,
     phase,
+    queueDrainAttempt,
     queuedMessages,
     setComposerDraftPrompt,
     threadDetailLoading,
@@ -6257,7 +6305,14 @@ function ChatViewContent(props: ChatViewProps) {
                                       queuedMessage.id,
                                     );
                                   } else {
-                                    promoteQueuedMessage(activeQueueKey, queuedMessage.id);
+                                    // Once the active turn has settled, dispatch immediately;
+                                    // promotion alone can leave the queue waiting for another event.
+                                    void onSend(
+                                      undefined,
+                                      undefined,
+                                      queuedMessage.text,
+                                      queuedMessage.id,
+                                    );
                                   }
                                 }}
                               >

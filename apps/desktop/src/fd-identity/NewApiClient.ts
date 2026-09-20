@@ -1,6 +1,7 @@
 import type { FdAccountUserSummary, FdUsagePeriod, FdUsageSummary } from "@t3tools/contracts";
 import {
   FD_RUNTIME_DEFAULT_MODEL,
+  FD_RUNTIME_LEGACY_DEFAULT_MODEL,
   FD_RUNTIME_MODELS,
 } from "@t3tools/contracts/fd/runtime-credentials";
 
@@ -51,11 +52,13 @@ export interface NewApiSessionCredentials {
 export interface NewApiRuntimeTokenRevocation {
   accessToken: string;
   runtimeTokenName: string;
+  runtimeTokenId?: number | undefined;
 }
 
 export interface NewApiPendingRevocationSession extends NewApiSessionCredentials {
   accessExpiresAt: number;
   userId: number;
+  runtimeTokenId?: number | undefined;
   runtimeTokenName: string;
   tokensRevoked: boolean;
 }
@@ -309,6 +312,20 @@ export class NewApiClient {
   }
 
   async revokeRuntimeTokens(revocation: NewApiRuntimeTokenRevocation): Promise<void> {
+    if (revocation.runtimeTokenId !== undefined) {
+      const matches = await this.#findRuntimeTokens(
+        revocation.accessToken,
+        revocation.runtimeTokenName,
+      );
+      const exact = matches.find((token) => token.id === revocation.runtimeTokenId);
+      if (!exact) return;
+      await this.deleteRuntimeToken({
+        accessToken: revocation.accessToken,
+        runtimeTokenId: exact.id,
+      });
+      return;
+    }
+
     let deleteError: unknown;
     let previousIds: string | undefined;
     let candidateCount = 0;
@@ -510,7 +527,12 @@ function assertManagedRuntimeToken(token: RuntimeToken): void {
 }
 
 function isLegacyManagedRuntimeToken(token: RuntimeToken): boolean {
-  return token.status === 1 && token.modelLimitsEnabled && token.modelLimits === FD_RUNTIME_MODEL;
+  return (
+    token.status === 1 &&
+    token.modelLimitsEnabled &&
+    (token.modelLimits === FD_RUNTIME_MODEL ||
+      token.modelLimits === FD_RUNTIME_LEGACY_DEFAULT_MODEL)
+  );
 }
 
 function object(value: unknown): Record<string, unknown> {

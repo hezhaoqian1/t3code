@@ -37,6 +37,10 @@ export type StoredFdCredentials = typeof StoredFdCredentials.Type;
 
 export const PendingFdRevocation = Schema.Struct({
   userId: PositiveInt,
+  // Added after the first vault format. Older pending entries may omit it;
+  // new entries use the exact token ID so cleanup cannot revoke a replacement
+  // token with the same device name.
+  runtimeTokenId: Schema.optional(PositiveInt),
   accessToken: Secret,
   accessExpiresAt: PositiveInt,
   sessionId: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(128)),

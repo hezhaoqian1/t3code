@@ -4,6 +4,28 @@ import type { PendingFdRevocation } from "./CredentialVault.ts";
 import { FD_RUNTIME_MODEL_LIMITS, NewApiClient, NewApiClientError } from "./NewApiClient.ts";
 
 describe("NewApiClient", () => {
+  it("revokes only the recorded token id when cleaning a pending session", async () => {
+    const fetch = responseQueue([
+      jsonResponse(
+        apiSuccess({
+          total: 2,
+          items: [runtimeToken({ id: 41 }), runtimeToken({ id: 42 })],
+        }),
+      ),
+      jsonResponse(apiSuccess()),
+    ]);
+    const client = new NewApiClient({ baseUrl: "http://127.0.0.1:3001", fetch });
+
+    await client.revokeRuntimeTokens({
+      accessToken: "access-current",
+      runtimeTokenName: "FD AI Desktop device123",
+      runtimeTokenId: 41,
+    });
+
+    expect(request(fetch, 1)).toMatchObject({ path: "/api/token/41", method: "DELETE" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("retires stale same-device tokens and creates exact Flash and Pro access", async () => {
     const fetch = responseQueue([
       jsonResponse(authResponse(), { cookie: true }),
