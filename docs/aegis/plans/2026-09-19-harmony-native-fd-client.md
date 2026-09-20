@@ -52,7 +52,7 @@ capability error instead of silently dropping the file.
 | Concern                        | HarmonyOS client           | FD Runtime                                | T3 desktop server            |
 | ------------------------------ | -------------------------- | ----------------------------------------- | ---------------------------- |
 | Task list and visible messages | Render and encrypted cache | Durable server copy                       | Local event store/projection |
-| Active context and resume      | Store opaque resume token  | Context, compaction, recovery             | Codex app-server cursor      |
+| Active context and resume      | Keep opaque cursor in memory; reconcile after restart | Context, compaction, recovery | Codex app-server cursor |
 | Skill catalog/version          | Select and display         | Authorize and provide policy              | Resolve local Skill files    |
 | Tools and permissions          | Show status/approval       | Execute, authorize, audit                 | Execute local provider tools |
 | Attachments                    | Pick, hash, upload chunks  | Scan, parse, OCR/vision, retain reference | Local attachment worker      |
@@ -62,8 +62,11 @@ capability error instead of silently dropping the file.
 The device must never persist tool arguments/results, audit identifiers, provider
 credentials, hidden reasoning, or enterprise policy text. Visible user/assistant
 text and safe attachment metadata may be cached for offline rendering. The native
-client now persists only a short-lived access-token projection in app-private
-Harmony Preferences; it never stores the password, refresh cookie, or provider key.
+client now persists only a short-lived access-token projection and a bounded,
+account-bound visible workspace projection in app-private Harmony Preferences; it
+never stores the password, refresh cookie, provider key, local file URI, preview
+URL, or resume cursor. A process restart reconciles the cached shell and messages
+with the server before allowing a turn to run.
 Startup validates the stored expiry and calls the gateway user endpoint before
 restoring the workspace. Invalid or revoked sessions are cleared fail-closed.
 
@@ -387,6 +390,11 @@ The isolated release worktree branch `codex/harmony-native-release` contains:
   temporary ID. Attachments are removed from the composer after enqueueing but
   remain attached to the durable user message so parser events can still update
   their state.
+- A bounded Harmony Preferences workspace cache that restores the last visible
+  thread, messages, Skill/model selection, and queue while offline. It serializes
+  writes, removes local-only attachment fields, marks interrupted uploads for
+  reselection, and falls back to the remote T3 thread/detail/history projection
+  after reconnect.
 - Queue entries can be edited, deleted, reordered, or sent immediately. An
   immediate send requests interruption of the active turn and waits for the
   terminal event before starting the selected entry. A 404/405 mobile API
