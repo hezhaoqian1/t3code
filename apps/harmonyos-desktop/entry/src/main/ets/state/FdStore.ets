@@ -7,8 +7,12 @@ import {
   FdStreamEvent,
   FdThreadDetail,
   FdThreadShell,
+  FdWorkspaceCache,
+  FdWorkspaceSnapshot,
+  MemoryFdWorkspaceCache,
   createClientId,
   isoNow,
+  sanitizeWorkspaceSnapshot,
   sampleSkills,
   sampleThread,
   sampleThreadShells
@@ -29,11 +33,22 @@ export class FdStore {
   signedIn: boolean = false;
   /** True only after the authenticated thread shell and detail are remote-backed. */
   remoteWorkspaceReady: boolean = false;
+  /** True while the visible workspace is served from the last account snapshot. */
+  cachedWorkspaceLoaded: boolean = false;
   accountName: string = '';
   lastError: string = '';
 
-  constructor(client: FdRuntimeClient = new FdRuntimeClient()) {
+  private readonly workspaceCache: FdWorkspaceCache;
+  private workspacePersistQueue: Promise<void> = Promise.resolve();
+  private workspacePersistScheduled: boolean = false;
+  private pendingWorkspaceSnapshot: FdWorkspaceSnapshot | undefined;
+
+  constructor(
+    client: FdRuntimeClient = new FdRuntimeClient(),
+    workspaceCache: FdWorkspaceCache = new MemoryFdWorkspaceCache()
+  ) {
     this.client = client;
+    this.workspaceCache = workspaceCache;
     this.threads = sampleThreadShells();
     this.skills = sampleSkills();
   }
@@ -46,6 +61,7 @@ export class FdStore {
       this.signedIn = true;
       this.accountName = session.userName;
       this.remoteWorkspaceReady = false;
+      this.cachedWorkspaceLoaded = false;
       // Do not expose the offline demo catalog while an authenticated
       // account is loading its server-owned workspace.
       this.threads = [];
@@ -53,6 +69,7 @@ export class FdStore {
       this.activeThread = sampleThread();
       this.queuedTurns = [];
       this.activeTurnId = '';
+      await this.loadCachedWorkspace();
       await this.refreshWorkspace();
     } catch (error) {
       this.lastError = error instanceof FdRuntimeError ? error.message : '登录失败，请检查网络';
@@ -68,19 +85,23 @@ export class FdStore {
     this.signedIn = true;
     this.accountName = session.userName;
     this.remoteWorkspaceReady = false;
+    this.cachedWorkspaceLoaded = false;
     this.threads = [];
     this.skills = [];
     this.activeThread = sampleThread();
     this.queuedTurns = [];
     this.activeTurnId = '';
+    await this.loadCachedWorkspace();
     await this.refreshWorkspace();
     return true;
   }
 
   async logout(): Promise<void> {
     await this.client.logout();
+    await this.clearWorkspaceCache();
     this.signedIn = false;
     this.remoteWorkspaceReady = false;
+    this.cachedWorkspaceLoaded = false;
     this.accountName = '';
     this.threads = sampleThreadShells();
     this.skills = sampleSkills();
@@ -90,6 +111,64 @@ export class FdStore {
     this.activeTurnId = '';
     this.selectedSkillVersionId = 0;
     this.lastError = '';
+  }
+
+  private async loadCachedWorkspace(): Promise<void> {
+    if (this.accountName.length === 0) return;
+    try {
+      const snapshot = await this.workspaceCache.load(this.accountName);
+      if (snapshot === undefined || snapshot.accountName !== this.accountName) return;
+      this.threads = snapshot.threads.slice();
+      this.activeThread = snapshot.activeThread;
+      this.queuedTurns = snapshot.queuedTurns.slice();
+      this.selectedSkillVersionId = snapshot.selectedSkillVersionId;
+      this.selectedModel = snapshot.selectedModel;
+      this.cachedWorkspaceLoaded = true;
+      this.remoteWorkspaceReady = false;
+    } catch (_error) {
+      // A corrupt or unavailable local cache must never block remote login.
+      this.cachedWorkspaceLoaded = false;
+    }
+  }
+
+  private async clearWorkspaceCache(): Promise<void> {
+    this.pendingWorkspaceSnapshot = undefined;
+    await this.workspacePersistQueue;
+    try {
+      await this.workspaceCache.clear();
+    } catch (_error) {
+      // Cache cleanup is best-effort; runtime logout still owns credentials.
+    }
+  }
+
+  private snapshotForCache(): FdWorkspaceSnapshot {
+    return sanitizeWorkspaceSnapshot({
+      accountName: this.accountName,
+      threads: this.threads,
+      activeThread: this.activeThread,
+      queuedTurns: this.queuedTurns,
+      selectedSkillVersionId: this.selectedSkillVersionId,
+      selectedModel: this.selectedModel,
+      savedAt: Date.now()
+    });
+  }
+
+  /** Coalesce rapid stream/attachment updates into serialized cache writes. */
+  private persistWorkspace(): void {
+    if (!this.signedIn || this.accountName.length === 0) return;
+    this.pendingWorkspaceSnapshot = this.snapshotForCache();
+    if (this.workspacePersistScheduled) return;
+    this.workspacePersistScheduled = true;
+    this.workspacePersistQueue = this.workspacePersistQueue.then(async (): Promise<void> => {
+      const snapshot = this.pendingWorkspaceSnapshot;
+      this.pendingWorkspaceSnapshot = undefined;
+      if (snapshot !== undefined) await this.workspaceCache.save(snapshot);
+    }).catch((): void => {
+      // Local persistence must not turn a successful runtime turn into an error.
+    }).then((): void => {
+      this.workspacePersistScheduled = false;
+      if (this.pendingWorkspaceSnapshot !== undefined) this.persistWorkspace();
+    });
   }
 
   async refreshWorkspace(): Promise<void> {
@@ -109,13 +188,17 @@ export class FdStore {
       const threads = await this.client.listThreads();
       // An authenticated empty list is authoritative. Do not leave the
       // offline demo row visible or send a new turn to its local ID.
+      const cachedActiveThreadId = this.cachedWorkspaceLoaded ? this.activeThread.id : '';
       this.threads = threads;
       if (threads.length > 0) {
-        const first = threads[0];
-        if (first === undefined || !(await this.openThread(first.id))) {
+        const preferred = threads.find((thread: FdThreadShell) => thread.id === cachedActiveThreadId) ?? threads[0];
+        if (preferred === undefined || !(await this.openThread(preferred.id))) {
           throw new FdRuntimeError('thread_unavailable', '任务详情暂不可用，请稍后重试');
         }
+        if (preferred.id !== cachedActiveThreadId) this.queuedTurns = [];
         this.remoteWorkspaceReady = true;
+        this.cachedWorkspaceLoaded = false;
+        this.persistWorkspace();
       } else {
         await this.createThread();
       }
@@ -123,7 +206,7 @@ export class FdStore {
       // The native shell remains usable while the mobile API is being rolled out.
       // A thread 404 must not discard a successfully loaded Skill/model catalog.
       this.remoteWorkspaceReady = false;
-      if (this.threads.length === 0) {
+      if (!this.cachedWorkspaceLoaded && this.threads.length === 0) {
         this.activeThread = sampleThread();
         this.queuedTurns = [];
         this.activeTurnId = '';
@@ -178,6 +261,7 @@ export class FdStore {
         }
       }
     }
+    this.persistWorkspace();
     return true;
   }
 
@@ -192,6 +276,7 @@ export class FdStore {
     this.activeThread.messages = [...older, ...this.activeThread.messages];
     this.activeThread.hasMoreHistory = page.hasMoreHistory;
     this.activeThread.historyCursor = page.historyCursor;
+    this.persistWorkspace();
     return older.length > 0;
   }
 
@@ -222,10 +307,19 @@ export class FdStore {
     this.selectedSkillVersionId = detail.skillVersionId ?? 0;
     this.queuedTurns = [];
     this.activeTurnId = '';
+    this.cachedWorkspaceLoaded = false;
+    this.persistWorkspace();
   }
 
   selectSkill(versionId: number): void {
     this.selectedSkillVersionId = this.selectedSkillVersionId === versionId ? 0 : versionId;
+    this.persistWorkspace();
+  }
+
+  selectModel(model: string): void {
+    if (model.length === 0) return;
+    this.selectedModel = model;
+    this.persistWorkspace();
   }
 
   addAttachment(attachment: FdAttachment): void {
@@ -234,6 +328,7 @@ export class FdStore {
     );
     next.push(attachment);
     this.activeThread.attachments = next;
+    this.persistWorkspace();
   }
 
   updateAttachment(attachmentId: string, update: FdAttachmentPatch): void {
@@ -244,16 +339,19 @@ export class FdStore {
     const current = this.activeThread.attachments[index];
     if (current === undefined) return;
     this.activeThread.attachments[index] = { ...current, ...update };
+    this.persistWorkspace();
   }
 
   removeAttachment(attachmentId: string): void {
     this.activeThread.attachments = this.activeThread.attachments.filter(
       (item: FdAttachment) => item.attachmentId !== attachmentId
     );
+    this.persistWorkspace();
   }
 
   clearAttachments(): void {
     this.activeThread.attachments = [];
+    this.persistWorkspace();
   }
 
   enqueueTurn(text: string): FdQueuedTurn {
@@ -268,17 +366,22 @@ export class FdStore {
     };
     this.queuedTurns.push(turn);
     this.activeThread.state = 'queued';
+    this.persistWorkspace();
     return turn;
   }
 
   editQueued(id: string, text: string): void {
     const target = this.queuedTurns.find((turn: FdQueuedTurn) => turn.id === id);
-    if (target !== undefined) target.text = text;
+    if (target !== undefined) {
+      target.text = text;
+      this.persistWorkspace();
+    }
   }
 
   removeQueued(id: string): void {
     this.queuedTurns = this.queuedTurns.filter((turn: FdQueuedTurn) => turn.id !== id);
     if (this.queuedTurns.length === 0 && this.activeThread.state === 'queued') this.activeThread.state = 'idle';
+    this.persistWorkspace();
   }
 
   restoreQueuedTurn(turn: FdQueuedTurn): void {
@@ -286,6 +389,7 @@ export class FdStore {
       this.queuedTurns = [turn, ...this.queuedTurns];
     }
     this.activeThread.state = 'queued';
+    this.persistWorkspace();
   }
 
   moveQueued(id: string, direction: number): void {
@@ -297,11 +401,15 @@ export class FdStore {
     if (current === undefined || next === undefined) return;
     this.queuedTurns[index] = next;
     this.queuedTurns[target] = current;
+    this.persistWorkspace();
   }
 
   async startTurn(turn: FdQueuedTurn, onEvent?: (event: FdStreamEvent) => void): Promise<string> {
     if (this.client.isAuthenticated && !this.remoteWorkspaceReady) {
       throw new FdRuntimeError('workspace_unavailable', '远端任务列表尚未就绪，请刷新后重试');
+    }
+    if (turn.attachments.some((attachment: FdAttachment) => attachment.state !== 'ready')) {
+      throw new FdRuntimeError('attachment_unavailable', '队列中的附件需要重新选择或等待解析完成');
     }
     const userMessage: FdMessage = {
       id: turn.messageId,
@@ -323,6 +431,7 @@ export class FdStore {
     this.activeThread.latestMessage = turn.text;
     this.activeThread.state = 'working';
     this.activeThread.updatedAt = isoNow();
+    this.persistWorkspace();
     if (!this.client.isAuthenticated) {
       const assistant: FdMessage = {
         id: createClientId('message'),
@@ -336,6 +445,7 @@ export class FdStore {
       this.activeThread.messages.push(assistant);
       this.activeThread.latestMessage = assistant.text;
       this.activeThread.state = 'idle';
+      this.persistWorkspace();
       return '';
     }
     let terminalEvent = false;
@@ -362,6 +472,7 @@ export class FdStore {
     if (failed !== undefined && failed.type === 'turn.failed') {
       throw new FdRuntimeError('turn_failed', failed.message);
     }
+    this.persistWorkspace();
     return receipt.streamUrl;
   }
 
@@ -480,6 +591,9 @@ export class FdStore {
         break;
       case 'thread.synchronized':
         break;
+    }
+    if (event.type !== 'assistant.delta' && event.type !== 'assistant.reasoning' && event.type !== 'turn.progress') {
+      this.persistWorkspace();
     }
   }
 

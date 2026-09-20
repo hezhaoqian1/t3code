@@ -103,6 +103,40 @@ export class MemoryFdSessionStorage implements FdSessionStorage {
   }
 }
 
+/** Visible-only workspace state used to render the last session offline. */
+export interface FdWorkspaceSnapshot {
+  accountName: string;
+  threads: Array<FdThreadShell>;
+  activeThread: FdThreadDetail;
+  queuedTurns: Array<FdQueuedTurn>;
+  selectedSkillVersionId: number;
+  selectedModel: string;
+  savedAt: number;
+}
+
+export interface FdWorkspaceCache {
+  load(accountName: string): Promise<FdWorkspaceSnapshot | undefined>;
+  save(snapshot: FdWorkspaceSnapshot): Promise<void>;
+  clear(): Promise<void>;
+}
+
+export class MemoryFdWorkspaceCache implements FdWorkspaceCache {
+  private value: FdWorkspaceSnapshot | undefined;
+
+  async load(accountName: string): Promise<FdWorkspaceSnapshot | undefined> {
+    if (this.value === undefined || this.value.accountName !== accountName) return undefined;
+    return this.value;
+  }
+
+  async save(snapshot: FdWorkspaceSnapshot): Promise<void> {
+    this.value = sanitizeWorkspaceSnapshot(snapshot);
+  }
+
+  async clear(): Promise<void> {
+    this.value = undefined;
+  }
+}
+
 export interface FdQueuedTurn {
   id: string;
   /** Stable visible user-message id so a failed queue retry cannot duplicate it. */
@@ -112,6 +146,120 @@ export interface FdQueuedTurn {
   skillVersionId?: number;
   model: string;
   createdAt: string;
+}
+
+const CACHE_MAX_CHARS: number = 800000;
+const CACHE_MAX_MESSAGES: number = 100;
+const CACHE_MAX_ACTIVITIES: number = 32;
+const CACHE_MAX_QUEUE: number = 20;
+
+function visibleText(value: string, limit: number): string {
+  if (value.length <= limit) return value;
+  return `${value.slice(0, limit)}\n\n[离线缓存已截断，重新连接后可加载完整内容]`;
+}
+
+function visibleAttachment(attachment: FdAttachment): FdAttachment {
+  const interrupted = attachment.state === 'selected' || attachment.state === 'uploading' || attachment.state === 'processing';
+  const state: FdAttachmentState = interrupted ? 'failed' : attachment.state;
+  return {
+    attachmentId: attachment.attachmentId,
+    name: visibleText(attachment.name, 240),
+    mimeType: attachment.mimeType,
+    sizeBytes: Number.isFinite(attachment.sizeBytes) ? Math.max(0, attachment.sizeBytes) : 0,
+    state,
+    progress: state === 'ready' ? 100 : Math.max(0, Math.min(100, attachment.progress)),
+    ...(attachment.errorMessage !== undefined ? { errorMessage: visibleText(attachment.errorMessage, 600) } : {}),
+    ...(interrupted && attachment.errorMessage === undefined ? { errorMessage: '应用重启后需要重新选择附件' } : {})
+  } as FdAttachment;
+}
+
+function visibleMessage(message: FdMessage): FdMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    text: visibleText(message.text, 16000),
+    createdAt: message.createdAt,
+    updatedAt: message.updatedAt,
+    streaming: false,
+    attachments: message.attachments.map((attachment: FdAttachment) => visibleAttachment(attachment))
+  };
+}
+
+function visibleShell(thread: FdThreadShell): FdThreadShell {
+  return {
+    id: thread.id,
+    title: visibleText(thread.title, 240),
+    model: thread.model,
+    skillVersionId: thread.skillVersionId,
+    state: thread.state === 'working' ? 'offline' : thread.state,
+    latestMessage: visibleText(thread.latestMessage, 1200),
+    updatedAt: thread.updatedAt,
+    hasPendingApprovals: thread.hasPendingApprovals
+  };
+}
+
+function visibleThread(thread: FdThreadDetail): FdThreadDetail {
+  const shell = visibleShell(thread);
+  return {
+    ...shell,
+    messages: thread.messages.slice(-CACHE_MAX_MESSAGES).map((message: FdMessage) => visibleMessage(message)),
+    activities: thread.activities.slice(-CACHE_MAX_ACTIVITIES).map((activity: FdActivity) => ({
+      id: activity.id,
+      kind: activity.kind,
+      summary: visibleText(activity.summary, 600),
+      tone: activity.tone,
+      createdAt: activity.createdAt
+    })),
+    attachments: thread.attachments.map((attachment: FdAttachment) => visibleAttachment(attachment)),
+    sequence: Number.isFinite(thread.sequence) ? Math.max(0, thread.sequence) : 0,
+    hasMoreHistory: thread.hasMoreHistory
+  } as FdThreadDetail;
+}
+
+function visibleQueuedTurn(turn: FdQueuedTurn): FdQueuedTurn {
+  return {
+    id: turn.id,
+    messageId: turn.messageId,
+    text: visibleText(turn.text, 16000),
+    attachments: turn.attachments.map((attachment: FdAttachment) => visibleAttachment(attachment)),
+    skillVersionId: turn.skillVersionId,
+    model: turn.model,
+    createdAt: turn.createdAt
+  };
+}
+
+/**
+ * Strip local-only and short-lived fields before a workspace snapshot crosses
+ * into durable storage. The same projection is used by the in-memory fallback
+ * so tests exercise the production privacy boundary too.
+ */
+export function sanitizeWorkspaceSnapshot(snapshot: FdWorkspaceSnapshot): FdWorkspaceSnapshot {
+  const safe: FdWorkspaceSnapshot = {
+    accountName: snapshot.accountName,
+    threads: snapshot.threads.slice(0, 100).map((thread: FdThreadShell) => visibleShell(thread)),
+    activeThread: visibleThread(snapshot.activeThread),
+    queuedTurns: snapshot.queuedTurns.slice(0, CACHE_MAX_QUEUE).map((turn: FdQueuedTurn) => visibleQueuedTurn(turn)),
+    selectedSkillVersionId: snapshot.selectedSkillVersionId,
+    selectedModel: snapshot.selectedModel,
+    savedAt: snapshot.savedAt
+  };
+  if (JSON.stringify(safe).length <= CACHE_MAX_CHARS) return safe;
+  return {
+    ...safe,
+    threads: safe.threads.slice(0, 40),
+    activeThread: {
+      ...safe.activeThread,
+      messages: safe.activeThread.messages.slice(-40).map((message: FdMessage) => ({
+        ...message,
+        text: visibleText(message.text, 4000)
+      })),
+      activities: safe.activeThread.activities.slice(-12)
+    } as FdThreadDetail,
+    queuedTurns: safe.queuedTurns.slice(0, 10).map((turn: FdQueuedTurn) => ({
+      ...turn,
+      text: visibleText(turn.text, 4000)
+    }))
+  } as FdWorkspaceSnapshot;
 }
 
 export type FdStreamEvent =

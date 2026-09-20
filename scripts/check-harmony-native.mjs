@@ -16,6 +16,7 @@ const requiredFiles = [
   "entry/src/main/ets/entryability/EntryAbility.ets",
   "entry/src/main/ets/runtime/HarmonyContext.ets",
   "entry/src/main/ets/runtime/HarmonySessionStorage.ets",
+  "entry/src/main/ets/runtime/HarmonyWorkspaceCache.ets",
   "entry/src/main/ets/config/HarmonyConfig.ets",
   "entry/src/main/ets/data/FdModels.ets",
   "entry/src/main/ets/network/FdRuntimeClient.ets",
@@ -60,6 +61,8 @@ assert.match(index, /this.store.clearAttachments()/);
 assert.match(index, /activeTurnId.length/);
 assert.match(index, /remoteWorkspaceReady/);
 assert.match(index, /restoreQueuedTurn/);
+assert.match(index, /createHarmonyWorkspaceCache/);
+assert.match(index, /cachedWorkspaceLoaded/);
 assert.match(index, /Web\(\{ src: this\.previewUrl/);
 assert.doesNotMatch(index, /HARMONY_WEB_URL|USE_PACKAGED_WEB_BUNDLE/);
 
@@ -109,6 +112,7 @@ assert.match(store, /messages: history/);
 assert.match(store, /this\.queuedTurns/);
 assert.match(store, /editQueued/);
 assert.match(store, /private findAttachment/);
+assert.match(store, /attachment_unavailable/);
 assert.match(store, /this\.models/);
 assert.match(store, /this\.applyEvent\(event\)/);
 assert.match(store, /case 'thread.message-sent'/);
@@ -117,6 +121,10 @@ assert.match(store, /loadOlderHistory/);
 assert.match(store, /this\.skills = \[\];/);
 assert.match(store, /this\.threads = \[\];/);
 assert.match(store, /restoreSession/);
+assert.match(store, /loadCachedWorkspace/);
+assert.match(store, /sanitizeWorkspaceSnapshot/);
+assert.match(store, /workspacePersistQueue/);
+assert.match(store, /selectModel/);
 assert.doesNotMatch(client, /unlimited_quota/);
 assert.match(client, /findRuntimeToken/);
 assert.match(client, /sessionStorage\.save/);
@@ -129,11 +137,20 @@ assert.match(
   /preferences\.getPreferences/,
 );
 assert.match(read("entry/src/main/ets/runtime/HarmonySessionStorage.ets"), /prefs\.flush/);
+const workspaceCache = read("entry/src/main/ets/runtime/HarmonyWorkspaceCache.ets");
+assert.match(workspaceCache, /preferences\.getPreferences/);
+assert.match(workspaceCache, /sanitizeWorkspaceSnapshot/);
+assert.match(workspaceCache, /accountName/);
+assert.doesNotMatch(workspaceCache, /sourceUri/);
+assert.doesNotMatch(workspaceCache, /previewUrl/);
 assert.match(read("entry/src/main/ets/runtime/HarmonyContext.ets"), /setHarmonyAbilityContext/);
-assert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
-assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
-assert.match(read("entry/src/main/ets/data/FdModels.ets"), /thread\.message-sent/);
-assert.match(read("entry/src/main/ets/data/FdModels.ets"), /assistant\.reasoning/);
+const models = read("entry/src/main/ets/data/FdModels.ets");
+assert.match(models, /createUuid/);
+assert.match(models, /FdAttachmentPatch/);
+assert.match(models, /thread\.message-sent/);
+assert.match(models, /assistant\.reasoning/);
+assert.match(models, /sanitizeWorkspaceSnapshot/);
+assert.match(models, /应用重启后需要重新选择附件/);
 assert.match(config, /deepseek-flash/);
 assert.match(moduleJson5, /ohos\.permission\.INTERNET/);
 assert.match(moduleJson5, /deviceTypes/);

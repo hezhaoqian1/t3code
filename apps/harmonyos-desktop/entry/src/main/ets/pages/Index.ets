@@ -16,13 +16,15 @@ import {
 import { FdRuntimeClient, FdRuntimeError, FdStreamHandle } from '../network/FdRuntimeClient';
 import { uploadPickedAttachment } from '../network/AttachmentTransfer';
 import { createHarmonySessionStorage } from '../runtime/HarmonySessionStorage';
+import { createHarmonyWorkspaceCache } from '../runtime/HarmonyWorkspaceCache';
 import { FdStore } from '../state/FdStore';
 
 @Entry
 @Component
 struct Index {
   private readonly store: FdStore = new FdStore(
-    new FdRuntimeClient(FD_RUNTIME_ORIGIN, createHarmonySessionStorage())
+    new FdRuntimeClient(FD_RUNTIME_ORIGIN, createHarmonySessionStorage()),
+    createHarmonyWorkspaceCache()
   );
   private stream: FdStreamHandle | undefined;
   private previewController: webview.WebviewController = new webview.WebviewController();
@@ -44,6 +46,7 @@ struct Index {
   @State private queuedTurns: Array<FdQueuedTurn> = [];
   @State private activeThreadId: string = '';
   @State private activeThreadTitle: string = '';
+  @State private cachedWorkspaceLoaded: boolean = false;
   @State private selectedSkillVersionId: number = 0;
   @State private selectedModel: string = FD_DEFAULT_MODEL;
   @State private draft: string = '';
@@ -87,6 +90,7 @@ struct Index {
     this.queuedTurns = this.store.queuedTurns.slice();
     this.activeThreadId = this.store.activeThread.id;
     this.activeThreadTitle = this.store.activeThread.title;
+    this.cachedWorkspaceLoaded = this.store.cachedWorkspaceLoaded;
     this.selectedSkillVersionId = this.store.selectedSkillVersionId;
     this.selectedModel = this.store.selectedModel;
     if (this.store.lastError.length > 0) this.errorText = this.store.lastError;
@@ -97,6 +101,7 @@ struct Index {
       this.statusText = '正在处理';
     }
     else if (this.store.activeThread.state === 'queued') this.statusText = `排队中 (${this.queuedTurns.length})`;
+    else if (this.signedIn && this.cachedWorkspaceLoaded && !this.store.remoteWorkspaceReady) this.statusText = '已加载本地缓存，等待 FD Runtime';
     else if (this.signedIn && !this.store.remoteWorkspaceReady) this.statusText = '任务列表暂不可用，请刷新';
     else this.statusText = this.signedIn ? '已连接 FD Runtime' : '离线演示模式';
   }
@@ -538,7 +543,7 @@ struct Index {
         .value(this.selectedModel)
         .onSelect((index: number) => {
           const selected = this.models[index];
-          if (selected !== undefined) this.store.selectedModel = selected;
+          if (selected !== undefined) this.store.selectModel(selected);
           this.syncFromStore();
         });
       Text(this.statusText).fontSize(12).fontColor(this.errorText.length > 0 ? '#C2414A' : '#80939A').margin({ left: 18, right: 18, top: 14, bottom: 16 });
