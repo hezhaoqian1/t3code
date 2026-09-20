@@ -174,6 +174,7 @@ export class FdStore {
   async refreshWorkspace(): Promise<void> {
     this.lastError = '';
     this.remoteWorkspaceReady = false;
+    const cachedThreadsBeforeRefresh = this.threads.slice();
     let skillsLoaded = false;
     try {
       const skills = await this.client.getSkills();
@@ -206,6 +207,7 @@ export class FdStore {
       // The native shell remains usable while the mobile API is being rolled out.
       // A thread 404 must not discard a successfully loaded Skill/model catalog.
       this.remoteWorkspaceReady = false;
+      if (this.cachedWorkspaceLoaded) this.threads = cachedThreadsBeforeRefresh;
       if (!this.cachedWorkspaceLoaded && this.threads.length === 0) {
         this.activeThread = sampleThread();
         this.queuedTurns = [];
