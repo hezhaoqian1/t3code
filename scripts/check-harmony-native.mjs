@@ -123,6 +123,7 @@ assert.match(store, /this\.skills = \[\];/);
 assert.match(store, /this\.threads = \[\];/);
 assert.match(store, /restoreSession/);
 assert.match(store, /loadCachedWorkspace/);
+assert.match(store, /clearWorkspaceCache/);
 assert.match(store, /sanitizeWorkspaceSnapshot/);
 assert.match(store, /workspacePersistQueue/);
 assert.match(store, /selectModel/);
