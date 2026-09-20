@@ -1,6 +1,7 @@
 import type { FdAccountUserSummary, FdUsagePeriod, FdUsageSummary } from "@t3tools/contracts";
 import {
   FD_RUNTIME_DEFAULT_MODEL,
+  FD_RUNTIME_LEGACY_DEFAULT_MODEL,
   FD_RUNTIME_MODELS,
 } from "@t3tools/contracts/fd/runtime-credentials";
 
@@ -510,7 +511,12 @@ function assertManagedRuntimeToken(token: RuntimeToken): void {
 }
 
 function isLegacyManagedRuntimeToken(token: RuntimeToken): boolean {
-  return token.status === 1 && token.modelLimitsEnabled && token.modelLimits === FD_RUNTIME_MODEL;
+  return (
+    token.status === 1 &&
+    token.modelLimitsEnabled &&
+    (token.modelLimits === FD_RUNTIME_MODEL ||
+      token.modelLimits === FD_RUNTIME_LEGACY_DEFAULT_MODEL)
+  );
 }
 
 function object(value: unknown): Record<string, unknown> {
