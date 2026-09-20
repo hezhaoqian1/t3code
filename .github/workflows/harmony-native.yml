@@ -8,12 +8,14 @@ on:
       - "apps/harmonyos-desktop/**"
       - "scripts/check-harmony-native.mjs"
       - "scripts/build-harmony-native.mjs"
+      - "scripts/test-harmony-live.mjs"
       - ".github/workflows/harmony-native.yml"
   pull_request:
     paths:
       - "apps/harmonyos-desktop/**"
       - "scripts/check-harmony-native.mjs"
       - "scripts/build-harmony-native.mjs"
+      - "scripts/test-harmony-live.mjs"
       - ".github/workflows/harmony-native.yml"
 
 permissions:
@@ -38,3 +40,6 @@ jobs:
 
       - name: Check build launcher syntax
         run: node --check scripts/build-harmony-native.mjs
+
+      - name: Check live smoke syntax
+        run: node --check scripts/test-harmony-live.mjs

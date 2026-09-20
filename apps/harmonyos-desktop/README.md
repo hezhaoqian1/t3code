@@ -31,3 +31,19 @@ short-lived preview URLs, tool parameters, reasoning overlays, or resume
 cursors. Uploads and attachment processing that were interrupted by a restart
 are shown as needing the file to be selected again. A successful remote refresh
 replaces the cached projection with the server-backed thread and history.
+
+## Live contract smoke
+
+Run the read-only gateway smoke against an environment that already has test
+data. Credentials are read from environment variables and are never printed:
+
+```powershell
+$env:FD_HARMONY_LIVE_BASE_URL = "https://ai-api.fdsure.com"
+$env:FD_HARMONY_LIVE_USERNAME = "admin"
+$env:FD_HARMONY_LIVE_PASSWORD = "<password>"
+node scripts/test-harmony-live.mjs
+```
+
+The check logs in, reads bootstrap, Skills, thread shells and one thread
+detail, then validates a preview URL when a ready attachment is available. It
+does not create threads, send turns, upload files, or mutate server data.
