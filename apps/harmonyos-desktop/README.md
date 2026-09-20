@@ -3,9 +3,11 @@
 This application is a native ArkUI client. It does not load the T3 web renderer
 or use ArkWeb for the main surface.
 
-The client talks to the FD Runtime over HTTPS and a resumable WebSocket stream.
-The default endpoint is the production gateway, but debug builds can point at a
-staging runtime in `entry/src/main/ets/config/HarmonyConfig.ets`.
+The client talks to the FD Runtime over HTTPS and an authenticated, resumable
+SSE turn stream. An optional WebSocket replay stream is enabled only when the
+gateway advertises that capability. The default endpoint is the production
+gateway, but debug builds can point at a staging runtime in
+`entry/src/main/ets/config/HarmonyConfig.ets`.
 
 Build with DevEco Studio, or from a project where DevEco has generated the
 `hvigorw` wrapper:
