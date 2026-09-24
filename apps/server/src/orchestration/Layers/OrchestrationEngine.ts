@@ -231,6 +231,7 @@ const makeOrchestrationEngine = Effect.gen(function* () {
             threadId: envelope.command.threadId,
             messageId: envelope.command.message.messageId,
             text: envelope.command.message.text,
+            attachments: envelope.command.message.attachments,
             createdAt: envelope.command.createdAt,
           });
         }

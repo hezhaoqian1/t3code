@@ -642,42 +642,65 @@ describe("ProviderCommandReactor", () => {
     expect(JSON.stringify(Array.from(persisted))).toContain("hello reactor");
   });
 
-  it("allows FD Skill document attachments through the document analysis pipeline", async () => {
-    const harness = await createHarness();
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-fd-skill-document-attachment"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-fd-skill-document-attachment"),
-          role: "user",
-          text: "分析这个文件",
-          attachments: [
-            {
-              type: "document",
-              id: "document-attachment-1",
-              name: "sales.xlsx",
-              mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-              sizeBytes: 128,
-            },
-          ],
+  it.each([
+    { name: "ordinary chat", fields: {} },
+    { name: "FD Skill", fields: { fdSkillVersionId: 10004 } },
+    { name: "local Skill", fields: { nativeSkillNames: ["fd-acceptance"] } },
+  ])(
+    "preserves $name attachments in history and sends them to the provider",
+    async ({ fields }) => {
+      const harness = await createHarness();
+      const attachments = [
+        {
+          type: "document" as const,
+          id: "document-attachment-1",
+          name: "sales.xlsx",
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          sizeBytes: 128,
         },
-        fdSkillVersionId: 10004,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "approval-required",
-        createdAt: "2026-01-01T00:00:00.000Z",
-      }),
-    );
+        {
+          type: "image" as const,
+          id: "image-attachment-1",
+          name: "chart.png",
+          mimeType: "image/png",
+          sizeBytes: 64,
+        },
+      ];
 
-    await waitFor(() => harness.startSession.mock.calls.length === 1);
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
-      fdSkillVersionId: 10004,
-      input: "分析这个文件",
-    });
-  });
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-fd-skill-document-attachment"),
+          threadId: ThreadId.make("thread-1"),
+          ...fields,
+          message: {
+            messageId: asMessageId("user-message-fd-skill-document-attachment"),
+            role: "user",
+            text: "分析这个文件",
+            attachments,
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        }),
+      );
+
+      await harness.drain();
+      expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+        ...fields,
+        input: "分析这个文件",
+        attachments,
+      });
+      const thread = (await harness.readModel()).threads[0];
+      expect(thread?.messages[0]?.attachments).toEqual(attachments);
+      if ("fdSkillVersionId" in fields) {
+        const overlay = await harness.runEffect(
+          harness.enterpriseRuntime.getSnapshot(ThreadId.make("thread-1")),
+        );
+        expect(overlay.messages[0]?.attachments).toEqual(attachments);
+      }
+    },
+  );
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>
     Effect.gen(function* () {

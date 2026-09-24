@@ -4811,13 +4811,6 @@ function ChatViewContent(props: ChatViewProps) {
     }
     const threadIdForSend = activeThread.id;
     const fdSkillVersionId = selectedFdSkillVersionId(threadIdForSend);
-    if (
-      fdSkillVersionId !== undefined &&
-      (composerImages.length > 0 || sendContextDocuments.length > 0)
-    ) {
-      setThreadError(threadIdForSend, "FD Skill 暂不支持本地文件附件，请移除文件后再发送。");
-      return;
-    }
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath

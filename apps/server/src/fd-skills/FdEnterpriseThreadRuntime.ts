@@ -57,6 +57,7 @@ export interface FdEnterpriseTurnInput {
   readonly threadId: ThreadId;
   readonly messageId: MessageId;
   readonly text: string;
+  readonly attachments?: OrchestrationMessage["attachments"];
   readonly createdAt: string;
 }
 
@@ -194,6 +195,9 @@ const make = Effect.gen(function* () {
       id: event.payload.messageId,
       role: event.payload.role,
       text: event.payload.text,
+      ...(event.payload.attachments !== undefined
+        ? { attachments: event.payload.attachments }
+        : {}),
       turnId: event.payload.turnId,
       streaming: event.payload.streaming,
       createdAt: event.payload.createdAt,
@@ -215,6 +219,7 @@ const make = Effect.gen(function* () {
       streaming: next.streaming,
       turnId: next.turnId,
       updatedAt: next.updatedAt,
+      ...(next.attachments !== undefined ? { attachments: next.attachments } : {}),
     };
   };
 
@@ -235,6 +240,7 @@ const make = Effect.gen(function* () {
     messageId: MessageId;
     role: "user" | "assistant";
     text: string;
+    attachments?: OrchestrationMessage["attachments"];
     turnId: ProviderRuntimeEvent["turnId"] | null;
     streaming: boolean;
     createdAt: string;
@@ -248,6 +254,7 @@ const make = Effect.gen(function* () {
           messageId: input.messageId,
           role: input.role,
           text: input.text,
+          ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
           turnId: input.turnId ?? null,
           streaming: input.streaming,
           createdAt: input.createdAt,
@@ -368,6 +375,7 @@ const make = Effect.gen(function* () {
         id: input.messageId,
         role: "user",
         text: input.text,
+        ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
         turnId: null,
         streaming: false,
         createdAt: input.createdAt,
@@ -379,6 +387,7 @@ const make = Effect.gen(function* () {
         messageId: input.messageId,
         role: "user",
         text: input.text,
+        ...(input.attachments !== undefined ? { attachments: input.attachments } : {}),
         turnId: null,
         streaming: false,
         createdAt: input.createdAt,

@@ -329,7 +329,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
         role: "user",
         text: "sensitive enterprise prompt",
       });
-      expect("attachments" in (enterpriseEvents[0]?.payload ?? {})).toBe(false);
+      expect(enterpriseEvents[0]?.payload).toMatchObject({ attachments: [] });
       expect(enterpriseEvents[1]?.type).toBe("thread.turn-start-requested");
       if (enterpriseEvents[1]?.type === "thread.turn-start-requested") {
         expect(enterpriseEvents[1].payload.fdSkillVersionId).toBe(10004);

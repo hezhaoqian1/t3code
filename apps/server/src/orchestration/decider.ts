@@ -938,9 +938,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           messageId: command.message.messageId,
           role: "user",
           text: command.message.text,
-          ...(command.fdSkillVersionId === undefined
-            ? { attachments: command.message.attachments }
-            : {}),
+          attachments: command.message.attachments,
           turnId: null,
           streaming: false,
           createdAt: command.createdAt,
