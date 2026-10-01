@@ -1,5 +1,5 @@
 import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
+import { ArrowUpIcon, ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -162,10 +162,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             isEnvironmentUnavailable ||
             !hasSendableContent
           }
-          aria-label="排队发送"
-          title="当前任务完成后发送"
+          aria-label="加入排队"
+          title="加入排队，当前任务结束后发送"
         >
-          ↑
+          <ArrowUpIcon className="size-4" aria-hidden />
         </button>
       </div>
     );

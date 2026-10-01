@@ -3165,7 +3165,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             ? "请先在设置中启用模型服务"
                             : phase === "disconnected"
                               ? "继续提出修改，或添加图片"
-                              : "输入任务，@ 引用文件，$ 使用 Skill，/ 使用命令"
+                              : phase === "running"
+                                ? "AI 正在工作，可继续输入，回车加入排队"
+                                : "输入任务，@ 引用文件，$ 使用 Skill，/ 使用命令"
                 }
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
               />

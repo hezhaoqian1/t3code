@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import type { OrchestrationThreadActivity } from "@t3tools/contracts";
 
+import type { SessionPhase } from "./types";
+
 /** Attachment preparation owns the session before the provider emits turn.started. */
 export function hasPendingAttachmentPreparation(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -18,6 +20,35 @@ export function hasPendingAttachmentPreparation(
       pending.add(taskId);
   }
   return pending.size > 0;
+}
+
+/**
+ * What "send now" does for a queued message. While a turn runs it steers that
+ * turn: the provider folds the message in at its next step instead of waiting
+ * for the turn to end. Otherwise it goes out as the next turn. A non-null
+ * `blockedReason` explains why neither can happen yet.
+ */
+export function resolveQueuedSendNow(input: {
+  phase: SessionPhase;
+  isPreparingAttachments: boolean;
+  hasPendingRequest: boolean;
+  isUnavailable: boolean;
+  isStartingTurn: boolean;
+  queueSending: boolean;
+}): { action: "steer" | "send"; blockedReason: string | null } {
+  const action = input.phase === "running" ? "steer" : "send";
+  if (input.queueSending) return { action, blockedReason: "正在发送上一条排队消息" };
+  if (input.isUnavailable) return { action, blockedReason: "正在连接本地服务" };
+  // Approvals and questions pause the agent. A steer landing on top of them
+  // answers nothing, so the user resolves them first.
+  if (input.hasPendingRequest) return { action, blockedReason: "请先处理当前的授权或问题" };
+  // The provider owns the session while it prepares attachments and rejects
+  // a second send until that finishes.
+  if (input.isPreparingAttachments) return { action, blockedReason: "附件处理中，完成后可引导" };
+  if (action === "send" && input.isStartingTurn) {
+    return { action, blockedReason: "任务正在启动" };
+  }
+  return { action, blockedReason: null };
 }
 
 export interface QueuedMessage {
