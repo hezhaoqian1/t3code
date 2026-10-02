@@ -33,7 +33,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const DESKTOP_APP_ID = "com.fdsure.enterprise-ai";
-export const BUNDLED_CODEX_VERSION = "0.147.0";
+export const BUNDLED_CODEX_VERSION = "0.159.3";
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);

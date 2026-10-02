@@ -16,7 +16,8 @@ const ApiEnvelopeSchema = Schema.Struct({
 const RuntimeToolSchema = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
-  input_schema: Schema.Record(Schema.String, Schema.Unknown),
+  // JSON Schema for the tool arguments; Codex takes it as a JSON value.
+  input_schema: Schema.Record(Schema.String, Schema.Json),
 });
 
 const RuntimeReferenceSchema = Schema.Struct({

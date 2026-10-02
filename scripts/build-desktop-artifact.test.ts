@@ -318,14 +318,14 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it.effect("pins one native Codex runtime for each desktop artifact", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;
-      assert.equal(BUNDLED_CODEX_VERSION, "0.147.0");
+      assert.equal(BUNDLED_CODEX_VERSION, "0.159.3");
       assert.deepStrictEqual(resolveCodexRuntimePackage("mac", "arm64"), {
-        packageSpec: "0.147.0-darwin-arm64",
+        packageSpec: "0.159.3-darwin-arm64",
         vendorDirectory: "aarch64-apple-darwin",
         executableName: "codex",
       });
       assert.deepStrictEqual(resolveCodexRuntimePackage("win", "x64"), {
-        packageSpec: "0.147.0-win32-x64",
+        packageSpec: "0.159.3-win32-x64",
         vendorDirectory: "x86_64-pc-windows-msvc",
         executableName: "codex.exe",
       });
