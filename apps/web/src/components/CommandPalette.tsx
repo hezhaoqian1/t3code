@@ -66,7 +66,7 @@ import { refreshProviderSkillsCommand } from "../state/providerSkills";
 import { threadEnvironment } from "../state/threads";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { usePrimaryEnvironment, usePrimaryEnvironmentId } from "../state/environments";
-import { usePrimaryProjects, usePrimaryThreadShells } from "../state/entities";
+import { usePrimaryProjects, usePrimaryThreadShells, useThreadShell } from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -598,6 +598,14 @@ function OpenCommandPaletteDialog(props: {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewTask, handleNewThread } =
     useHandleNewThread();
+  // The open task's shell is always loaded; its detail may not be yet.
+  const routeThreadTarget = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params, primaryEnvironmentId),
+  });
+  const activeThreadShell = useThreadShell(
+    routeThreadTarget?.kind === "server" ? routeThreadTarget.threadRef : null,
+  );
   const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, {
     reportFailure: false,
   });
@@ -1329,12 +1337,14 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThread) {
-    const thread = activeThread;
+  if (activeThreadShell) {
+    const thread = activeThreadShell;
     actionItems.push({
       kind: "action",
       value: "action:restart-agent-session",
+      // Typing what the menu shows must find it, so the title is a term too.
       searchTerms: [
+        "重启 AI 会话（加载新的 Skill 和连接器）",
         "restart",
         "reload",
         "session",
@@ -1383,6 +1393,8 @@ function OpenCommandPaletteDialog(props: {
       kind: "action",
       value: "action:reload-skills",
       searchTerms: [
+        "重新加载 Skill 和连接器",
+        "重启 AI 会话",
         "restart",
         "reload",
         "skills",

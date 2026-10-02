@@ -1,4 +1,5 @@
 import * as Context from "effect/Context";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
@@ -86,6 +87,35 @@ const requestDesktopShutdownAndWait = Effect.fn("desktop.lifecycle.requestShutdo
   },
 );
 
+/** How long a quit may stall after shutdown before the windows are closed for it. */
+export const QUIT_STALL_CLOSE_WINDOWS_AFTER = Duration.seconds(5);
+/** How long closing the windows may take before the process exits outright. */
+export const QUIT_STALL_EXIT_AFTER = Duration.seconds(3);
+
+/**
+ * Quits once shutdown has finished. The backend is already stopped at this
+ * point, so a quit that stalls (a window that never closes) would leave a
+ * dead app on screen: after a grace period the windows are closed directly,
+ * and if even that does not end the process, it exits.
+ */
+export const quitAfterShutdown = (closeWindows: () => void) =>
+  Effect.gen(function* () {
+    const electronApp = yield* ElectronApp.ElectronApp;
+    yield* electronApp.quit;
+    yield* Effect.sleep(QUIT_STALL_CLOSE_WINDOWS_AFTER);
+    yield* logLifecycleInfo("quit stalled; closing windows");
+    yield* Effect.sync(closeWindows);
+    yield* Effect.sleep(QUIT_STALL_EXIT_AFTER);
+    yield* logLifecycleInfo("quit stalled; exiting");
+    yield* electronApp.exit(0);
+  });
+
+const closeAllWindows = () => {
+  for (const window of Electron.BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) window.close();
+  }
+};
+
 function handleBeforeQuit(
   event: Electron.Event,
   runEffect: <A, E>(effect: Effect.Effect<A, E, DesktopLifecycleRuntimeServices>) => Promise<A>,
@@ -114,10 +144,9 @@ function handleBeforeQuit(
   ).finally(() => {
     markQuitAllowed();
     void runEffect(
-      Effect.gen(function* () {
-        const electronApp = yield* ElectronApp.ElectronApp;
-        yield* electronApp.quit;
-      }).pipe(Effect.withSpan("desktop.lifecycle.quitAfterShutdown")),
+      quitAfterShutdown(closeAllWindows).pipe(
+        Effect.withSpan("desktop.lifecycle.quitAfterShutdown"),
+      ),
     );
   });
 }

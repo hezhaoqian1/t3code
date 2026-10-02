@@ -1,8 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 
 import type * as Electron from "electron";
 import { beforeEach, vi } from "vite-plus/test";
@@ -181,4 +183,37 @@ describe("DesktopLifecycle", () => {
       ).pipe(Effect.provide(layer));
     });
   }
+
+  it.effect("closes the windows and then exits when a quit stalls after shutdown", () => {
+    const calls: string[] = [];
+    const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+    const layer = makeTestLayer({
+      platform: "win32",
+      appListeners,
+      quit: () => calls.push("quit"),
+    });
+    return Effect.gen(function* () {
+      const exitCodes: number[] = [];
+      const electronApp = yield* ElectronApp.ElectronApp;
+      const fiber = yield* DesktopLifecycle.quitAfterShutdown(() =>
+        calls.push("close-windows"),
+      ).pipe(
+        Effect.provideService(ElectronApp.ElectronApp, {
+          ...electronApp,
+          exit: (code) => Effect.sync(() => exitCodes.push(code)),
+        }),
+        Effect.forkChild,
+      );
+      yield* Effect.yieldNow;
+      assert.deepStrictEqual(calls, ["quit"]);
+
+      yield* TestClock.adjust(DesktopLifecycle.QUIT_STALL_CLOSE_WINDOWS_AFTER);
+      assert.deepStrictEqual(calls, ["quit", "close-windows"]);
+      assert.deepStrictEqual(exitCodes, []);
+
+      yield* TestClock.adjust(DesktopLifecycle.QUIT_STALL_EXIT_AFTER);
+      assert.deepStrictEqual(exitCodes, [0]);
+      yield* Fiber.join(fiber);
+    }).pipe(Effect.provide(layer));
+  });
 });
