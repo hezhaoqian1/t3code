@@ -9,6 +9,7 @@ export const makeProviderRegistryMock = (
 ): ProviderRegistryShape => ({
   getProviders: Effect.succeed(providers),
   streamChanges: Stream.empty,
+  refreshSkills: () => Effect.void,
 });
 
 export const makeProviderRegistryLayer = (providers: ReadonlyArray<ServerProvider> = []) =>

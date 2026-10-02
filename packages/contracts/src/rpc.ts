@@ -131,6 +131,7 @@ import {
   ServerProcessDiagnosticsResult,
   ServerProcessResourceHistoryInput,
   ServerProcessResourceHistoryResult,
+  ServerRefreshProviderSkillsInput,
   ServerSignalProcessInput,
   ServerSignalProcessResult,
   ServerUpsertKeybindingInput,
@@ -241,6 +242,7 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
   serverSetDesktopMessageFeedback: "server.setDesktopMessageFeedback",
+  serverRefreshProviderSkills: "server.refreshProviderSkills",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -367,6 +369,12 @@ export const WsServerSetDesktopMessageFeedbackRpc = Rpc.make(
     error: Schema.Union([EnvironmentAuthorizationError, DesktopMessageFeedbackError]),
   },
 );
+
+export const WsServerRefreshProviderSkillsRpc = Rpc.make(WS_METHODS.serverRefreshProviderSkills, {
+  payload: ServerRefreshProviderSkillsInput,
+  success: Schema.Struct({}),
+  error: EnvironmentAuthorizationError,
+});
 
 export const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
@@ -790,6 +798,7 @@ export const LocalWsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsServerSetDesktopMessageFeedbackRpc,
+  WsServerRefreshProviderSkillsRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,

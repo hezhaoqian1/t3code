@@ -33,6 +33,7 @@ import {
   LinkIcon,
   MessageSquareIcon,
   PaletteIcon,
+  RotateCcwIcon,
   SettingsIcon,
   SquarePenIcon,
   TextSearchIcon,
@@ -61,6 +62,8 @@ import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
+import { refreshProviderSkillsCommand } from "../state/providerSkills";
+import { threadEnvironment } from "../state/threads";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { usePrimaryEnvironment, usePrimaryEnvironmentId } from "../state/environments";
 import { usePrimaryProjects, usePrimaryThreadShells } from "../state/entities";
@@ -595,6 +598,12 @@ function OpenCommandPaletteDialog(props: {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewTask, handleNewThread } =
     useHandleNewThread();
+  const stopThreadSession = useAtomCommand(threadEnvironment.stopSession, {
+    reportFailure: false,
+  });
+  const refreshProviderSkills = useAtomCommand(refreshProviderSkillsCommand, {
+    reportFailure: false,
+  });
   const projects = usePrimaryProjects();
   const primaryServerWelcome = useAtomValue(primaryServerWelcomeAtom);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
@@ -1316,6 +1325,54 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "chat.new",
       run: async () => {
         await handleNewTask();
+      },
+    });
+  }
+
+  if (activeThread) {
+    const thread = activeThread;
+    actionItems.push({
+      kind: "action",
+      value: "action:restart-agent-session",
+      searchTerms: [
+        "restart",
+        "reload",
+        "session",
+        "skills",
+        "connector",
+        "mcp",
+        "重启",
+        "会话",
+        "刷新",
+        "技能",
+        "连接器",
+      ],
+      title: "重启 AI 会话（加载新的 Skill 和连接器）",
+      icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
+      // Stopping the agent process keeps the conversation: the next message
+      // starts a fresh process that resumes it with the current skills,
+      // connectors and MCP servers. The rescan updates the composer's menus.
+      // Failures throw into executeItem's error toast.
+      run: async () => {
+        const { environmentId } = thread;
+        const status = thread.session?.status;
+        if (status === "running" || status === "starting") {
+          throw new Error("任务正在运行，请先停止或等待完成后再重启会话。");
+        }
+        if (thread.session && status !== "stopped") {
+          const stopped = await stopThreadSession({
+            environmentId,
+            input: { threadId: thread.id },
+          });
+          if (stopped._tag === "Failure") throw squashAtomCommandFailure(stopped);
+        }
+        const refreshed = await refreshProviderSkills({ environmentId, input: {} });
+        if (refreshed._tag === "Failure") throw squashAtomCommandFailure(refreshed);
+        toastManager.add({
+          type: "success",
+          title: "AI 会话已重启",
+          description: "Skill 列表已刷新。发送下一条消息时会用新的配置继续这个任务，对话内容不变。",
+        });
       },
     });
   }

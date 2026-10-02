@@ -466,11 +466,33 @@ export const ProviderRegistryLive = Layer.effect(
       () => syncLiveSourcesAndContinue,
     ).pipe(Effect.forkScoped);
 
+    const refreshSkills = Effect.fn("ProviderRegistry.refreshSkills")(function* (
+      instanceId?: ProviderInstanceId,
+    ) {
+      const instances = yield* instanceRegistry.listInstances;
+      yield* Effect.forEach(
+        instances.filter(
+          (instance) =>
+            instance.snapshot.refresh !== undefined &&
+            (instanceId === undefined || instance.instanceId === instanceId),
+        ),
+        (instance) =>
+          Effect.gen(function* () {
+            yield* instance.snapshot.refresh!;
+            const source = buildSnapshotSource(instance);
+            const provider = yield* source.getSnapshot;
+            yield* correlateSnapshotWithSource(source, provider).pipe(Effect.flatMap(syncProvider));
+          }).pipe(Effect.ignoreCause({ log: true })),
+        { concurrency: "unbounded", discard: true },
+      );
+    });
+
     return {
       getProviders: Ref.get(providersRef),
       get streamChanges() {
         return Stream.fromPubSub(changesPubSub);
       },
+      refreshSkills,
     } satisfies ProviderRegistryShape;
   }),
 );

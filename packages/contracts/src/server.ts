@@ -326,6 +326,16 @@ export const ServerProcessResourceHistoryResult = Schema.Struct({
 });
 export type ServerProcessResourceHistoryResult = typeof ServerProcessResourceHistoryResult.Type;
 
+/**
+ * Rescans the skill catalogs a provider offers (local skills on disk and,
+ * for FD, the account's authorized FD Skills) and republishes its snapshot.
+ * Without an instance id every provider that can rescan does.
+ */
+export const ServerRefreshProviderSkillsInput = Schema.Struct({
+  instanceId: Schema.optional(ProviderInstanceId),
+});
+export type ServerRefreshProviderSkillsInput = typeof ServerRefreshProviderSkillsInput.Type;
+
 export const ServerSignalProcessInput = Schema.Struct({
   pid: PositiveInt,
   startTimeMs: NonNegativeInt,

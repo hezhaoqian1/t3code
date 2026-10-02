@@ -1,8 +1,16 @@
-import { Building2Icon, CheckIcon, ChevronDownIcon, ShieldCheckIcon, XIcon } from "lucide-react";
+import {
+  Building2Icon,
+  CheckIcon,
+  ChevronDownIcon,
+  RefreshCwIcon,
+  ShieldCheckIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { ServerProvider, ServerProviderSkill } from "@t3tools/contracts";
+import type { EnvironmentId, ServerProvider, ServerProviderSkill } from "@t3tools/contracts";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
 import { useFdSkillSelectionStore } from "../../fdSkillSelectionStore";
 import {
@@ -10,6 +18,9 @@ import {
   excludeEnterpriseComposerDraftFromPersistence,
 } from "../../composerDraftStore";
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
+import { refreshProviderSkillsCommand } from "../../state/providerSkills";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { toastManager } from "../ui/toast";
 import { cn } from "~/lib/utils";
 
 export type BusinessCapabilityCatalogState = "loading" | "ready" | "error";
@@ -102,9 +113,29 @@ export function FdSkillPicker(props: {
   skills: ReadonlyArray<ServerProviderSkill>;
   providerCatalogState?: BusinessCapabilityCatalogState;
   openRequest?: number;
+  /** Environment whose catalog the refresh button rescans; omit to hide it. */
+  environmentId?: EnvironmentId | null;
 }) {
   const providerCatalogState = props.providerCatalogState ?? "ready";
   const [open, setOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshProviderSkills = useAtomCommand(refreshProviderSkillsCommand, {
+    reportFailure: false,
+  });
+  const refreshCatalog = async () => {
+    if (!props.environmentId || refreshing) return;
+    setRefreshing(true);
+    const result = await refreshProviderSkills({ environmentId: props.environmentId, input: {} });
+    setRefreshing(false);
+    if (result._tag === "Failure") {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Skill 列表刷新失败",
+        description: error instanceof Error ? error.message : "请稍后重试。",
+      });
+    }
+  };
   const [revokedNotice, setRevokedNotice] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -243,7 +274,23 @@ export function FdSkillPicker(props: {
                     已授权 {fdSkills.length} 项
                   </div>
                 </div>
-                <ShieldCheckIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                {props.environmentId ? (
+                  <button
+                    type="button"
+                    aria-label="刷新 Skill 列表"
+                    title="刷新 Skill 列表（新授权的 Skill 无需重启应用）"
+                    disabled={refreshing}
+                    onClick={() => void refreshCatalog()}
+                    className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                  >
+                    <RefreshCwIcon
+                      className={cn("size-3.5", refreshing && "animate-spin")}
+                      aria-hidden="true"
+                    />
+                  </button>
+                ) : (
+                  <ShieldCheckIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                )}
               </div>
               {revokedNotice ? (
                 <p

@@ -3273,6 +3273,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
                 <FdSkillPicker
                   threadId={activeThreadId}
+                  environmentId={environmentId}
                   skills={businessCapabilitySkills}
                   providerCatalogState={providerSkillCatalogState}
                   openRequest={fdSkillPickerOpenRequest}

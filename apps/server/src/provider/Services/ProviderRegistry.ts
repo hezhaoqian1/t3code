@@ -6,7 +6,7 @@
  *
  * @module ProviderRegistry
  */
-import type { ServerProvider } from "@t3tools/contracts";
+import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
@@ -24,6 +24,12 @@ export interface ProviderRegistryShape {
    * change. The array contains the full current state.
    */
   readonly streamChanges: Stream.Stream<ReadonlyArray<ServerProvider>>;
+
+  /**
+   * Rescans skills for one instance, or every instance that can rescan, and
+   * publishes the updated snapshots before resolving.
+   */
+  readonly refreshSkills: (instanceId?: ProviderInstanceId) => Effect.Effect<void>;
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(

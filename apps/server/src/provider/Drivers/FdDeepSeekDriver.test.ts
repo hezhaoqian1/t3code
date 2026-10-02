@@ -479,8 +479,8 @@ describe("FdDeepSeekDriver", () => {
         expect.arrayContaining([
           expect.objectContaining({
             slug: FD_RESPONSES_MODEL,
-            name: "DeepSeek V4 Flash",
-            shortName: "V4 Flash",
+            name: "DeepSeek V4.1 Flash",
+            shortName: "Flash",
             isDefault: true,
             isCustom: false,
           }),
@@ -497,7 +497,7 @@ describe("FdDeepSeekDriver", () => {
             shortName: "Qwen Flash",
             isDefault: false,
             isCustom: false,
-            capabilities: expect.objectContaining({ supportsVision: false }),
+            capabilities: expect.objectContaining({ supportsVision: true }),
           }),
           expect.objectContaining({
             slug: "glm-5.2",
@@ -554,7 +554,7 @@ describe("FdDeepSeekDriver", () => {
                     },
                   ],
                   model_capabilities: {
-                    "deepseek-v4-flash": {
+                    [FD_RESPONSES_MODEL]: {
                       fd_skills: true,
                       fd_skill_protocol: "enterprise-agent-v1",
                     },
@@ -624,7 +624,7 @@ describe("FdDeepSeekDriver", () => {
                   },
                 ],
                 model_capabilities: {
-                  "deepseek-v4-flash": {
+                  [FD_RESPONSES_MODEL]: {
                     fd_skills: true,
                     fd_skill_protocol: "enterprise-agent-v1",
                   },
@@ -709,7 +709,7 @@ describe("FdDeepSeekDriver", () => {
                 data: {
                   skills: [],
                   model_capabilities: {
-                    "deepseek-v4-flash": {
+                    [FD_RESPONSES_MODEL]: {
                       fd_skills: true,
                       fd_skill_protocol: "enterprise-agent-v1",
                     },
@@ -809,7 +809,7 @@ describe("FdDeepSeekDriver", () => {
                     },
                   ],
                   model_capabilities: {
-                    "deepseek-v4-flash": {
+                    [FD_RESPONSES_MODEL]: {
                       fd_skills: true,
                       fd_skill_protocol: "enterprise-agent-v1",
                     },
@@ -846,6 +846,67 @@ describe("FdDeepSeekDriver", () => {
     ),
   );
 
+  it.effect("rescans FD Skills on request without a credential change", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const store = yield* makeStore();
+        yield* store.apply({ version: 1, type: "set", credentials });
+        let granted = false;
+        const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(
+          async () =>
+            new Response(
+              JSON.stringify({
+                data: {
+                  skills: granted
+                    ? [
+                        {
+                          id: 4,
+                          version_id: 10004,
+                          name: "company-database-query",
+                          display_name: "管理部数据查询",
+                          description: "查询管理部授权数据",
+                        },
+                      ]
+                    : [],
+                  model_capabilities: {
+                    [FD_RESPONSES_MODEL]: {
+                      fd_skills: true,
+                      fd_skill_protocol: "enterprise-agent-v1",
+                    },
+                  },
+                },
+              }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+        );
+        const instance = yield* FdDeepSeekDriver.create({
+          instanceId: FD_DEEPSEEK_INSTANCE_ID,
+          displayName: undefined,
+          environment: [],
+          enabled: true,
+          config: {},
+        }).pipe(
+          Effect.provideService(FdRuntimeCredentialStore, store.service),
+          Effect.provideService(WorkspaceFileSystem.WorkspaceFileSystem, workspaceFileSystem),
+          Effect.provideService(WorkspaceEntries.WorkspaceEntries, workspaceEntries),
+          Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+          Effect.provideService(VcsProcess.VcsProcess, vcsProcess),
+          Effect.provide(attachmentLayer),
+        );
+
+        const managed = expect.objectContaining({ path: "fd-managed://10004" });
+        expect((yield* instance.snapshot.getSnapshot).skills).not.toContainEqual(managed);
+
+        // A grant made after startup shows up once the catalog is rescanned.
+        granted = true;
+        expect(instance.snapshot.refresh).toBeDefined();
+        yield* instance.snapshot.refresh!;
+        expect((yield* instance.snapshot.getSnapshot).skills).toContainEqual(managed);
+        fetch.mockRestore();
+      }),
+    ),
+  );
+
   it.effect(
     "hides managed FD Skills when the exact model capability is disabled or incompatible",
     () =>
@@ -869,7 +930,7 @@ describe("FdDeepSeekDriver", () => {
                         description: "查询管理部授权数据",
                       },
                     ],
-                    model_capabilities: { "deepseek-v4-flash": capability },
+                    model_capabilities: { [FD_RESPONSES_MODEL]: capability },
                   },
                 }),
                 { status: 200, headers: { "Content-Type": "application/json" } },

@@ -283,8 +283,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       const adapter = yield* makeFdDeepSeekAdapter({
         instanceId,
         isSupportedModel: (model) =>
-          isFdResponsesModelAdvertised(model) ||
-          authorizedDynamicModels.has(model),
+          isFdResponsesModelAdvertised(model) || authorizedDynamicModels.has(model),
         kernel,
         ordinaryAdapter,
         ordinarySessionInput: (input) =>
@@ -360,9 +359,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
           ...FD_RESPONSES_MODEL_CATALOG,
           ...dynamicSlugs
             .filter(
-              (slug) =>
-                shouldAdvertiseFdModelSlug(slug) &&
-                !isFdResponsesModelAdvertised(slug),
+              (slug) => shouldAdvertiseFdModelSlug(slug) && !isFdResponsesModelAdvertised(slug),
             )
             .map(modelConfigForSlug),
         ];
@@ -434,6 +431,15 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       const getSnapshot = credentials.current.pipe(Effect.flatMap(buildSnapshot));
       const snapshot = {
         getSnapshot,
+        // Local skills are scanned from disk and FD Skills come from the
+        // account's catalog; both only change when the user adds or is
+        // granted one, so they are rescanned on request instead of polled.
+        refresh: Effect.gen(function* () {
+          const credentialState = yield* credentials.current;
+          yield* Effect.promise(() =>
+            Promise.all([userSkillCatalog.refresh(), refreshFdSkillCatalog(credentialState)]),
+          );
+        }),
         streamChanges: credentials.changes.pipe(
           Stream.mapEffect((credentialState) =>
             Effect.gen(function* () {

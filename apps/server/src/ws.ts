@@ -1653,6 +1653,12 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
+        [WS_METHODS.serverRefreshProviderSkills]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.serverRefreshProviderSkills,
+            providerRegistry.refreshSkills(input.instanceId).pipe(Effect.as({})),
+            { "rpc.aggregate": "server" },
+          ),
         [WS_METHODS.serverGetUsageSummary]: (input) =>
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
             "rpc.aggregate": "server",
