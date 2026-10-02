@@ -1,6 +1,10 @@
 import * as Schema from "effect/Schema";
 
-import { ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+} from "./orchestration.ts";
 
 const ASSET_PATH_MAX_LENGTH = 1024;
 
@@ -28,6 +32,63 @@ export const AssetCreateUrlResult = Schema.Struct({
   expiresAt: Schema.Number,
 });
 export type AssetCreateUrlResult = typeof AssetCreateUrlResult.Type;
+
+export const ATTACHMENT_UPLOAD_URL_TTL_MS = 10 * 60_000;
+
+const ImageAttachmentCreateUploadUrlInput = Schema.Struct({
+  type: Schema.Literal("image"),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100), Schema.isPattern(/^image\//i)),
+  sizeBytes: NonNegativeInt.check(
+    Schema.isGreaterThanOrEqualTo(1),
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES),
+  ),
+});
+
+const DocumentAttachmentCreateUploadUrlInput = Schema.Struct({
+  type: Schema.Literal("document"),
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(255)),
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(150)),
+  sizeBytes: NonNegativeInt.check(
+    Schema.isGreaterThanOrEqualTo(1),
+    Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES),
+  ),
+});
+
+/**
+ * Asks the local server for a signed, short-lived URL to upload one composer
+ * attachment before the message is sent. The turn then refers to the upload
+ * by id instead of carrying the bytes over the WebSocket.
+ */
+export const AttachmentCreateUploadUrlInput = Schema.Union([
+  ImageAttachmentCreateUploadUrlInput,
+  DocumentAttachmentCreateUploadUrlInput,
+]);
+export type AttachmentCreateUploadUrlInput = typeof AttachmentCreateUploadUrlInput.Type;
+
+export const AttachmentCreateUploadUrlResult = Schema.Struct({
+  attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+  relativeUrl: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)),
+  expiresAt: Schema.Number,
+});
+export type AttachmentCreateUploadUrlResult = typeof AttachmentCreateUploadUrlResult.Type;
+
+/** Discards an upload that was never sent (the attachment was removed). */
+export const AttachmentDeleteInput = Schema.Struct({
+  attachmentId: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
+});
+export type AttachmentDeleteInput = typeof AttachmentDeleteInput.Type;
+
+export class AttachmentUploadSigningKeyError extends Schema.TaggedErrorClass<AttachmentUploadSigningKeyError>()(
+  "AttachmentUploadSigningKeyError",
+  {
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Failed to load the attachment upload signing key.";
+  }
+}
 
 export class AssetWorkspaceContextNotFoundError extends Schema.TaggedErrorClass<AssetWorkspaceContextNotFoundError>()(
   "AssetWorkspaceContextNotFoundError",

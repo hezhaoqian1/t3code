@@ -11,7 +11,13 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 
-import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
+import {
+  createAttachmentId,
+  parseThreadSegmentFromAttachmentId,
+  PENDING_ATTACHMENT_THREAD_SEGMENT,
+  planAttachmentClaim,
+  resolveAttachmentPath,
+} from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -43,6 +49,62 @@ export const canonicalizeClientCommandTimestamps = (
     },
   };
 };
+
+const removeClaimedAttachmentPaths = Effect.fn("Normalizer.removeClaimedAttachmentPaths")(
+  function* (attachmentPaths: ReadonlyArray<string>) {
+    if (attachmentPaths.length === 0) {
+      return;
+    }
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* Effect.forEach(
+      attachmentPaths,
+      (attachmentPath) =>
+        fileSystem.remove(attachmentPath, { force: true }).pipe(
+          Effect.tapError((cause) =>
+            Effect.logWarning("Failed to remove an unclaimed attachment copy.", {
+              attachmentPath,
+              cause,
+            }),
+          ),
+          Effect.orElseSucceed(() => undefined),
+        ),
+      { concurrency: 1 },
+    );
+  },
+);
+
+/**
+ * A turn start whose dispatch failed leaves the thread copies of its uploaded
+ * attachments behind. The pending uploads are still there, so a retry claims
+ * them again; this removes the orphaned copies.
+ */
+export const cleanupFailedUploadedAttachments = Effect.fn(
+  "Normalizer.cleanupFailedUploadedAttachments",
+)(function* (command: ClientOrchestrationCommand, normalizedCommand: OrchestrationCommand) {
+  if (command.type !== "thread.turn.start" || normalizedCommand.type !== "thread.turn.start") {
+    return;
+  }
+  const serverConfig = yield* ServerConfig;
+  const claimedPaths: string[] = [];
+  for (const [index, attachment] of normalizedCommand.message.attachments.entries()) {
+    const original = command.message.attachments[index];
+    if (
+      !original ||
+      "dataUrl" in original ||
+      parseThreadSegmentFromAttachmentId(original.id) !== PENDING_ATTACHMENT_THREAD_SEGMENT
+    ) {
+      continue;
+    }
+    const claimedPath = resolveAttachmentPath({
+      attachmentsDir: serverConfig.attachmentsDir,
+      attachment,
+    });
+    if (claimedPath) {
+      claimedPaths.push(claimedPath);
+    }
+  }
+  yield* removeClaimedAttachmentPaths(claimedPaths);
+});
 
 export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
   Effect.gen(function* () {
@@ -105,10 +167,76 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       return canonicalCommand as OrchestrationCommand;
     }
 
+    const claimedAttachmentPaths: string[] = [];
     const normalizedAttachments = yield* Effect.forEach(
       canonicalCommand.message.attachments,
       (attachment) =>
         Effect.gen(function* () {
+          if (!("dataUrl" in attachment)) {
+            // Uploaded ahead of the send: copy the pending upload under this
+            // thread's id. Only pending uploads can be claimed, so a turn can
+            // never point at another thread's attachment.
+            const claim = planAttachmentClaim({
+              attachmentsDir: serverConfig.attachmentsDir,
+              threadId: canonicalCommand.threadId,
+              attachmentId: attachment.id,
+            });
+            if (!claim.ok) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `附件“${attachment.name}”无法发送：${claim.reason}。`,
+              });
+            }
+            const info = yield* fileSystem.stat(claim.currentPath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationDispatchCommandError({
+                    message: `附件“${attachment.name}”无法发送：上传的文件不存在。`,
+                    cause,
+                  }),
+              ),
+            );
+            const maxBytes =
+              attachment.type === "image"
+                ? PROVIDER_SEND_TURN_MAX_IMAGE_BYTES
+                : PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES;
+            if (
+              Number(info.size) !== attachment.sizeBytes ||
+              attachment.sizeBytes <= 0 ||
+              attachment.sizeBytes > maxBytes
+            ) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `附件“${attachment.name}”无法发送：上传的文件大小不一致。`,
+              });
+            }
+            const normalizedAttachment = {
+              ...attachment,
+              id: claim.finalId,
+              mimeType: attachment.mimeType.toLowerCase(),
+            };
+            const expectedPath = resolveAttachmentPath({
+              attachmentsDir: serverConfig.attachmentsDir,
+              attachment: normalizedAttachment,
+            });
+            if (expectedPath !== claim.finalPath) {
+              return yield* new OrchestrationDispatchCommandError({
+                message: `附件“${attachment.name}”无法发送：文件类型与上传时不一致。`,
+              });
+            }
+            // Keep the pending copy until the turn succeeds, so a failed
+            // thread bootstrap can retry with a fresh thread id.
+            yield* fileSystem.copyFile(claim.currentPath, claim.finalPath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationDispatchCommandError({
+                    message: `附件“${attachment.name}”无法保存到当前任务。`,
+                    cause,
+                  }),
+              ),
+            );
+            claimedAttachmentPaths.push(claim.finalPath);
+            return normalizedAttachment;
+          }
+
           const parsed = parseBase64DataUrl(attachment.dataUrl);
           if (!parsed) {
             return yield* new OrchestrationDispatchCommandError({
@@ -177,7 +305,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           return persistedAttachment;
         }),
       { concurrency: 1 },
-    );
+    ).pipe(Effect.tapError(() => removeClaimedAttachmentPaths(claimedAttachmentPaths)));
 
     return {
       ...canonicalCommand,

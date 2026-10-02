@@ -14,7 +14,15 @@ import {
   FilesystemBrowseResult,
   FilesystemBrowseError,
 } from "./filesystem.ts";
-import { AssetAccessError, AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
+import {
+  AssetAccessError,
+  AssetCreateUrlInput,
+  AssetCreateUrlResult,
+  AttachmentCreateUploadUrlInput,
+  AttachmentCreateUploadUrlResult,
+  AttachmentDeleteInput,
+  AttachmentUploadSigningKeyError,
+} from "./assets.ts";
 import {
   GitActionProgressEvent,
   VcsSwitchRefInput,
@@ -243,6 +251,8 @@ export const WS_METHODS = {
   serverGetUsageSummary: "server.getUsageSummary",
   serverSetDesktopMessageFeedback: "server.setDesktopMessageFeedback",
   serverRefreshProviderSkills: "server.refreshProviderSkills",
+  attachmentsCreateUploadUrl: "attachments.createUploadUrl",
+  attachmentsDelete: "attachments.delete",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -369,6 +379,17 @@ export const WsServerSetDesktopMessageFeedbackRpc = Rpc.make(
     error: Schema.Union([EnvironmentAuthorizationError, DesktopMessageFeedbackError]),
   },
 );
+
+export const WsAttachmentsCreateUploadUrlRpc = Rpc.make(WS_METHODS.attachmentsCreateUploadUrl, {
+  payload: AttachmentCreateUploadUrlInput,
+  success: AttachmentCreateUploadUrlResult,
+  error: Schema.Union([AttachmentUploadSigningKeyError, EnvironmentAuthorizationError]),
+});
+
+export const WsAttachmentsDeleteRpc = Rpc.make(WS_METHODS.attachmentsDelete, {
+  payload: AttachmentDeleteInput,
+  error: EnvironmentAuthorizationError,
+});
 
 export const WsServerRefreshProviderSkillsRpc = Rpc.make(WS_METHODS.serverRefreshProviderSkills, {
   payload: ServerRefreshProviderSkillsInput,
@@ -799,6 +820,8 @@ export const LocalWsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerSetDesktopMessageFeedbackRpc,
   WsServerRefreshProviderSkillsRpc,
+  WsAttachmentsCreateUploadUrlRpc,
+  WsAttachmentsDeleteRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,

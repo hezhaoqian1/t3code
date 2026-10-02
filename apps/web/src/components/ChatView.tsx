@@ -280,6 +280,12 @@ import {
 } from "./chat/composerPromptHistory";
 import { isEditableFocused } from "../lib/editableFocus";
 import {
+  awaitAttachmentUploads,
+  getUploadedAttachments,
+  releaseAttachmentUploads,
+  type UploadableAttachment,
+} from "../lib/attachmentUploadQueue";
+import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
   DRAFT_HERO_TRANSITION_DURATION_MS,
   DRAFT_HERO_TRANSITION_EASING,
@@ -4868,22 +4874,37 @@ function ChatViewContent(props: ChatViewProps) {
           ? ATTACHMENT_ONLY_BOOTSTRAP_PROMPT
           : IMAGE_ONLY_BOOTSTRAP_PROMPT),
     );
-    const turnAttachmentsPromise = Promise.all([
-      ...composerImagesSnapshot.map(async (image) => ({
-        type: "image" as const,
-        name: image.name,
-        mimeType: image.mimeType,
-        sizeBytes: image.sizeBytes,
-        dataUrl: await readFileAsDataUrl(image.file),
-      })),
-      ...composerDocumentsSnapshot.map(async (document) => ({
-        type: "document" as const,
-        name: document.name,
-        mimeType: document.mimeType,
-        sizeBytes: document.sizeBytes,
-        dataUrl: await readFileAsDataUrl(document.file),
-      })),
-    ]);
+    // Attachments upload in the background as soon as they are added, so the
+    // turn usually carries only their ids. If any upload is not ready (failed,
+    // or the local server was unreachable), the whole set goes inline instead.
+    const uploadableAttachments: UploadableAttachment[] = [
+      ...composerImagesSnapshot,
+      ...composerDocumentsSnapshot,
+    ];
+    const turnAttachmentsPromise = (async () => {
+      await awaitAttachmentUploads(uploadableAttachments.map((attachment) => attachment.id));
+      const uploaded = getUploadedAttachments({
+        environmentId,
+        attachments: uploadableAttachments,
+      });
+      if (uploaded) return uploaded;
+      return Promise.all([
+        ...composerImagesSnapshot.map(async (image) => ({
+          type: "image" as const,
+          name: image.name,
+          mimeType: image.mimeType,
+          sizeBytes: image.sizeBytes,
+          dataUrl: await readFileAsDataUrl(image.file),
+        })),
+        ...composerDocumentsSnapshot.map(async (document) => ({
+          type: "document" as const,
+          name: document.name,
+          mimeType: document.mimeType,
+          sizeBytes: document.sizeBytes,
+          dataUrl: await readFileAsDataUrl(document.file),
+        })),
+      ]);
+    })();
     const optimisticAttachments = composerImagesSnapshot.map((image) => ({
       type: "image" as const,
       id: image.id,
@@ -5079,6 +5100,8 @@ function ChatViewContent(props: ChatViewProps) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        // The server copied the uploads into the thread; drop the pending copies.
+        releaseAttachmentUploads(uploadableAttachments);
         if (queuedMessageId) {
           removeQueuedMessage(
             scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)),

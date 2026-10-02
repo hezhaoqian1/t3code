@@ -823,7 +823,8 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     messageId: MessageId,
     role: Schema.Literal("user"),
     text: Schema.String,
-    attachments: Schema.Array(UploadChatAttachment),
+    // Inline bytes (dataUrl) or a reference to an attachment uploaded ahead of the send.
+    attachments: Schema.Array(Schema.Union([UploadChatAttachment, ChatAttachment])),
   }),
   fdSkillVersionId: Schema.optional(PositiveInt),
   /** Internal one-turn local Skill selection; never included in user text. */

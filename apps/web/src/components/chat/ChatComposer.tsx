@@ -79,6 +79,8 @@ import {
   isHeicImageFile,
   prepareImageForAttachment,
 } from "../../lib/imageCompression";
+import { releaseAttachmentUpload, startAttachmentUpload } from "../../lib/attachmentUploadQueue";
+import { DocumentUploadStatus, ImageUploadOverlay } from "./AttachmentUploadStatus";
 
 /** Picked, pasted or dropped files the composer treats as images. */
 function isComposerImageFile(file: File): boolean {
@@ -2513,12 +2515,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
 
   const removeComposerDocument = (documentId: string) => {
+    releaseAttachmentUpload(documentId);
     setComposerDocuments((current) => current.filter((document) => document.id !== documentId));
   };
 
   const removeComposerImage = (imageId: string) => {
+    releaseAttachmentUpload(imageId);
     removeComposerImageFromDraft(imageId);
   };
+
+  // Upload every composer attachment in the background as soon as it is
+  // present (added, pasted, dropped, or restored with a draft), so sending
+  // only carries ids. Starting an upload that already exists is a no-op.
+  useEffect(() => {
+    for (const image of composerImages) {
+      startAttachmentUpload({ environmentId, attachment: image });
+    }
+    for (const document of composerDocuments) {
+      startAttachmentUpload({ environmentId, attachment: document });
+    }
+  }, [composerDocuments, composerImages, environmentId]);
 
   // ------------------------------------------------------------------
   // Callbacks: paste / drag
@@ -3198,12 +3214,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             </TooltipPopup>
                           </Tooltip>
                         )}
+                        <ImageUploadOverlay attachment={image} environmentId={environmentId} />
                         <Button
                           variant="ghost"
                           size="icon-xs"
                           className="absolute right-1 top-1 bg-background/80 hover:bg-background/90"
                           onClick={() => removeComposerImage(image.id)}
-                          aria-label={`Remove ${image.name}`}
+                          aria-label={`移除 ${image.name}`}
                         >
                           <XIcon />
                         </Button>
@@ -3225,9 +3242,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
                       <span className="min-w-0">
                         <span className="block max-w-56 truncate font-medium">{document.name}</span>
-                        <span className="block text-[10px] text-muted-foreground">
-                          {(document.sizeBytes / 1024 / 1024).toFixed(1)} MB · 待解析
-                        </span>
+                        <DocumentUploadStatus attachment={document} environmentId={environmentId} />
                       </span>
                       <Button
                         type="button"

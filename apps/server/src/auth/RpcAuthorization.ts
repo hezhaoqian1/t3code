@@ -41,6 +41,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetUsageSummary]: AuthOrchestrationReadScope,
   [WS_METHODS.serverSetDesktopMessageFeedback]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverRefreshProviderSkills]: AuthOrchestrationOperateScope,
+  [WS_METHODS.attachmentsCreateUploadUrl]: AuthOrchestrationOperateScope,
+  [WS_METHODS.attachmentsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverSignalProcess]: AuthOrchestrationOperateScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.serverReportHostPowerState]: AuthOrchestrationOperateScope,
