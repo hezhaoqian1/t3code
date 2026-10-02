@@ -8,15 +8,18 @@ import {
   useLocation,
   useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { CheckIcon, CopyIcon } from "lucide-react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 
-import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "../branding";
+import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { Button } from "../components/ui/button";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
+import { errorMessage, errorReport } from "../lib/errorReport";
 import {
   AnchoredToastProvider,
   stackedThreadToast,
@@ -208,7 +211,18 @@ function DocumentTitleSync() {
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
   const message = errorMessage(error);
-  const details = errorDetails(error);
+  // Router pathname rather than window.location: desktop uses hash history, where the window path is always "/".
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const report = useMemo(
+    () =>
+      errorReport(error, {
+        appName: APP_DISPLAY_NAME,
+        appVersion: APP_VERSION,
+        pathname,
+        ...(typeof navigator !== "undefined" ? { userAgent: navigator.userAgent } : {}),
+      }),
+    [error, pathname],
+  );
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
@@ -221,60 +235,42 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
         <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
           {APP_DISPLAY_NAME}
         </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Something went wrong.
-        </h1>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">出错了</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
 
         <div className="mt-5 flex flex-wrap gap-2">
           <Button size="sm" onClick={() => reset()}>
-            Try again
+            重试
           </Button>
           <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-            Reload app
+            重新加载应用
           </Button>
+          <CopyErrorButton report={report} />
         </div>
 
-        <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
-          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
-            <span className="group-open:hidden">Show error details</span>
-            <span className="hidden group-open:inline">Hide error details</span>
-          </summary>
-          <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
-            {details}
+        <div className="mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
+          <p className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            错误报告（联系 IT 时请附上）
+          </p>
+          <pre className="max-h-64 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs whitespace-pre-wrap text-foreground/85">
+            {report}
           </pre>
-        </details>
+        </div>
       </section>
     </div>
   );
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
+/** Copies the full error report and swaps to a check mark for a moment as confirmation. */
+function CopyErrorButton({ report }: { report: string }) {
+  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "error-report" });
 
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
-  }
-
-  return "An unexpected router error occurred.";
-}
-
-function errorDetails(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack ?? error.message;
-  }
-
-  if (typeof error === "string") {
-    return error;
-  }
-
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return "No additional error details are available.";
-  }
+  return (
+    <Button size="sm" variant="outline" onClick={() => copyToClipboard(report)}>
+      {isCopied ? <CheckIcon className="text-success" /> : <CopyIcon />}
+      {isCopied ? "已复制" : "复制错误报告"}
+    </Button>
+  );
 }
 
 function AuthenticatedTracingBootstrap() {
