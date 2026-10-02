@@ -47,6 +47,10 @@ Use **Inspect** to pick an element in the app and reveal its color token. Inspec
 successful pick; its hover glow and badge preview the element and token that click will select.
 **Cancel** or `Escape` exits Inspect and clears its selection and spotlight.
 
+`thread.undo` defaults to `mod+z` and undoes the latest settle, snooze, unpin, or archive while
+the sidebar shows its notice. It yields to native text undo whenever a text field, editor, or
+terminal has focus.
+
 The command palette searches active thread titles, projects, branches, user messages, and final
 agent responses across connected environments. Message matches show one labeled excerpt while
 keeping the thread's project, branch, and machine context visible. Message search begins after two

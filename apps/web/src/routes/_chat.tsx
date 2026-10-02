@@ -15,6 +15,8 @@ import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
+import { undoLatestThreadAction } from "../hooks/showThreadUndoNotice";
+import { isEditableFocused } from "../lib/editableFocus";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -69,10 +71,22 @@ function ChatRouteGlobalShortcuts() {
           terminalOpen,
           previewFocus: isPreviewFocused(),
           previewOpen,
+          editableFocus: isEditableFocused(event.target),
         },
       });
 
       if (isCommandPaletteOpen()) {
+        return;
+      }
+
+      if (command === "thread.undo") {
+        // Only claim the chord when there is an undo to run; otherwise the
+        // page keeps its native behavior for the key.
+        if (event.repeat) return;
+        if (undoLatestThreadAction()) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
         return;
       }
 

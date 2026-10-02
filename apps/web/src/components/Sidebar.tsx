@@ -144,12 +144,7 @@ import {
   terminalStatusFromRunningIds,
   type TerminalStatusIndicator,
 } from "./ThreadStatusIndicators";
-import {
-  resolveSnoozePresets,
-  snoozeWakeDescription,
-  snoozeWakeLabel,
-  type SnoozePreset,
-} from "./Sidebar.snooze";
+import { resolveSnoozePresets, snoozeWakeLabel, type SnoozePreset } from "./Sidebar.snooze";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
@@ -2452,23 +2447,10 @@ export default function Sidebar() {
           );
           return;
         }
-        if (outcome.status !== "success") return;
-        // Snooze hides the row, so the toast is the only confirmation —
-        // and the Undo is the escape hatch for a mis-click.
-        toastManager.add(
-          stackedThreadToast({
-            type: "success",
-            title: `已设置提醒：${snoozeWakeDescription(preset.snoozedUntil, new Date(), timestampFormat)}`,
-            timeout: 5_000,
-            actionProps: {
-              children: "撤销",
-              onClick: () => attemptUnsnooze(threadRef),
-            },
-          }),
-        );
+        // Success is confirmed by the sidebar undo notice.
       })();
     },
-    [attemptUnsnooze, performSnooze, timestampFormat],
+    [performSnooze],
   );
 
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
@@ -2557,32 +2539,17 @@ export default function Sidebar() {
             outcome.status === "failure" ? [outcome.error] : [],
           );
 
-          if (snoozedThreadRefs.length > 0) {
-            const snoozedCount = snoozedThreadRefs.length;
-            const failedCount = failures.length;
-            toastManager.add(
-              stackedThreadToast({
-                type: failedCount > 0 ? "warning" : "success",
-                title:
-                  failedCount > 0
-                    ? `已为 ${selectedThreads.length} 个任务中的 ${snoozedCount} 个设置提醒`
-                    : `已为 ${snoozedCount} 个任务设置提醒`,
-                description: failedCount > 0 ? `${failedCount} 个任务设置失败。` : undefined,
-                timeout: 5_000,
-                actionProps: {
-                  children: "撤销",
-                  onClick: () => {
-                    for (const threadRef of snoozedThreadRefs) attemptUnsnooze(threadRef);
-                  },
-                },
-              }),
-            );
-          } else if (failures.length > 0) {
+          // Snoozed threads are confirmed (and undoable together) by the
+          // sidebar notice; only failures need their own toast.
+          if (failures.length > 0) {
             const firstError = failures[0];
             toastManager.add(
               stackedThreadToast({
                 type: "error",
-                title: "批量设置稍后提醒失败",
+                title:
+                  snoozedThreadRefs.length > 0
+                    ? `${failures.length} 个任务设置稍后提醒失败`
+                    : "批量设置稍后提醒失败",
                 description: firstError instanceof Error ? firstError.message : "发生未知错误。",
               }),
             );

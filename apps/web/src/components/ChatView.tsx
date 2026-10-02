@@ -274,6 +274,7 @@ import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import { QueuedMessagesTray } from "./chat/QueuedMessagesTray";
+import { isEditableFocused } from "../lib/editableFocus";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
   DRAFT_HERO_TRANSITION_DURATION_MS,
@@ -4412,6 +4413,7 @@ function ChatViewContent(props: ChatViewProps) {
       const shortcutContext = {
         terminalFocus: terminalFocusOwner !== null,
         terminalOpen: Boolean(terminalUiState.terminalOpen),
+        editableFocus: isEditableFocused(event.target),
       };
 
       if (!shortcutContext.terminalFocus && shouldTypeToFocusComposer(event)) {

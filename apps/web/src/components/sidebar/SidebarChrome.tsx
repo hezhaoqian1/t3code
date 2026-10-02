@@ -21,6 +21,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../ui/sidebar";
+import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
 import fdsureMark from "../../assets/fdsure-mark.png";
 import { useFdAccount } from "../../fd/FdAccountProvider";
@@ -118,6 +119,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter({
 
   return (
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
+      <SidebarThreadUndoNotice />
       <SidebarUpdatePill />
       {isDesktop ? (
         <SidebarMenu>

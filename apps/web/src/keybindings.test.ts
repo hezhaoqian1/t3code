@@ -6,6 +6,7 @@ import {
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
   formatShortcutLabel,
   isChatNewShortcut,
@@ -788,6 +789,33 @@ describe("plus key parsing", () => {
     assert.isTrue(
       isTerminalToggleShortcut(event({ key: "+", ctrlKey: true }), plusBindings, {
         platform: "Linux",
+      }),
+    );
+  });
+});
+
+describe("thread undo shortcut", () => {
+  it("resolves mod+z with nothing editable focused", () => {
+    assert.equal(
+      resolveShortcutCommand(event({ key: "z", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Win32",
+        context: { terminalFocus: false, editableFocus: false },
+      }),
+      "thread.undo",
+    );
+  });
+
+  it("leaves native undo alone inside text fields and terminals", () => {
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "z", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Win32",
+        context: { editableFocus: true },
+      }),
+    );
+    assert.isNull(
+      resolveShortcutCommand(event({ key: "z", ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Win32",
+        context: { terminalFocus: true },
       }),
     );
   });
