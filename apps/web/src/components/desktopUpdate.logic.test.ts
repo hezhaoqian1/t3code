@@ -257,6 +257,19 @@ describe("desktop update UI helpers", () => {
     expect(message).toContain("安装完成后会自动重新打开方德 AI");
   });
 
+  it("says whether running tasks continue after the update", () => {
+    const state = { availableVersion: "1.1.0", downloadedVersion: "1.1.0" };
+
+    expect(
+      getDesktopUpdateInstallConfirmationMessage(state, "Win32", { continueRunningTasks: true }),
+    ).toContain("新版本启动后自动继续");
+    const interrupted = getDesktopUpdateInstallConfirmationMessage(state, "Win32", {
+      continueRunningTasks: false,
+    });
+    expect(interrupted).toContain("正在运行的任务会被中断");
+    expect(interrupted).not.toContain("自动继续");
+  });
+
   it("keeps the Windows installer progress message platform-specific", () => {
     const message = getDesktopUpdateInstallConfirmationMessage(
       {

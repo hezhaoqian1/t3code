@@ -70,6 +70,9 @@ export type ProviderSessionStartInput = typeof ProviderSessionStartInput.Type;
 
 export const ProviderSendTurnInput = Schema.Struct({
   threadId: ThreadId,
+  /** Internal recovery signal: resumes a turn cut off by a restart. Allows an
+      empty turn only for adapters that support promptless continuation. */
+  continuation: Schema.optional(Schema.Boolean),
   fdSkillVersionId: Schema.optional(PositiveInt),
   /** Internal one-turn local Skill selection; never included in user text. */
   nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),

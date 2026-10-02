@@ -303,6 +303,15 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+  /**
+   * Resume a task whose turn was cut off when the local service stopped
+   * (app update, crash, quitting mid-task) once the service starts again.
+   * Upstream's key name; on by default for FD so an update never silently
+   * drops an employee's running task.
+   */
+  continueThreadsAfterServerUpdate: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -382,6 +391,7 @@ export const ServerSettingsPatch = Schema.Struct({
       otlpMetricsUrl: Schema.optionalKey(TrimmedString),
     }),
   ),
+  continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

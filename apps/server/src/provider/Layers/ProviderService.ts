@@ -790,7 +790,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     });
 
     const attachments = parsed.attachments ?? [];
-    if (!parsed.input && attachments.length === 0) {
+    if (!parsed.input && attachments.length === 0 && parsed.continuation !== true) {
       return yield* toValidationError(
         "ProviderService.sendTurn",
         "Either input text or at least one attachment is required",
@@ -810,11 +810,31 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     let metricProvider = "unknown";
     let metricModel = input.modelSelection?.model;
     return yield* Effect.gen(function* () {
-      const routed = yield* resolveRoutableSession({
+      let routed = yield* resolveRoutableSession({
         threadId: input.threadId,
         operation: "ProviderService.sendTurn",
-        allowRecovery: true,
+        allowRecovery: false,
       });
+      // Check before recovery so an unsupported continuation does not start a
+      // provider process only to be rejected.
+      if (
+        input.continuation === true &&
+        !input.input &&
+        attachments.length === 0 &&
+        routed.adapter.capabilities.promptlessTurnContinuation !== true
+      ) {
+        return yield* toValidationError(
+          "ProviderService.sendTurn",
+          `Provider '${routed.adapter.provider}' requires an explicit continuation prompt`,
+        );
+      }
+      if (!routed.isActive) {
+        routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: "ProviderService.sendTurn",
+          allowRecovery: true,
+        });
+      }
       metricProvider = routed.adapter.provider;
       metricModel = input.modelSelection?.model;
       yield* Effect.annotateCurrentSpan({
@@ -837,6 +857,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         runtimePayload: {
           ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
           activeTurnId: turn.turnId,
+          // The admitted turn consumes any pending restart continuation.
+          continueAfterServerUpdate: null,
           lastRuntimeEvent: "provider.sendTurn",
           lastRuntimeEventAt: yield* nowIso,
         },
@@ -1078,6 +1100,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           status: "stopped",
           runtimePayload: {
             activeTurnId: null,
+            // A deliberate stop cancels a pending restart continuation.
+            continueAfterServerUpdate: null,
           },
         });
         yield* analytics.record("provider.session.stopped", {

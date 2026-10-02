@@ -5,6 +5,8 @@ import {
   EventId,
   ProviderDriverKind,
   type ProviderRuntimeEvent,
+  type ProviderSendTurnInput,
+  type ProviderSessionStartInput,
   RuntimeItemId,
   ThreadId,
   TurnId,
@@ -1502,6 +1504,100 @@ describe("FdDeepSeekAdapter", () => {
       expect(compact).toHaveBeenCalledOnce();
       expect(sentInputs).toHaveLength(3);
       expect(adapter.capabilities.sessionModelSwitch).toBe("in-session");
+    }),
+  );
+
+  it.effect("resumes a cut-off turn in the FD Skill conversation it ran in", () =>
+    Effect.gen(function* () {
+      const codexProvider = ProviderDriverKind.make("codex");
+      const startedInputs: ProviderSessionStartInput[] = [];
+      const sentInputs: ProviderSendTurnInput[] = [];
+      const ordinaryAdapter: ProviderAdapterShape<never> = {
+        provider: codexProvider,
+        capabilities: { sessionModelSwitch: "in-session", promptlessTurnContinuation: true },
+        startSession: (input) => {
+          startedInputs.push(input);
+          return Effect.succeed({
+            provider: codexProvider,
+            providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+            status: "ready" as const,
+            runtimeMode: input.runtimeMode,
+            model: "deepseek-v4-flash",
+            threadId: input.threadId,
+            resumeCursor: input.resumeCursor ?? { threadId: "codex-new" },
+            createdAt: "2026-10-01T00:00:00.000Z",
+            updatedAt: "2026-10-01T00:00:00.000Z",
+          });
+        },
+        sendTurn: (input) => {
+          sentInputs.push(input);
+          return Effect.succeed({ threadId: input.threadId, turnId: TurnId.make("resumed") });
+        },
+        interruptTurn: () => Effect.void,
+        respondToRequest: () => Effect.void,
+        respondToUserInput: () => Effect.void,
+        stopSession: () => Effect.void,
+        listSessions: () => Effect.succeed([]),
+        hasSession: () => Effect.succeed(false),
+        readThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        rollbackThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        stopAll: () => Effect.void,
+        streamEvents: Stream.empty,
+      };
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel({
+          stream: async function* () {
+            throw new Error("transitional kernel must not run");
+          },
+        }),
+        ordinaryAdapter,
+      });
+      expect(adapter.capabilities.promptlessTurnContinuation).toBe(true);
+
+      // The task was last running an FD Skill turn when the service stopped.
+      yield* adapter.startSession({
+        ...startInput,
+        resumeCursor: {
+          threadId: "codex-skill",
+          fdContext: {
+            version: 1,
+            activeProfile: "enterprise:7",
+            profiles: {
+              local: { threadId: "codex-local" },
+              "enterprise:7": { threadId: "codex-skill" },
+            },
+          },
+        },
+      });
+      yield* adapter.sendTurn({ threadId, continuation: true });
+
+      expect(startedInputs).toHaveLength(1);
+      expect(startedInputs[0]).toMatchObject({
+        fdSkillVersionId: 7,
+        resumeCursor: { threadId: "codex-skill" },
+      });
+      expect(sentInputs).toEqual([
+        expect.objectContaining({ threadId, continuation: true, fdSkillVersionId: 7 }),
+      ]);
+      expect(sentInputs[0]?.input).toBeUndefined();
+    }),
+  );
+
+  it.effect("still requires input for an ordinary turn that is not a continuation", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel({
+          stream: async function* () {
+            throw new Error("kernel must not run");
+          },
+        }),
+      });
+      expect(adapter.capabilities.promptlessTurnContinuation).toBeUndefined();
+      yield* adapter.startSession(startInput);
+      const error = yield* adapter.sendTurn({ threadId, continuation: true }).pipe(Effect.flip);
+      expect(error.message).toContain("Turn input is required");
     }),
   );
 

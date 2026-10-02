@@ -106,6 +106,8 @@ interface FdSessionContext {
   readonly startInput: ProviderSessionStartInput;
   ordinarySessionStarted: boolean;
   ordinaryExecutionProfile: FdExecutionProfile | undefined;
+  /** The profile that was active when the persisted session last ran. */
+  readonly restoredExecutionProfile: FdExecutionProfile | undefined;
   ordinaryEnterpriseGeneration: number;
   readonly ordinaryResumeCursors: Map<FdExecutionProfile, unknown>;
   history: ReadonlyArray<FdResponsesInputItem>;
@@ -125,6 +127,15 @@ interface FdSessionContext {
 
 function executionProfileFor(fdSkillVersionId: number | undefined): FdExecutionProfile {
   return fdSkillVersionId === undefined ? "local" : `enterprise:${fdSkillVersionId}`;
+}
+
+/** The FD Skill version a profile runs with; undefined for the local profile. */
+export function fdSkillVersionIdForProfile(
+  profile: FdExecutionProfile | undefined,
+): number | undefined {
+  if (profile === undefined || profile === "local") return undefined;
+  const versionId = Number(profile.slice("enterprise:".length));
+  return Number.isSafeInteger(versionId) && versionId > 0 ? versionId : undefined;
 }
 
 interface EnterpriseToolGrounding {
@@ -291,8 +302,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
 ) {
   const instanceId = options.instanceId ?? FD_DEEPSEEK_INSTANCE_ID;
   const isSupportedResponsesModel =
-    options.isSupportedModel ??
-    ((model: string) => isFdResponsesModelAdvertised(model));
+    options.isSupportedModel ?? ((model: string) => isFdResponsesModelAdvertised(model));
   const now = options.now ?? (() => new Date());
   let nextId = 0;
   const randomId = options.randomId ?? (() => `fd-${++nextId}`);
@@ -942,6 +952,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       startInput: input,
       ordinarySessionStarted: false,
       ordinaryExecutionProfile: undefined,
+      restoredExecutionProfile: binding.activeProfile,
       ordinaryResumeCursors: binding.profiles,
       ordinaryEnterpriseGeneration: options.enterpriseGeneration?.() ?? 0,
       history: [],
@@ -1019,8 +1030,22 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
   const preparations = new Map<ThreadId, AbortController>();
   const sendPreparedTurn: ProviderAdapterShape<FdAdapterError>["sendTurn"] = Effect.fn(
     "sendFdDeepSeekTurn",
-  )(function* (input: ProviderSendTurnInput) {
-    const context = yield* requireSession(input.threadId);
+  )(function* (requestedInput: ProviderSendTurnInput) {
+    const context = yield* requireSession(requestedInput.threadId);
+    // A restart continuation resumes the conversation the cut-off turn ran
+    // in: the same FD Skill profile, so its Codex thread and history.
+    const continuation =
+      requestedInput.continuation === true && options.ordinaryAdapter !== undefined;
+    const continuationSkillVersionId = continuation
+      ? (requestedInput.fdSkillVersionId ??
+        fdSkillVersionIdForProfile(
+          context.ordinaryExecutionProfile ?? context.restoredExecutionProfile,
+        ))
+      : requestedInput.fdSkillVersionId;
+    const input: ProviderSendTurnInput =
+      continuationSkillVersionId === requestedInput.fdSkillVersionId
+        ? requestedInput
+        : { ...requestedInput, fdSkillVersionId: continuationSkillVersionId };
     const selectedModel =
       input.modelSelection?.model ??
       (context.session.model && isSupportedResponsesModel(context.session.model)
@@ -1028,7 +1053,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         : FD_RESPONSES_MODEL);
     const inputText = input.input?.trim();
     const attachments = input.attachments ?? [];
-    if (!inputText && attachments.length === 0) {
+    if (!inputText && attachments.length === 0 && !continuation) {
       return yield* new ProviderAdapterValidationError({
         provider: FD_DEEPSEEK_DRIVER_KIND,
         operation: "sendTurn",
@@ -1468,6 +1493,8 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     capabilities: {
       // All advertised FD models now share the same managed Responses runtime.
       sessionModelSwitch: options.ordinaryAdapter ? "in-session" : "unsupported",
+      // Ordinary turns run on Codex, which resumes a cut-off turn without a prompt.
+      ...(options.ordinaryAdapter ? { promptlessTurnContinuation: true } : {}),
     },
     startSession,
     sendTurn,

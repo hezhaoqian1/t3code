@@ -99,12 +99,16 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
 export function getDesktopUpdateInstallConfirmationMessage(
   state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
   platform = "",
+  options: { readonly continueRunningTasks?: boolean } = {},
 ): string {
   const version = state.downloadedVersion ?? state.availableVersion;
   const windowsInstallWarning = isWindowsPlatform(platform)
     ? "\n\nWindows 将显示安装进度，安装完成后会自动重新打开方德 AI。"
     : "\n\n安装完成后会自动重新打开方德 AI。";
-  return `退出并安装${version ? ` ${version}` : "新版本"}？\n\n正在运行的任务会被中断，请确认任务已经保存。${windowsInstallWarning}`;
+  const runningTasks = options.continueRunningTasks
+    ? "正在运行的任务会暂停，新版本启动后自动继续；终端里正在运行的命令会被中断。"
+    : "正在运行的任务会被中断，请确认任务已经保存。";
+  return `退出并安装${version ? ` ${version}` : "新版本"}？\n\n${runningTasks}${windowsInstallWarning}`;
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {

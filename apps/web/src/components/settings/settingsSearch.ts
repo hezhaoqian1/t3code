@@ -106,6 +106,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "continue-threads-after-restart",
+    title: "重启后继续未完成的任务",
+    to: "/settings/general",
+    searchTerms: ["更新 重启 崩溃 退出 恢复 继续 任务 中断 resume restart update"],
+  },
+  {
     id: "follow-up-behavior",
     title: "运行中发送消息",
     to: "/settings/general",
@@ -249,6 +255,7 @@ const LEGACY_SETTINGS_SEARCH_TITLES: Readonly<Record<SettingsSearchItemId, strin
   "auto-settle-inactive-threads": "Auto-settle inactive threads",
   "time-format": "Time format",
   "chat-width": "Chat width",
+  "continue-threads-after-restart": "Continue tasks after restart",
   "follow-up-behavior": "Follow-up behavior",
   "thread-notifications": "Thread notifications",
   "in-app-notifications": "In-app notifications",

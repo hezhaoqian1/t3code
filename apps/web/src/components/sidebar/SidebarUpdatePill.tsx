@@ -1,6 +1,7 @@
 import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { isElectron } from "../../env";
+import { usePrimarySettings } from "../../hooks/useSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
@@ -117,6 +118,9 @@ export function SidebarUpdatePill() {
     );
   }, [state]);
 
+  const continueRunningTasks = usePrimarySettings(
+    (settings) => settings.continueThreadsAfterServerUpdate,
+  );
   const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed;
   const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "发现新版本";
   const disabled = isDesktopUpdateButtonDisabled(state);
@@ -163,7 +167,9 @@ export function SidebarUpdatePill() {
 
     if (action === "install") {
       const confirmed = window.confirm(
-        getDesktopUpdateInstallConfirmationMessage(state, navigator.platform),
+        getDesktopUpdateInstallConfirmationMessage(state, navigator.platform, {
+          continueRunningTasks,
+        }),
       );
       if (!confirmed) return;
       void bridge
@@ -190,7 +196,7 @@ export function SidebarUpdatePill() {
           );
         });
     }
-  }, [action, disabled, state]);
+  }, [action, continueRunningTasks, disabled, state]);
 
   if (!visible && !showArm64Warning) return null;
 

@@ -1457,6 +1457,46 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("resumes a cut-off turn without a prompt only when the provider supports it", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const capabilities = routing.codex.adapter.capabilities as {
+        promptlessTurnContinuation?: boolean;
+      };
+
+      const initial = yield* provider.startSession(asThreadId("thread-continuation"), {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId: asThreadId("thread-continuation"),
+        cwd: "/tmp/project-continuation",
+        runtimeMode: "full-access",
+      });
+      yield* routing.codex.stopAll();
+      routing.codex.startSession.mockClear();
+      routing.codex.sendTurn.mockClear();
+
+      // Rejected before recovery: no provider process starts just to fail.
+      const rejected = yield* provider
+        .sendTurn({ threadId: initial.threadId, continuation: true })
+        .pipe(Effect.flip);
+      assert.include(rejected.message, "requires an explicit continuation prompt");
+      assert.equal(routing.codex.startSession.mock.calls.length, 0);
+
+      capabilities.promptlessTurnContinuation = true;
+      try {
+        yield* provider.sendTurn({ threadId: initial.threadId, continuation: true });
+      } finally {
+        delete capabilities.promptlessTurnContinuation;
+      }
+      assert.equal(routing.codex.startSession.mock.calls.length, 1);
+      assert.deepEqual(routing.codex.sendTurn.mock.calls[0]?.[0], {
+        threadId: initial.threadId,
+        continuation: true,
+        attachments: [],
+      });
+    }),
+  );
+
   it.effect("recovers stale claudeAgent sessions for sendTurn using persisted cwd", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;

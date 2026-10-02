@@ -2079,6 +2079,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     provider: PROVIDER,
     capabilities: {
       sessionModelSwitch: "in-session",
+      // turn/start with no input continues the resumed thread from where it stopped.
+      promptlessTurnContinuation: true,
     },
     startSession,
     sendTurn,

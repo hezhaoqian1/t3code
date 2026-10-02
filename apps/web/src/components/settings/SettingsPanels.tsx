@@ -390,6 +390,9 @@ function AboutVersionTitle() {
 
 function AboutVersionSection() {
   const updateState = useDesktopUpdateState();
+  const continueRunningTasks = usePrimarySettings(
+    (settings) => settings.continueThreadsAfterServerUpdate,
+  );
   const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
 
   const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
@@ -449,6 +452,7 @@ function AboutVersionSection() {
         getDesktopUpdateInstallConfirmationMessage(
           updateState ?? { availableVersion: null, downloadedVersion: null },
           navigator.platform,
+          { continueRunningTasks },
         ),
       );
       if (!confirmed) return;
@@ -610,6 +614,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
         ? ["运行中发送消息"]
         : []),
+      ...(settings.continueThreadsAfterServerUpdate !==
+      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
+        ? ["重启后继续未完成的任务"]
+        : []),
       ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
         ? ["任务通知"]
         : []),
@@ -685,6 +693,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.timestampFormat,
       settings.chatWidth,
       settings.followUpBehavior,
+      settings.continueThreadsAfterServerUpdate,
       settings.notificationMode,
       settings.inAppNotificationsEnabled,
       settings.wordWrap,
@@ -756,6 +765,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
+      continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
@@ -1862,6 +1872,34 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("continue-threads-after-restart")}
+          description="应用更新、意外退出或任务进行中关闭应用后，重新打开时自动继续未完成的任务（12 小时内）。终端里正在运行的命令无法恢复。"
+          resetAction={
+            settings.continueThreadsAfterServerUpdate !==
+            DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate ? (
+              <SettingResetButton
+                label="continue tasks after restart"
+                onClick={() =>
+                  updateSettings({
+                    continueThreadsAfterServerUpdate:
+                      DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.continueThreadsAfterServerUpdate}
+              onCheckedChange={(checked) =>
+                updateSettings({ continueThreadsAfterServerUpdate: Boolean(checked) })
+              }
+              aria-label="重启后继续未完成的任务"
+            />
           }
         />
 
