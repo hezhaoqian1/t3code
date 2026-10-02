@@ -607,6 +607,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["时间格式"]
         : []),
       ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["聊天区宽度"] : []),
+      ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
+        ? ["运行中发送消息"]
+        : []),
       ...(settings.notificationMode !== DEFAULT_UNIFIED_SETTINGS.notificationMode
         ? ["任务通知"]
         : []),
@@ -681,6 +684,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.chatWidth,
+      settings.followUpBehavior,
       settings.notificationMode,
       settings.inAppNotificationsEnabled,
       settings.wordWrap,
@@ -751,6 +755,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
+      followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
@@ -1854,6 +1859,45 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("follow-up-behavior")}
+          description="AI 正在执行任务时按回车：排队会等当前任务结束后再发送；引导会立刻把消息插入当前任务，让 AI 在下一步按新要求调整。排队中的消息随时可以点“引导”或按 Ctrl+Shift+Enter 立即发出。"
+          resetAction={
+            settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior ? (
+              <SettingResetButton
+                label="follow-up behavior"
+                onClick={() =>
+                  updateSettings({ followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.followUpBehavior}
+              onValueChange={(value) => {
+                if (value === "queue" || value === "steer") {
+                  updateSettings({ followUpBehavior: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="运行中发送消息">
+                <SelectValue>
+                  {settings.followUpBehavior === "steer" ? "立即引导" : "排队（默认）"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="queue">
+                  排队（默认）
+                </SelectItem>
+                <SelectItem hideIndicator value="steer">
+                  立即引导
                 </SelectItem>
               </SelectPopup>
             </Select>

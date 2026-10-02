@@ -106,6 +106,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
   },
   {
+    id: "follow-up-behavior",
+    title: "运行中发送消息",
+    to: "/settings/general",
+    searchTerms: ["排队 引导 回车 队列 steer queue 追加"],
+  },
+  {
     id: "thread-notifications",
     title: "任务通知",
     to: "/settings/general",
@@ -243,6 +249,7 @@ const LEGACY_SETTINGS_SEARCH_TITLES: Readonly<Record<SettingsSearchItemId, strin
   "auto-settle-inactive-threads": "Auto-settle inactive threads",
   "time-format": "Time format",
   "chat-width": "Chat width",
+  "follow-up-behavior": "Follow-up behavior",
   "thread-notifications": "Thread notifications",
   "in-app-notifications": "In-app notifications",
   "test-notification": "Test notification",

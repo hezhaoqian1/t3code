@@ -18,6 +18,7 @@ import { CommandPalette } from "../components/CommandPalette";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
 import { isElectron } from "../env";
 import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
+import { QueuedMessageSender } from "../components/QueuedMessageSender";
 import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { Button } from "../components/ui/button";
@@ -124,6 +125,7 @@ function AuthenticatedRootRouteView() {
         <AuthenticatedTracingBootstrap />
         <SlowRpcRequestToastCoordinator />
         <ThreadNotificationCoordinator />
+        <QueuedMessageSender />
         {isElectron ? <RunningThreadKeepAlive /> : null}
         <EventRouter />
         {appShell}

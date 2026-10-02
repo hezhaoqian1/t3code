@@ -44,6 +44,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+o", command: "editor.openFavorite" },
   // Yields to native text undo while a text field or editor has focus.
   { key: "mod+z", command: "thread.undo", when: "!terminalFocus && !editableFocus" },
+  // Sends the oldest queued message into the running task now.
+  { key: "mod+shift+enter", command: "thread.steerQueuedMessage", when: "!terminalFocus" },
   { key: "mod+shift+[", command: "thread.previous" },
   { key: "mod+shift+]", command: "thread.next" },
   ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({

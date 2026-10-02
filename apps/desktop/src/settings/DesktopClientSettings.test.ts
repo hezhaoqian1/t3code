@@ -41,6 +41,7 @@ const clientSettings: ClientSettings = {
   chatWidth: "comfortable",
   notificationMode: "notifications",
   inAppNotificationsEnabled: true,
+  followUpBehavior: "queue",
   wordWrap: true,
 };
 

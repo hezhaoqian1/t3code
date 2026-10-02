@@ -172,6 +172,7 @@ import {
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import { useComposerDraftStore, useThreadHasUnsentDraft } from "../composerDraftStore";
+import { useSendQueueStore } from "../sendQueueStore";
 import { isGeneratedTaskWorkspaceRoot, isOfficeWorkspaceShellContext } from "../officeMode";
 import { projectEnvironment } from "../state/projects";
 
@@ -496,6 +497,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // Unsent composer text on this thread. The open thread shows its own
   // composer, so the marker only decorates rows you have navigated away from.
   const hasUnsentDraft = useThreadHasUnsentDraft(threadRef) && !props.isActive;
+  // Messages waiting to go out on this task; they send even while another
+  // task is open, so the row shows how many are left.
+  const queuedMessageCount = useSendQueueStore(
+    (state) => state.byThreadKey[threadKey]?.length ?? 0,
+  );
   const handleDiscardDraftClick = useCallback(
     (event: ReactMouseEvent) => {
       event.preventDefault();
@@ -921,6 +927,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <SquarePenIcon aria-hidden className={DRAFT_PEN_CLASS_NAME} />
     </span>
   ) : null;
+  const queueIndicator =
+    queuedMessageCount > 0 ? (
+      <span
+        role="status"
+        aria-label={`${queuedMessageCount} 条排队消息`}
+        title={`${queuedMessageCount} 条排队消息，任务结束后自动发送`}
+        className="inline-flex shrink-0 items-center gap-0.5 rounded-sm bg-primary/10 px-1 text-[10px] font-medium text-primary tabular-nums"
+      >
+        <ClockIcon aria-hidden className="size-2.5" />
+        {queuedMessageCount}
+      </span>
+    ) : null;
   const discardDraftButton = hasUnsentDraft ? (
     <button
       type="button"
@@ -978,6 +996,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               </span>
             )}
             {title}
+            {queueIndicator}
             {draftIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1244,6 +1263,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </div>
             <div className="mt-1 flex min-w-0 items-center gap-1.5">
               {title}
+              {queueIndicator}
               {draftIndicator}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">

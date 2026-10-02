@@ -504,6 +504,8 @@ export interface ChatComposerHandle {
   addTerminalContext: (selection: TerminalContextSelection) => void;
   /** Remove current-turn document files after a successful dispatch. */
   clearDocuments: () => void;
+  /** Put documents back, e.g. queued messages returned to the composer. */
+  addDocuments: (documents: ReadonlyArray<ComposerDocumentAttachment>) => void;
   /** Clear one-turn native Skill selection after a successful dispatch. */
   clearNativeSkillSelection: () => void;
   /** Select a generated presentation as the target of the next turn. */
@@ -2775,6 +2777,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
       },
       clearDocuments: () => setComposerDocuments([]),
+      addDocuments: (documents) => {
+        if (documents.length === 0) return;
+        setComposerDocuments((current) => {
+          const existingIds = new Set(current.map((document) => document.id));
+          return [...current, ...documents.filter((document) => !existingIds.has(document.id))];
+        });
+      },
       clearNativeSkillSelection: () => {
         setNativeSkillNames([]);
         setPresentationOperation(null);
@@ -3295,7 +3304,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                             : phase === "disconnected"
                               ? "继续提出修改，或添加图片"
                               : phase === "running"
-                                ? "AI 正在工作，可继续输入，回车加入排队"
+                                ? settings.followUpBehavior === "steer"
+                                  ? "AI 正在工作，回车立即引导当前任务"
+                                  : "AI 正在工作，可继续输入，回车加入排队"
                                 : "输入任务，@ 引用文件，$ 使用 Skill，/ 使用命令"
                 }
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}

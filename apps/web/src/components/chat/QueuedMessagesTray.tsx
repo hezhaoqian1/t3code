@@ -3,9 +3,11 @@ import {
   ArrowUpIcon,
   ClockIcon,
   CornerDownRightIcon,
+  PaperclipIcon,
   PencilIcon,
   RotateCcwIcon,
   Trash2Icon,
+  Undo2Icon,
 } from "lucide-react";
 
 import type { QueuedMessage } from "../../sendQueueStore";
@@ -23,6 +25,23 @@ interface QueuedMessagesTrayProps {
   onEditCancel: () => void;
   onSave: (id: string, text: string) => void;
   onRemove: (id: string) => void;
+  /** Takes the message out of the queue and puts it back in the composer. */
+  onRestore: (id: string) => void;
+}
+
+/** "2 个附件 · 1 条上下文" for what a queued message carries besides text. */
+export function describeQueuedExtras(message: QueuedMessage): string | null {
+  const attachmentCount = message.images.length + message.documents.length;
+  const contextCount =
+    message.terminalContexts.length +
+    message.elementContexts.length +
+    message.previewAnnotations.length +
+    message.reviewComments.length;
+  const parts = [
+    attachmentCount > 0 ? `${attachmentCount} 个附件` : null,
+    contextCount > 0 ? `${contextCount} 条上下文` : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 /**
@@ -40,6 +59,7 @@ export const QueuedMessagesTray = memo(function QueuedMessagesTray({
   onEditCancel,
   onSave,
   onRemove,
+  onRestore,
 }: QueuedMessagesTrayProps) {
   if (messages.length === 0) return null;
   const steering = sendNowAction === "steer";
@@ -88,6 +108,7 @@ export const QueuedMessagesTray = memo(function QueuedMessagesTray({
             const sendTitle =
               sendNowBlockedReason ??
               (steering ? "立即插入当前任务，AI 会在下一步读取这条消息" : "立即作为新消息发送");
+            const extras = describeQueuedExtras(message);
             return (
               <li
                 key={message.id}
@@ -106,8 +127,14 @@ export const QueuedMessagesTray = memo(function QueuedMessagesTray({
                     disabled={sending}
                     onClick={() => onEditStart(message.id)}
                   >
-                    {message.text}
+                    {message.text || "（仅附件）"}
                   </button>
+                  {extras ? (
+                    <div className="flex items-center gap-1 text-muted-foreground text-xs">
+                      <PaperclipIcon className="size-3 shrink-0" aria-hidden />
+                      <span className="truncate">{extras}</span>
+                    </div>
+                  ) : null}
                   {message.error ? (
                     <div className="truncate text-destructive text-xs" title={message.error}>
                       {message.error}
@@ -120,7 +147,7 @@ export const QueuedMessagesTray = memo(function QueuedMessagesTray({
                     size="xs"
                     variant="outline"
                     className="rounded-full px-2.5"
-                    disabled={sending || sendNowBlockedReason !== null || !message.text.trim()}
+                    disabled={sending || sendNowBlockedReason !== null}
                     title={sendTitle}
                     aria-label={`${sendLabel}排队消息 ${index + 1}`}
                     onClick={() => onSendNow(message.id)}
@@ -146,6 +173,17 @@ export const QueuedMessagesTray = memo(function QueuedMessagesTray({
                     onClick={() => onEditStart(message.id)}
                   >
                     <PencilIcon aria-hidden />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    disabled={sending}
+                    title="放回输入框"
+                    aria-label={`放回输入框 ${index + 1}`}
+                    onClick={() => onRestore(message.id)}
+                  >
+                    <Undo2Icon aria-hidden />
                   </Button>
                   <Button
                     type="button"

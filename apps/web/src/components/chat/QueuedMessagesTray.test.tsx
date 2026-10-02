@@ -1,13 +1,26 @@
+import { ProviderInstanceId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { QueuedMessage } from "../../sendQueueStore";
-import { QueuedMessagesTray } from "./QueuedMessagesTray";
+import { describeQueuedExtras, QueuedMessagesTray } from "./QueuedMessagesTray";
 
 const message = (id: string, update: Partial<QueuedMessage> = {}): QueuedMessage => ({
   id,
   text: `message ${id}`,
   createdAt: "2026-10-01T00:00:00.000Z",
+  images: [],
+  documents: [],
+  terminalContexts: [],
+  elementContexts: [],
+  previewAnnotations: [],
+  reviewComments: [],
+  sendSettings: {
+    modelSelection: { instanceId: ProviderInstanceId.make("fd-deepseek"), model: "fd-model" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    nativeSkillNames: [],
+  },
   status: undefined,
   error: undefined,
   ...update,
@@ -32,6 +45,7 @@ function render(input: {
       onEditCancel={noop}
       onSave={noop}
       onRemove={noop}
+      onRestore={noop}
     />,
   );
 }
@@ -88,5 +102,49 @@ describe("QueuedMessagesTray", () => {
     expect(markup).toMatch(/<textarea[^>]*aria-label="编辑排队消息 2"/);
     expect(markup).toContain("message b</textarea>");
     expect(markup).toContain("Esc 取消");
+  });
+
+  it("returns a queued message to the composer", () => {
+    const markup = render({
+      messages: [message("a"), message("b", { status: "sending" })],
+    });
+
+    expect(isDisabled(markup, "放回输入框 1")).toBe(false);
+    expect(isDisabled(markup, "放回输入框 2")).toBe(true);
+  });
+
+  it("lists attachments and contexts and sends a message with only attachments", () => {
+    const markup = render({
+      messages: [
+        message("a", {
+          text: "",
+          images: [{ id: "image-1" } as never],
+          documents: [{ id: "document-1" } as never, { id: "document-2" } as never],
+          reviewComments: [{ id: "comment-1" } as never],
+        }),
+      ],
+    });
+
+    expect(markup).toContain("（仅附件）");
+    expect(markup).toContain("3 个附件 · 1 条上下文");
+    expect(isDisabled(markup, "引导排队消息 1")).toBe(false);
+  });
+});
+
+describe("describeQueuedExtras", () => {
+  it("is empty for a text-only message", () => {
+    expect(describeQueuedExtras(message("a"))).toBeNull();
+  });
+
+  it("counts every kind of context", () => {
+    expect(
+      describeQueuedExtras(
+        message("a", {
+          terminalContexts: [{} as never],
+          elementContexts: [{} as never],
+          previewAnnotations: [{} as never],
+        }),
+      ),
+    ).toBe("3 条上下文");
   });
 });

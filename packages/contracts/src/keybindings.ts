@@ -51,6 +51,7 @@ const STATIC_KEYBINDING_COMMANDS = [
   "chat.newLocal",
   "editor.openFavorite",
   "thread.undo",
+  "thread.steerQueuedMessage",
   ...THREAD_KEYBINDING_COMMANDS,
 ] as const;
 
