@@ -74,7 +74,16 @@ import {
   resolveProviderSkillCatalogState,
   type BusinessCapabilityCatalogState,
 } from "./FdSkillPicker";
-import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
+import {
+  compressImageForStash,
+  isHeicImageFile,
+  prepareImageForAttachment,
+} from "../../lib/imageCompression";
+
+/** Picked, pasted or dropped files the composer treats as images. */
+function isComposerImageFile(file: File): boolean {
+  return file.type.startsWith("image/") || isHeicImageFile(file);
+}
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import { resolveShortcutCommand } from "../../keybindings";
@@ -2396,12 +2405,12 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const acceptedFiles: File[] = [];
     let error: string | null = null;
     for (const file of files) {
-      if (!file.type.startsWith("image/")) {
-        error = `Unsupported file type for '${file.name}'. Please attach image files only.`;
+      if (!isComposerImageFile(file)) {
+        error = `“${file.name}”不是图片，这里只能添加图片。`;
         continue;
       }
       if (reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} images per message.`;
+        error = `每条消息最多添加 ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} 张图片。`;
         break;
       }
       acceptedFiles.push(file);
@@ -2415,14 +2424,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const nextImages: ComposerImageAttachment[] = [];
       let compressionError: string | null = null;
       for (const file of acceptedFiles) {
-        // Images over the wire cap are downscaled to fit rather than
-        // refused; files already within it pass through byte-for-byte.
-        const compressed = await compressImageToByteLimit(file, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES);
+        // HEIC photos and formats providers cannot read (BMP, AVIF) are
+        // converted, and images over the wire cap are downscaled to fit
+        // rather than refused; files already fine pass through byte-for-byte.
+        const compressed = await prepareImageForAttachment(
+          file,
+          PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+        );
         if (!compressed.ok) {
           compressionError =
             compressed.reason === "unreadable"
-              ? `'${file.name}' could not be read as an image.`
-              : `'${file.name}' is too large to attach, even after compression.`;
+              ? `“${file.name}”无法识别为图片。支持 JPG、PNG、GIF、WebP、HEIC 等常见格式，其他格式请先另存为 PNG 或 JPG。`
+              : `“${file.name}”太大，压缩后仍无法添加。`;
           continue;
         }
         const attachmentFile = compressed.file;
@@ -2513,8 +2526,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
     const files = Array.from(event.clipboardData.files);
     if (files.length === 0) return;
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    const documentFiles = isElectron ? files.filter((file) => !file.type.startsWith("image/")) : [];
+    const imageFiles = files.filter(isComposerImageFile);
+    const documentFiles = isElectron ? files.filter((file) => !isComposerImageFile(file)) : [];
     if (imageFiles.length === 0 && documentFiles.length === 0) return;
     event.preventDefault();
     void addComposerImages(imageFiles);
@@ -2552,8 +2565,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     const files = Array.from(event.dataTransfer.files);
-    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-    const documentFiles = isElectron ? files.filter((file) => !file.type.startsWith("image/")) : [];
+    const imageFiles = files.filter(isComposerImageFile);
+    const documentFiles = isElectron ? files.filter((file) => !isComposerImageFile(file)) : [];
     void addComposerImages(imageFiles);
     addComposerDocuments(documentFiles);
     focusComposer();
@@ -2817,7 +2830,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       <input
         ref={composerImageInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif"
         multiple
         className="hidden"
         aria-hidden="true"
