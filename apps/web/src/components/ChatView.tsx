@@ -5207,7 +5207,7 @@ function ChatViewContent(props: ChatViewProps) {
       localDispatchBlocking ||
       isConnecting ||
       threadDetailLoading ||
-      activeEnvironmentUnavailable !== null ||
+      activeEnvironmentUnavailable ||
       activePendingProgress !== null ||
       (composerRef.current?.getSendContext()?.images.length ?? 0) > 0 ||
       (composerRef.current?.getSendContext()?.documents.length ?? 0) > 0 ||
@@ -5218,7 +5218,7 @@ function ChatViewContent(props: ChatViewProps) {
         (sendContext?.images.length ?? 0) > 0 || (sendContext?.documents.length ?? 0) > 0;
       const retryableTransientBlock =
         phase !== "running" &&
-        activeEnvironmentUnavailable === null &&
+        !activeEnvironmentUnavailable &&
         !hasComposerAttachments &&
         (localDispatchBlocking || isConnecting || threadDetailLoading);
       if (retryableTransientBlock) {
@@ -5277,7 +5277,7 @@ function ChatViewContent(props: ChatViewProps) {
     phase,
     isPreparingAttachments,
     hasPendingRequest: activePendingApproval !== null || pendingUserInputs.length > 0,
-    isUnavailable: isConnecting || threadDetailLoading || activeEnvironmentUnavailable !== null,
+    isUnavailable: isConnecting || threadDetailLoading || activeEnvironmentUnavailable,
     isStartingTurn: phase === "connecting" || (isSendBusy && !latestTurnSettled),
     queueSending: queuedMessages.some((message) => message.status === "sending"),
   });
