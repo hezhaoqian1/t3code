@@ -27,12 +27,14 @@ import * as PreviewIpc from "./methods/preview.ts";
 import * as AccountIpc from "./methods/account.ts";
 import * as ConnectorIpc from "./methods/connectors.ts";
 import * as PresentationIpc from "./methods/presentation.ts";
+import { installNotificationBadge } from "./methods/notificationBadge.ts";
 
 export const installDesktopIpcHandlers = Effect.fn("desktop.ipc.installHandlers")(function* () {
   const ipc = yield* DesktopIpc.DesktopIpc;
   yield* PreviewIpc.installPreviewEventForwarding();
   yield* AccountIpc.installAccountStateForwarding();
   yield* ConnectorIpc.installConnectorStateForwarding();
+  yield* installNotificationBadge();
 
   yield* ipc.handleSync(getAppBranding);
   yield* ipc.handleSync(getWindowFullscreenState);

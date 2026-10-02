@@ -16,6 +16,9 @@ import { resolveServerBackedAppDisplayName } from "../branding.logic";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
 import { CommandPalette } from "../components/CommandPalette";
 import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
+import { isElectron } from "../env";
+import { ThreadNotificationCoordinator } from "../components/ThreadNotificationCoordinator";
+import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
 import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
 import { Button } from "../components/ui/button";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
@@ -120,6 +123,8 @@ function AuthenticatedRootRouteView() {
         <FontAppearanceSync />
         <AuthenticatedTracingBootstrap />
         <SlowRpcRequestToastCoordinator />
+        <ThreadNotificationCoordinator />
+        {isElectron ? <RunningThreadKeepAlive /> : null}
         <EventRouter />
         {appShell}
         {/* Above the router: a theme draft is judged by walking the app, so the

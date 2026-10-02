@@ -62,3 +62,32 @@ describe("ClientSettings chat width", () => {
     expect(() => decodePatch({ chatWidth: "huge" })).toThrow();
   });
 });
+
+describe("ClientSettings notifications", () => {
+  const decode = Schema.decodeUnknownSync(ClientSettingsSchema);
+  const decodePatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+  it("turns on system and in-app notifications for existing settings", () => {
+    const settings = decode({});
+    expect(settings.notificationMode).toBe("notifications");
+    expect(settings.inAppNotificationsEnabled).toBe(true);
+  });
+
+  it.each(["off", "notifications", "sound", "notifications-and-sound"] as const)(
+    "accepts the %s mode",
+    (notificationMode) => {
+      expect(decode({ notificationMode }).notificationMode).toBe(notificationMode);
+      expect(decodePatch({ notificationMode }).notificationMode).toBe(notificationMode);
+    },
+  );
+
+  it("keeps an explicit opt-out", () => {
+    const settings = decode({ notificationMode: "off", inAppNotificationsEnabled: false });
+    expect(settings.notificationMode).toBe("off");
+    expect(settings.inAppNotificationsEnabled).toBe(false);
+  });
+
+  it("rejects unknown modes", () => {
+    expect(() => decode({ notificationMode: "loud" })).toThrow();
+  });
+});

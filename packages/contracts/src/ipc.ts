@@ -851,6 +851,10 @@ export interface DesktopBridge {
   pickThemeFiles?: () => Promise<readonly PickedThemeFile[] | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
+  /** Shows how many background tasks have unseen notifications on the dock or taskbar. */
+  setNotificationBadge?: (badge: { count: number; image: string | null }) => Promise<void>;
+  /** Fires when the app regains focus and the badge clears. */
+  onNotificationBadgeClear?: (listener: () => void) => () => void;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },

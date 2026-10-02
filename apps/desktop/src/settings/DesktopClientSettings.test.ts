@@ -39,6 +39,8 @@ const clientSettings: ClientSettings = {
   legacySidebarEnabled: false,
   timestampFormat: "24-hour",
   chatWidth: "comfortable",
+  notificationMode: "notifications",
+  inAppNotificationsEnabled: true,
   wordWrap: true,
 };
 

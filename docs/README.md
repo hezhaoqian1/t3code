@@ -6,6 +6,7 @@
 - [桌面端更新](./user/updating.md)
 - [桌面端文件分析](./user/file-analysis.md)
 - [输入框：排队与引导](./user/composer.md)
+- [任务通知](./user/notifications.md)
 - [权限模式](./user/permission-modes.md)
 - [快捷键](./user/keybindings.md)
 - [任务与空间](./user/thread-sidebar.md)
