@@ -50,6 +50,11 @@ describe("searchSettings", () => {
     ]);
   });
 
+  it("matches extra search terms such as the chat width synonyms", () => {
+    expect(searchSettings("宽屏").map((item) => item.id)).toEqual(["chat-width"]);
+    expect(searchSettings("聊天区").map((item) => item.id)).toEqual(["chat-width"]);
+  });
+
   it("returns no results for an empty query", () => {
     expect(searchSettings("   ", ITEMS)).toEqual([]);
   });

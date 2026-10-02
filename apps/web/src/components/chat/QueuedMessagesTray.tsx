@@ -48,7 +48,10 @@ export const QueuedMessagesTray = memo(function QueuedMessagesTray({
     (steering ? "当前任务结束后依次发送，点「引导」可立即插入" : "即将依次发送");
 
   return (
-    <div className="mx-auto mb-1.5 w-full max-w-3xl px-2" data-chat-send-queue="true">
+    <div
+      className="mx-auto mb-1.5 w-full max-w-(--chat-max-width) px-2"
+      data-chat-send-queue="true"
+    >
       <div className="rounded-2xl border border-border/70 bg-card/95 py-1 shadow-xs">
         <div className="flex min-w-0 items-center gap-1.5 px-3 pt-1 pb-0.5 text-muted-foreground text-xs">
           <ClockIcon className="size-3.5 shrink-0" aria-hidden />

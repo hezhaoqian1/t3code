@@ -2114,3 +2114,16 @@ label:has(> select#reasoning-effort) select {
   opacity: 0.3;
   pointer-events: none;
 }
+
+/* Chat timeline and composer column width, set from the Chat width setting. */
+:root {
+  --chat-max-width: 48rem;
+}
+
+:root[data-chat-width="wide"] {
+  --chat-max-width: 72rem;
+}
+
+:root[data-chat-width="full"] {
+  --chat-max-width: 100%;
+}

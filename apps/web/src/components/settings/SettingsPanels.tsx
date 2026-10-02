@@ -315,6 +315,12 @@ export function SettledThreadsPanel() {
   );
 }
 
+const CHAT_WIDTH_LABELS = {
+  comfortable: "舒适",
+  wide: "较宽",
+  full: "铺满",
+} as const;
+
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "跟随系统",
   "12-hour": "12 小时制",
@@ -599,6 +605,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["时间格式"]
         : []),
+      ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["聊天区宽度"] : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["可见任务数"]
         : []),
@@ -666,6 +673,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
+      settings.chatWidth,
       settings.wordWrap,
       followSystem,
       theme,
@@ -733,6 +741,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     }
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
@@ -1834,6 +1843,44 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("chat-width")}
+          description="大屏幕上消息和输入框最多能铺多宽。"
+          resetAction={
+            settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? (
+              <SettingResetButton
+                label="chat width"
+                onClick={() => updateSettings({ chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth })}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.chatWidth}
+              onValueChange={(value) => {
+                if (value === "comfortable" || value === "wide" || value === "full") {
+                  updateSettings({ chatWidth: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="聊天区宽度">
+                <SelectValue>{CHAT_WIDTH_LABELS[settings.chatWidth]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="comfortable">
+                  {CHAT_WIDTH_LABELS.comfortable}（默认）
+                </SelectItem>
+                <SelectItem hideIndicator value="wide">
+                  {CHAT_WIDTH_LABELS.wide}
+                </SelectItem>
+                <SelectItem hideIndicator value="full">
+                  {CHAT_WIDTH_LABELS.full}
                 </SelectItem>
               </SelectPopup>
             </Select>

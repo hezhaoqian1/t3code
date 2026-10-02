@@ -1,7 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
-import { DEFAULT_SERVER_SETTINGS, ServerSettings, ServerSettingsPatch } from "./settings.ts";
+import {
+  ClientSettingsPatch,
+  ClientSettingsSchema,
+  DEFAULT_SERVER_SETTINGS,
+  ServerSettings,
+  ServerSettingsPatch,
+} from "./settings.ts";
 
 describe("FD server settings", () => {
   it("does not expose provider, model, credential, or update settings", () => {
@@ -34,5 +40,25 @@ describe("FD server settings", () => {
       providerInstances: { custom: { driver: "codex" } },
     });
     expect(decoded).toEqual({});
+  });
+});
+
+describe("ClientSettings chat width", () => {
+  const decode = Schema.decodeUnknownSync(ClientSettingsSchema);
+  const encode = Schema.encodeSync(ClientSettingsSchema);
+  const decodePatch = Schema.decodeUnknownSync(ClientSettingsPatch);
+
+  it("keeps the comfortable width for existing settings without a saved width", () => {
+    expect(decode({}).chatWidth).toBe("comfortable");
+  });
+
+  it.each(["comfortable", "wide", "full"] as const)("round-trips the %s width", (chatWidth) => {
+    expect(encode(decode({ chatWidth })).chatWidth).toBe(chatWidth);
+    expect(decodePatch({ chatWidth }).chatWidth).toBe(chatWidth);
+  });
+
+  it("rejects unsupported widths", () => {
+    expect(() => decode({ chatWidth: "huge" })).toThrow();
+    expect(() => decodePatch({ chatWidth: "huge" })).toThrow();
   });
 });

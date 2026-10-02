@@ -13,6 +13,8 @@ export interface SettingsSearchItem {
   readonly title: string;
   readonly to: SettingsPath;
   readonly targetId?: string;
+  /** Extra words people may type for this setting; matched like the title. */
+  readonly searchTerms?: ReadonlyArray<string>;
 }
 
 /**
@@ -102,6 +104,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "time-format",
     title: "时间格式",
     to: "/settings/general",
+  },
+  {
+    id: "chat-width",
+    title: "聊天区宽度",
+    to: "/settings/general",
+    searchTerms: ["宽屏 全宽 铺满 布局 消息 输入框 显示器 width"],
   },
   {
     id: "hide-whitespace-changes",
@@ -216,6 +224,7 @@ const LEGACY_SETTINGS_SEARCH_TITLES: Readonly<Record<SettingsSearchItemId, strin
   "project-grouping": "Project grouping",
   "auto-settle-inactive-threads": "Auto-settle inactive threads",
   "time-format": "Time format",
+  "chat-width": "Chat width",
   "hide-whitespace-changes": "Hide whitespace changes",
   "new-threads": "New threads",
   "start-from-origin": "Start from origin",
@@ -272,6 +281,9 @@ export function searchSettings(
 
   return items.filter((item) => {
     if (normalizeSearchText(item.title).includes(normalizedQuery)) return true;
+    if (item.searchTerms?.some((terms) => normalizeSearchText(terms).includes(normalizedQuery))) {
+      return true;
+    }
     const legacyTitle = LEGACY_SETTINGS_SEARCH_TITLES[item.id as SettingsSearchItemId];
     return legacyTitle !== undefined && normalizeSearchText(legacyTitle).includes(normalizedQuery);
   });
