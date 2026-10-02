@@ -274,6 +274,10 @@ import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import { QueuedMessagesTray } from "./chat/QueuedMessagesTray";
+import {
+  ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+  IMAGE_ONLY_BOOTSTRAP_PROMPT,
+} from "./chat/composerPromptHistory";
 import { isEditableFocused } from "../lib/editableFocus";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -335,10 +339,6 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { useAssetUrls } from "../assets/assetUrls";
 
-const IMAGE_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
-const ATTACHMENT_ONLY_BOOTSTRAP_PROMPT =
-  "[User attached one or more files without additional text. Analyze the attached files and respond with the most useful summary.]";
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
@@ -6302,6 +6302,7 @@ function ChatViewContent(props: ChatViewProps) {
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
                           <ChatComposer
                             composerRef={composerRef}
+                            promptHistoryMessages={timelineMessages}
                             composerDraftTarget={composerDraftTarget}
                             environmentId={environmentId}
                             routeKind={routeKind}
