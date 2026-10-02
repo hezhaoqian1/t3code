@@ -12,6 +12,7 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
+import { flushCompileCache } from "./compileCache.ts";
 
 import * as ServerConfig from "./config.ts";
 import { FD_DEEPSEEK_MODEL_SELECTION } from "./fd-agent/FdModelPolicy.ts";
@@ -391,6 +392,7 @@ export const make = (options?: StartupOptions) =>
           },
         }),
       );
+      yield* flushCompileCache;
       yield* Effect.logDebug("startup phase: complete");
     }).pipe(
       Effect.annotateSpans({

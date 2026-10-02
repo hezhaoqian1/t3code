@@ -1800,7 +1800,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     packageManager: rootPackageJson.packageManager,
     description: "Fangde AI desktop build",
     author: "Fangde Sure",
-    main: "apps/desktop/dist-electron/main.cjs",
+    main: "apps/desktop/dist-electron/boot.cjs",
     build: yield* createBuildConfig(
       options.platform,
       options.target,

@@ -104,6 +104,13 @@ describe("DesktopBackendConfiguration", () => {
         assert.equal(first.bootstrap.mode, "desktop");
         assert.equal(first.bootstrap.noBrowser, true);
         assert.deepEqual(first.args.slice(-1), ["--auto-bootstrap-project-from-cwd"]);
+        // Packaged builds preload the V8 compile cache for the backend.
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        assert.deepEqual(first.args.slice(0, 3), [
+          "--require",
+          environment.compileCachePath,
+          environment.backendEntryPath,
+        ]);
         assert.equal(first.cwd.replaceAll("\\", "/").endsWith("/userdata/office-workspace"), true);
         assert.match(first.bootstrap.desktopBootstrapToken, /^[0-9a-f]{48}$/i);
         assert.equal(second.bootstrap.desktopBootstrapToken, first.bootstrap.desktopBootstrapToken);

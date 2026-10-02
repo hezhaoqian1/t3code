@@ -52,6 +52,8 @@ export class DesktopEnvironment extends Context.Service<
     readonly rootDir: string;
     readonly appRoot: string;
     readonly backendEntryPath: string;
+    // Preload that turns on the V8 compile cache for the local backend.
+    readonly compileCachePath: string;
     readonly backendCwd: string;
     readonly preloadPath: string;
     readonly appUpdateYmlPath: string;
@@ -206,6 +208,7 @@ const make = Effect.fn("desktop.environment.make")(function* (
     rootDir,
     appRoot,
     backendEntryPath: path.join(serverRoot, "apps/server/dist/bin.mjs"),
+    compileCachePath: path.join(input.dirname, "compileCache.cjs"),
     backendCwd: input.isPackaged ? homeDirectory : appRoot,
     preloadPath: path.join(input.dirname, "preload.cjs"),
     appUpdateYmlPath: input.isPackaged
