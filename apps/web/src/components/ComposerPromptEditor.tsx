@@ -1857,7 +1857,7 @@ function ComposerPromptEditorInner({
               data-testid="composer-editor"
               aria-placeholder={placeholder}
               placeholder={<span />}
-              onPaste={onPaste}
+              onPasteCapture={onPaste}
             />
           }
           placeholder={

@@ -42,7 +42,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import {
   clampCollapsedComposerCursor,
   type ComposerTrigger,
@@ -2663,7 +2663,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       return;
     }
-    if (!insertComposerTextAtEnd(text, { ensureLeadingBoundary: true })) return;
+    // The text arrives after an await, outside React's event batching: commit
+    // the new prompt now, or the editor's pending focus re-emits the old,
+    // empty value and overwrites it.
+    let inserted = false;
+    flushSync(() => {
+      inserted = insertComposerTextAtEnd(text, { ensureLeadingBoundary: true });
+    });
+    if (!inserted) return;
     removeComposerDocument(document.id);
     focusComposer();
   };
@@ -2676,7 +2683,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       const imageFiles = files.filter(isComposerImageFile);
       const documentFiles = isElectron ? files.filter((file) => !isComposerImageFile(file)) : [];
       if (imageFiles.length === 0 && documentFiles.length === 0) return;
+      // Runs in the capture phase: keep the editor from also inserting the
+      // clipboard's text fallback (a file name or URL).
       event.preventDefault();
+      event.stopPropagation();
       void addComposerImages(imageFiles);
       addComposerDocuments(documentFiles);
       return;
