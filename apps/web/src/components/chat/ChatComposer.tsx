@@ -20,8 +20,15 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import {
+  isPasteAsTextShortcut,
+  nextPastedTextFileName,
+  pastedTextDisposition,
+  wouldTextPasteExceedLimit,
+} from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
@@ -121,7 +128,8 @@ import { searchSlashCommandItems } from "./composerSlashCommandSearch";
 import { ContextWindowMeter } from "./ContextWindowMeter";
 import { buildExpandedImagePreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
 import { basenameOfPath } from "../../pierre-icons";
-import { cn, randomUUID } from "~/lib/utils";
+import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
+import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { Separator } from "../ui/separator";
 import {
   resolveFeishuConnectorConnectionStatus,
@@ -225,6 +233,7 @@ import { toastManager } from "../ui/toast";
 import {
   BotIcon,
   CircleAlertIcon,
+  ClipboardPasteIcon,
   FileTextIcon,
   PencilRulerIcon,
   type LucideIcon,
@@ -648,6 +657,12 @@ export interface ChatComposerProps {
 // Component
 // --------------------------------------------------------------------------
 
+function formatPastedTextSize(bytes: number): string {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps) {
   const {
     promptHistoryMessages,
@@ -997,6 +1012,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // Refs
   // ------------------------------------------------------------------
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
+  // Ctrl+Shift+V (⌘⇧V) keeps a large paste inline. Electron can deliver the
+  // native menu action just before the paste event while browsers deliver
+  // keydown first; a short deadline bridges both without leaving later
+  // pastes in bypass mode.
+  const pasteAsTextShortcutUntilRef = useRef(0);
+  useEffect(() => {
+    const arm = () => {
+      pasteAsTextShortcutUntilRef.current = Date.now() + 1_000;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isPasteAsTextShortcut(event, isMacPlatform(navigator.platform))) arm();
+    };
+    const onBlur = () => {
+      pasteAsTextShortcutUntilRef.current = 0;
+    };
+    window.addEventListener(DESKTOP_PASTE_AS_TEXT_EVENT, arm);
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener(DESKTOP_PASTE_AS_TEXT_EVENT, arm);
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
   // Active ArrowUp recall. Cleared on edit and on thread switch.
   const promptHistoryPositionRef = useRef<ComposerPromptHistoryPosition | null>(null);
   const composerImageInputRef = useRef<HTMLInputElement>(null);
@@ -2477,7 +2516,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   };
 
-  const addComposerDocuments = (files: File[]) => {
+  const addComposerDocuments = (
+    files: File[],
+    options?: { readonly source?: ComposerDocumentAttachment["source"] },
+  ) => {
     if (!isElectron || !activeThreadId || files.length === 0) return;
     if (pendingUserInputs.length > 0) {
       toastManager.add({
@@ -2508,6 +2550,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         mimeType: documentMimeType(file),
         sizeBytes: file.size,
         file: normalizeDocumentFile(file),
+        ...(options?.source ? { source: options.source } : {}),
       });
     }
     if (nextDocuments.length > 0) {
@@ -2541,15 +2584,106 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Callbacks: paste / drag
   // ------------------------------------------------------------------
+  /**
+   * Large clipboard text becomes a "粘贴内容.txt" attachment instead of a wall
+   * of text in the composer and the chat. Returns true when the paste was
+   * handled here (folded, or refused with an explanation).
+   */
+  const foldPastedText = (plainText: string, bypassAutoAttachment: boolean): boolean => {
+    if (!isElectron || plainText.length === 0) return false;
+    const snapshot = composerEditorRef.current?.readSnapshot();
+    const cursor = snapshot?.cursor ?? promptRef.current.length;
+    const wouldExceedInputLimit = wouldTextPasteExceedLimit({
+      valueLength: promptRef.current.length,
+      selection: { start: cursor, end: cursor },
+      textLength: plainText.length,
+      maxLength: PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
+    });
+    const disposition = pastedTextDisposition({
+      text: plainText,
+      canAttach: true,
+      bypassAutoAttachment,
+      wouldExceedInputLimit,
+    });
+    if (disposition === "inline") {
+      if (!wouldExceedInputLimit) return false;
+      toastManager.add({
+        type: "error",
+        title: "粘贴内容超过单条消息上限",
+        description: `一条消息最多 ${PROVIDER_SEND_TURN_MAX_INPUT_CHARS.toLocaleString()} 个字符。不按 Shift 直接粘贴，会自动作为附件发送。`,
+      });
+      return true;
+    }
+    const canAttach =
+      Boolean(activeThreadId) &&
+      pendingUserInputs.length === 0 &&
+      attachmentCapacity(composerImagesRef.current.length + composerDocuments.length) > 0;
+    if (!canAttach) {
+      // Small enough to type in: paste it as usual.
+      if (!wouldExceedInputLimit) return false;
+      toastManager.add({
+        type: "error",
+        title: "粘贴内容太长，无法放入这条消息",
+        description:
+          pendingUserInputs.length > 0
+            ? "请先回答当前问题，再粘贴。"
+            : `每条消息最多 ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} 个附件，请先移除一个附件。`,
+      });
+      return true;
+    }
+    const name = nextPastedTextFileName(composerDocuments.map((document) => document.name));
+    const file = new File([plainText], name, { type: "text/plain" });
+    if (file.size > PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES) {
+      toastManager.add({
+        type: "error",
+        title: "粘贴内容太大",
+        description: "超过 25 MB，请保存为文件后再上传，或只粘贴需要的部分。",
+      });
+      return true;
+    }
+    addComposerDocuments([file], { source: "pasted-text" });
+    toastManager.add({
+      type: "info",
+      title: `大段粘贴已作为附件“${name}”`,
+      description: `${formatPastedTextSize(file.size)} · 想直接放进输入框，请用 ${
+        isMacPlatform(navigator.platform) ? "⌘⇧V" : "Ctrl+Shift+V"
+      } 粘贴`,
+    });
+    return true;
+  };
+
+  // Puts a folded paste back into the composer as text, when it fits.
+  const expandPastedTextDocument = async (document: ComposerDocumentAttachment) => {
+    const text = await document.file.text();
+    if (promptRef.current.length + text.length + 1 > PROVIDER_SEND_TURN_MAX_INPUT_CHARS) {
+      toastManager.add({
+        type: "error",
+        title: "内容太长，无法放回输入框",
+        description: `一条消息最多 ${PROVIDER_SEND_TURN_MAX_INPUT_CHARS.toLocaleString()} 个字符，请保留为附件发送。`,
+      });
+      return;
+    }
+    if (!insertComposerTextAtEnd(text, { ensureLeadingBoundary: true })) return;
+    removeComposerDocument(document.id);
+    focusComposer();
+  };
+
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
     const files = Array.from(event.clipboardData.files);
-    if (files.length === 0) return;
-    const imageFiles = files.filter(isComposerImageFile);
-    const documentFiles = isElectron ? files.filter((file) => !isComposerImageFile(file)) : [];
-    if (imageFiles.length === 0 && documentFiles.length === 0) return;
+    const bypassAutoAttachment = Date.now() <= pasteAsTextShortcutUntilRef.current;
+    pasteAsTextShortcutUntilRef.current = 0;
+    if (files.length > 0) {
+      const imageFiles = files.filter(isComposerImageFile);
+      const documentFiles = isElectron ? files.filter((file) => !isComposerImageFile(file)) : [];
+      if (imageFiles.length === 0 && documentFiles.length === 0) return;
+      event.preventDefault();
+      void addComposerImages(imageFiles);
+      addComposerDocuments(documentFiles);
+      return;
+    }
+    if (!foldPastedText(event.clipboardData.getData("text/plain"), bypassAutoAttachment)) return;
     event.preventDefault();
-    void addComposerImages(imageFiles);
-    addComposerDocuments(documentFiles);
+    event.stopPropagation();
   };
 
   const onComposerDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
@@ -3248,11 +3382,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       key={document.id}
                       className="flex max-w-full items-center gap-2 rounded-lg border border-border/80 bg-background px-2.5 py-2 text-xs"
                     >
-                      <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                      {document.source === "pasted-text" ? (
+                        <ClipboardPasteIcon
+                          className="size-4 shrink-0 text-muted-foreground"
+                          aria-label="粘贴的文本"
+                        />
+                      ) : (
+                        <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                      )}
                       <span className="min-w-0">
                         <span className="block max-w-56 truncate font-medium">{document.name}</span>
                         <DocumentUploadStatus attachment={document} environmentId={environmentId} />
                       </span>
+                      {document.source === "pasted-text" ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="xs"
+                          className="shrink-0"
+                          onClick={() => void expandPastedTextDocument(document)}
+                          title="把这段粘贴内容放回输入框，作为文字发送"
+                        >
+                          放回输入框
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         variant="ghost"

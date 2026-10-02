@@ -9,6 +9,7 @@ import {
   type DesktopEnvironmentBootstrap,
   type PickedThemeFile,
 } from "@t3tools/contracts";
+import * as Electron from "electron";
 import * as NodeOS from "node:os";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -137,6 +138,29 @@ export const confirm = DesktopIpc.makeIpcMethod({
     return yield* electronWindow.focusedMainOrFirst.pipe(
       Effect.flatMap((owner) => dialog.confirm({ owner, message })),
     );
+  }),
+});
+
+/**
+ * Pastes into the focused part of the main window after the renderer armed
+ * "keep this paste inline" (the ⌘⇧V menu item on macOS).
+ */
+export const pasteAsText = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PASTE_AS_TEXT_CHANNEL,
+  payload: Schema.Undefined,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.window.pasteAsText")(function* () {
+    const electronWindow = yield* ElectronWindow.ElectronWindow;
+    const window = yield* electronWindow.focusedMainOrFirst;
+    if (Option.isNone(window) || window.value.isDestroyed()) return;
+    const focused = Electron.webContents.getFocusedWebContents();
+    if (
+      focused &&
+      !focused.isDestroyed() &&
+      Electron.BrowserWindow.fromWebContents(focused) === window.value
+    ) {
+      focused.paste();
+    }
   }),
 });
 

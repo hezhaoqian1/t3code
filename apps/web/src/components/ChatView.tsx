@@ -4944,6 +4944,7 @@ function ChatViewContent(props: ChatViewProps) {
           mimeType: document.mimeType,
           sizeBytes: document.sizeBytes,
           dataUrl: await readFileAsDataUrl(document.file),
+          ...(document.source ? { source: document.source } : {}),
         })),
       ]);
     })();
@@ -4961,6 +4962,7 @@ function ChatViewContent(props: ChatViewProps) {
       name: document.name,
       mimeType: document.mimeType,
       sizeBytes: document.sizeBytes,
+      ...(document.source ? { source: document.source } : {}),
     }));
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response

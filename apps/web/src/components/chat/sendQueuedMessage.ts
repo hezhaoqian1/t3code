@@ -85,7 +85,11 @@ async function resolveTurnAttachments(
       };
       return attachment.type === "image"
         ? { type: "image" as const, ...inline }
-        : { type: "document" as const, ...inline };
+        : {
+            type: "document" as const,
+            ...inline,
+            ...(attachment.source ? { source: attachment.source } : {}),
+          };
     }),
   );
 }

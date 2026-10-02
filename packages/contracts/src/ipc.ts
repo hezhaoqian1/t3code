@@ -851,6 +851,8 @@ export interface DesktopBridge {
   pickThemeFiles?: () => Promise<readonly PickedThemeFile[] | null>;
   confirm: (message: string) => Promise<boolean>;
   setTheme: (theme: DesktopTheme) => Promise<void>;
+  /** Pastes into the focused composer after "paste as plain text" armed it. */
+  pasteAsText?: () => Promise<void>;
   /** Shows how many background tasks have unseen notifications on the dock or taskbar. */
   setNotificationBadge?: (badge: { count: number; image: string | null }) => Promise<void>;
   /** Fires when the app regains focus and the badge clears. */

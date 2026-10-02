@@ -24,6 +24,8 @@ export interface UploadableAttachment {
   readonly mimeType: string;
   readonly sizeBytes: number;
   readonly file: File;
+  /** Documents only: set for clipboard text the composer folded into a file. */
+  readonly source?: "pasted-text" | undefined;
 }
 
 const MAX_UPLOADS_PER_ENVIRONMENT = 3;
@@ -382,13 +384,21 @@ export function getUploadedAttachments(input: {
     if (upload?.status !== "ready" || upload.environmentId !== input.environmentId) {
       return null;
     }
-    uploaded.push({
-      type: attachment.type,
+    const reference = {
       id: upload.attachmentId,
       name: attachment.name,
       mimeType: attachment.mimeType || "application/octet-stream",
       sizeBytes: attachment.file.size,
-    });
+    };
+    uploaded.push(
+      attachment.type === "image"
+        ? { type: "image", ...reference }
+        : {
+            type: "document",
+            ...reference,
+            ...(attachment.source ? { source: attachment.source } : {}),
+          },
+    );
   }
   return uploaded;
 }

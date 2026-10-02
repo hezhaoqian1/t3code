@@ -117,6 +117,15 @@ export const ChatImageAttachment = Schema.Struct({
 });
 export type ChatImageAttachment = typeof ChatImageAttachment.Type;
 
+/**
+ * Where a document attachment came from when it is not a file the employee
+ * picked: "pasted-text" is clipboard text the composer folded into a file to
+ * keep the message readable. It is the employee's own words, not third-party
+ * content.
+ */
+export const DocumentAttachmentSource = Schema.Literal("pasted-text");
+export type DocumentAttachmentSource = typeof DocumentAttachmentSource.Type;
+
 export const ChatDocumentAttachment = Schema.Struct({
   type: Schema.Literal("document"),
   id: ChatAttachmentId,
@@ -125,6 +134,7 @@ export const ChatDocumentAttachment = Schema.Struct({
   sizeBytes: NonNegativeInt.check(
     Schema.isLessThanOrEqualTo(PROVIDER_SEND_TURN_MAX_DOCUMENT_BYTES),
   ),
+  source: Schema.optional(DocumentAttachmentSource),
 });
 export type ChatDocumentAttachment = typeof ChatDocumentAttachment.Type;
 
@@ -149,6 +159,7 @@ const UploadChatDocumentAttachment = Schema.Struct({
   dataUrl: TrimmedNonEmptyString.check(
     Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_DOCUMENT_DATA_URL_CHARS),
   ),
+  source: Schema.optional(DocumentAttachmentSource),
 });
 export type UploadChatDocumentAttachment = typeof UploadChatDocumentAttachment.Type;
 

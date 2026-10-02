@@ -55,6 +55,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   CircleAlertIcon,
+  ClipboardPasteIcon,
   EyeIcon,
   FileTextIcon,
   GlobeIcon,
@@ -1119,7 +1120,14 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
                 key={document.id}
                 className="flex max-w-full items-center gap-2 rounded-lg border border-border/70 bg-background/70 px-2.5 py-2 text-xs"
               >
-                <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                {document.source === "pasted-text" ? (
+                  <ClipboardPasteIcon
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-label="粘贴的文本"
+                  />
+                ) : (
+                  <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+                )}
                 <span className="min-w-0 truncate">{document.name}</span>
               </div>
             ))}

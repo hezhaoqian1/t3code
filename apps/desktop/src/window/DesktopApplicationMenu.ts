@@ -134,6 +134,9 @@ export const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
+    const pasteAsTextClick = () => {
+      runMenuEffect("paste-as-text", dispatchMenuAction("paste-as-text"));
+    };
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {
       runMenuEffect(`zoom-${direction}`, zoomMainWindow(direction));
     };
@@ -183,7 +186,35 @@ export const make = Effect.gen(function* () {
           { role: environment.platform === "darwin" ? "close" : "quit" },
         ],
       },
-      { role: "editMenu" },
+      // macOS has no native ⌘⇧V, so the menu provides "paste as plain text"
+      // (keeps a large paste in the composer instead of attaching it).
+      // Elsewhere Chromium handles Ctrl+Shift+V itself.
+      environment.platform === "darwin"
+        ? {
+            label: "Edit",
+            submenu: [
+              { role: "undo" },
+              { role: "redo" },
+              { type: "separator" },
+              { role: "cut" },
+              { role: "copy" },
+              { role: "paste" },
+              {
+                label: "Paste as Plain Text",
+                accelerator: "Cmd+Shift+V",
+                click: pasteAsTextClick,
+              },
+              { role: "pasteAndMatchStyle" },
+              { role: "delete" },
+              { role: "selectAll" },
+              { type: "separator" },
+              {
+                label: "Speech",
+                submenu: [{ role: "startSpeaking" }, { role: "stopSpeaking" }],
+              },
+            ],
+          }
+        : { role: "editMenu" },
       {
         label: "View",
         submenu: [

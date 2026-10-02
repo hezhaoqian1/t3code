@@ -151,3 +151,44 @@ describe("prepare attachments", () => {
     expect(calls).toBe(1);
   });
 });
+
+describe("pasted text attachments", () => {
+  const pastedTurn = {
+    threadId: ThreadId.make("test"),
+    input: "帮我找出报错原因",
+    attachments: [
+      {
+        type: "document" as const,
+        id: "test-00000000-0000-0000-0000-000000000002",
+        name: "粘贴内容.txt",
+        mimeType: "text/plain",
+        sizeBytes: 40_000,
+        source: "pasted-text" as const,
+      },
+    ],
+  };
+
+  it("sends a folded paste as the employee's own words without parsing it", async () => {
+    const result = await prepareAttachments({
+      platform: "win32",
+      turn: pastedTurn,
+      model: "deepseek-v4-flash",
+      attachmentsDir: "/tmp/attachments",
+      signal: new AbortController().signal,
+      process: async () => {
+        throw new Error("pasted text must not go through the document parser");
+      },
+      readText: async () => "ERROR at line 42\r\nretrying",
+      vision: {
+        analyze: async () => {
+          throw new Error("no vision for pasted text");
+        },
+      },
+    });
+    expect(result.attachments).toEqual([]);
+    expect(result.input).toContain("帮我找出报错原因");
+    expect(result.input).toContain('<pasted-text name="粘贴内容.txt">\nERROR at line 42\nretrying');
+    expect(result.input).toContain("按用户的原话对待");
+    expect(result.input).not.toContain('trust="none"');
+  });
+});
