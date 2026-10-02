@@ -59,6 +59,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 
 import {
   COMPOSER_DRAFT_STORAGE_KEY,
+  composerDraftHasUserContent,
   clearAllEnterpriseComposerDrafts,
   clearEnterpriseComposerDraft,
   clearComposerDraftsEnvironment,
@@ -1875,5 +1876,50 @@ describe("createDebouncedStorage", () => {
     vi.advanceTimersByTime(300);
     expect(base.setItem).toHaveBeenCalledTimes(1);
     expect(base.setItem).toHaveBeenCalledWith("key", "v2");
+  });
+});
+
+describe("composerDraftStore unsent draft marker", () => {
+  const threadRef = scopeThreadRef(TEST_ENVIRONMENT_ID, ThreadId.make("thread-unsent-marker"));
+  const hasDraft = () =>
+    composerDraftHasUserContent(useComposerDraftStore.getState().getComposerDraft(threadRef));
+
+  beforeEach(() => {
+    resetComposerDraftStore();
+  });
+
+  it("reports content for typed text and clears when the composer is emptied", () => {
+    expect(hasDraft()).toBe(false);
+
+    useComposerDraftStore.getState().setPrompt(threadRef, "   ");
+    expect(hasDraft()).toBe(false);
+
+    useComposerDraftStore.getState().setPrompt(threadRef, "跟进报销单的审批进度");
+    expect(hasDraft()).toBe(true);
+
+    useComposerDraftStore.getState().clearComposerContent(threadRef);
+    expect(hasDraft()).toBe(false);
+  });
+
+  it("restores discarded content for undo", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "跟进报销单的审批进度");
+    const draft = store.getComposerDraft(threadRef)!;
+    store.clearComposerContent(threadRef);
+    expect(hasDraft()).toBe(false);
+
+    useComposerDraftStore.getState().restoreComposerContent(threadRef, {
+      prompt: draft.prompt,
+      images: draft.images,
+      nonPersistedImageIds: draft.nonPersistedImageIds,
+      persistedAttachments: draft.persistedAttachments,
+      terminalContexts: draft.terminalContexts,
+      elementContexts: draft.elementContexts,
+      previewAnnotations: draft.previewAnnotations,
+      reviewComments: draft.reviewComments,
+    });
+    expect(useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt).toBe(
+      "跟进报销单的审批进度",
+    );
   });
 });

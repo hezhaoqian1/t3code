@@ -303,6 +303,37 @@ interface ProjectDraftSession extends DraftSessionState {
  */
 type ComposerThreadTarget = ScopedThreadRef | DraftId;
 
+/** The user-authored part of a draft, as cleared by `clearComposerContent`. */
+export type ComposerDraftContent = Pick<
+  ComposerThreadDraftState,
+  | "prompt"
+  | "images"
+  | "nonPersistedImageIds"
+  | "persistedAttachments"
+  | "terminalContexts"
+  | "elementContexts"
+  | "previewAnnotations"
+  | "reviewComments"
+>;
+
+/** True when a draft holds anything the user would lose by discarding it. */
+export function composerDraftHasUserContent(
+  draft: ComposerThreadDraftState | null | undefined,
+): boolean {
+  if (!draft) {
+    return false;
+  }
+  return (
+    draft.prompt.trim().length > 0 ||
+    draft.images.length > 0 ||
+    draft.persistedAttachments.length > 0 ||
+    draft.terminalContexts.length > 0 ||
+    draft.elementContexts.length > 0 ||
+    draft.previewAnnotations.length > 0 ||
+    draft.reviewComments.length > 0
+  );
+}
+
 /**
  * Persisted store for composer content plus draft-session metadata.
  *
@@ -484,6 +515,8 @@ interface ComposerDraftStoreState {
     attachments: PersistedComposerImageAttachment[],
   ) => void;
   clearComposerContent: (threadRef: ComposerThreadTarget) => void;
+  /** Puts content taken out by `clearComposerContent` back, e.g. to undo a discard. */
+  restoreComposerContent: (threadRef: ComposerThreadTarget, content: ComposerDraftContent) => void;
   /**
    * Clears only the prompt text and image attachments, preserving terminal /
    * element contexts, preview annotations, and review comments. Used by the
@@ -3320,6 +3353,21 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             return { draftsByThreadKey: nextDraftsByThreadKey };
           });
         },
+        restoreComposerContent: (threadRef, content) => {
+          const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
+          if (threadKey.length === 0) {
+            return;
+          }
+          set((state) => {
+            const current = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            return {
+              draftsByThreadKey: {
+                ...state.draftsByThreadKey,
+                [threadKey]: { ...current, ...content },
+              },
+            };
+          });
+        },
         clearComposerPromptAndImages: (threadRef) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0) {
@@ -3498,6 +3546,17 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
     };
   });
   composerDebouncedStorage.flush();
+}
+
+/**
+ * True when a real thread's composer holds unsent user content. Selects a
+ * boolean so the sidebar row that reads it re-renders only when the draft
+ * appears or disappears, not on every keystroke.
+ */
+export function useThreadHasUnsentDraft(threadRef: ScopedThreadRef): boolean {
+  return useComposerDraftStore((state) =>
+    composerDraftHasUserContent(getComposerDraftState(state, threadRef)),
+  );
 }
 
 export function useComposerThreadDraft(threadRef: ComposerThreadTarget): ComposerThreadDraftState {

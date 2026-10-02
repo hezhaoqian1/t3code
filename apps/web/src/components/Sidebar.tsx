@@ -176,7 +176,7 @@ import {
 } from "./sidebar/SidebarChrome";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
-import { useComposerDraftStore } from "../composerDraftStore";
+import { useComposerDraftStore, useThreadHasUnsentDraft } from "../composerDraftStore";
 import { isGeneratedTaskWorkspaceRoot, isOfficeWorkspaceShellContext } from "../officeMode";
 import { projectEnvironment } from "../state/projects";
 
@@ -402,6 +402,11 @@ type SortablePinnedRowBag = Pick<
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
 >;
 
+// Unsent work shares one look: the new-task draft button and thread rows with
+// unsent composer content both use this tint and pen so they read alike.
+const DRAFT_SURFACE_CLASS_NAME = "bg-amber-400/[0.06] hover:bg-amber-400/[0.1]";
+const DRAFT_PEN_CLASS_NAME = "size-3 shrink-0 text-amber-600 dark:text-amber-300/80";
+
 function SortablePinnedThreadRow(props: {
   id: string;
   children: (bag: SortablePinnedRowBag) => ReactNode;
@@ -493,6 +498,51 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [thread.environmentId, thread.id],
   );
   const threadKey = scopedThreadKey(threadRef);
+  // Unsent composer text on this thread. The open thread shows its own
+  // composer, so the marker only decorates rows you have navigated away from.
+  const hasUnsentDraft = useThreadHasUnsentDraft(threadRef) && !props.isActive;
+  const handleDiscardDraftClick = useCallback(
+    (event: ReactMouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const store = useComposerDraftStore.getState();
+      const draft = store.getComposerDraft(threadRef);
+      if (!draft) return;
+      const {
+        prompt,
+        images,
+        nonPersistedImageIds,
+        persistedAttachments,
+        terminalContexts,
+        elementContexts,
+        previewAnnotations,
+        reviewComments,
+      } = draft;
+      store.clearComposerContent(threadRef);
+      toastManager.add(
+        stackedThreadToast({
+          type: "info",
+          title: "草稿已丢弃",
+          timeout: 6_000,
+          actionProps: {
+            children: "撤销",
+            onClick: () =>
+              useComposerDraftStore.getState().restoreComposerContent(threadRef, {
+                prompt,
+                images,
+                nonPersistedImageIds,
+                persistedAttachments,
+                terminalContexts,
+                elementContexts,
+                previewAnnotations,
+                reviewComments,
+              }),
+          },
+        }),
+      );
+    },
+    [threadRef],
+  );
   const isRegeneratingTitle = thread.titleRegeneration != null;
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
@@ -781,9 +831,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       ? "bg-sidebar-row-active text-sidebar-foreground"
       : isSelected
         ? "bg-sidebar-row-selected text-sidebar-foreground"
-        : shouldRecede
-          ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-          : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
+        : hasUnsentDraft
+          ? cn(DRAFT_SURFACE_CLASS_NAME, "text-sidebar-foreground")
+          : shouldRecede
+            ? "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+            : "bg-transparent text-sidebar-foreground hover:bg-sidebar-row-hover",
     isInFlight &&
       !props.isActive &&
       !isSelected &&
@@ -863,6 +915,29 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     </span>
   ) : null;
 
+  const draftIndicator = hasUnsentDraft ? (
+    <span
+      role="img"
+      aria-label="未发送的草稿"
+      title="未发送的草稿"
+      data-testid={`sidebar-draft-indicator-${thread.id}`}
+      className="inline-flex shrink-0 items-center"
+    >
+      <SquarePenIcon aria-hidden className={DRAFT_PEN_CLASS_NAME} />
+    </span>
+  ) : null;
+  const discardDraftButton = hasUnsentDraft ? (
+    <button
+      type="button"
+      aria-label="丢弃草稿"
+      title="丢弃草稿"
+      onClick={handleDiscardDraftClick}
+      className="pointer-events-none inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
+    >
+      <XIcon className="size-3.5" />
+    </button>
+  ) : null;
+
   if (variant === "slim") {
     return (
       <li
@@ -908,6 +983,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               </span>
             )}
             {title}
+            {draftIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -918,6 +994,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
             {prBadge}
+            {discardDraftButton}
             <span className="relative ml-auto flex h-6 min-w-8 shrink-0 items-center justify-end">
               <span
                 className={cn(
@@ -1134,7 +1211,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     threadTimeLabel(thread)
                   )}
                 </span>
-                {props.settlementSupported || showSnoozeButton ? (
+                {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
                   <span
                     className={cn(
                       // focus-visible, not focus-within: a mouse click leaves
@@ -1146,6 +1223,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       snoozeMenuOpen && "pointer-events-auto static opacity-100",
                     )}
                   >
+                    {discardDraftButton}
                     {showSnoozeButton ? (
                       <SnoozePopoverButton
                         open={snoozeMenuOpen}
@@ -1169,8 +1247,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 ) : null}
               </span>
             </div>
-            <div className="mt-1 flex min-w-0">
+            <div className="mt-1 flex min-w-0 items-center gap-1.5">
               {title}
+              {draftIndicator}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   正在生成标题
