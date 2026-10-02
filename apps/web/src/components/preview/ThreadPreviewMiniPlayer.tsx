@@ -18,6 +18,7 @@ import {
   clampPreviewMiniPlayerSize,
   PREVIEW_MINI_PLAYER_DEFAULT_SIZE,
 } from "./previewMiniPlayerLayout";
+import { describeActionError } from "../../rpc/transportError";
 
 interface DragState {
   readonly pointerId: number;
@@ -75,7 +76,7 @@ export function ThreadPreviewMiniPlayer({ threadRef, tabId, bottomInset }: Props
       toastManager.add({
         type: "error",
         title: "Unable to update popped-out preview",
-        description: error instanceof Error ? error.message : "An error occurred.",
+        description: describeActionError(error),
       });
     });
   };

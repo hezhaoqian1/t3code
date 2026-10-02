@@ -90,6 +90,7 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
+import { describeActionError } from "../rpc/transportError";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -496,7 +497,7 @@ function PublishRepositoryDialog(props: PublishRepositoryDialogProps) {
       if (result._tag === "Failure") {
         if (!isAtomCommandInterrupted(result)) {
           const error = squashAtomCommandFailure(result);
-          setPublishError(error instanceof Error ? error.message : "An error occurred.");
+          setPublishError(describeActionError(error));
         }
         return;
       }
@@ -1410,7 +1411,7 @@ export default function GitActionsControl({
           stackedThreadToast({
             type: "error",
             title: "Action failed",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
             ...(scopedToastData !== undefined ? { data: scopedToastData } : {}),
           }),
         );
@@ -1553,7 +1554,7 @@ export default function GitActionsControl({
             stackedThreadToast({
               type: "error",
               title: "Pull failed",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
               ...(threadToastData !== undefined ? { data: threadToastData } : {}),
             }),
           );
@@ -1641,7 +1642,7 @@ export default function GitActionsControl({
           stackedThreadToast({
             type: "error",
             title: "Unable to open file",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
             ...(threadToastData !== undefined ? { data: threadToastData } : {}),
           }),
         );

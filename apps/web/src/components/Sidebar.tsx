@@ -175,6 +175,7 @@ import { useComposerDraftStore, useThreadHasUnsentDraft } from "../composerDraft
 import { useSendQueueStore } from "../sendQueueStore";
 import { isGeneratedTaskWorkspaceRoot, isOfficeWorkspaceShellContext } from "../officeMode";
 import { projectEnvironment } from "../state/projects";
+import { describeActionError } from "../rpc/transportError";
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "刚刚";
@@ -1462,7 +1463,7 @@ export default function Sidebar() {
         stackedThreadToast({
           type: "error",
           title: "复制路径失败",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          description: describeActionError(error),
         }),
       );
     },
@@ -1481,7 +1482,7 @@ export default function Sidebar() {
         stackedThreadToast({
           type: "error",
           title: "复制分支失败",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          description: describeActionError(error),
         }),
       );
     },
@@ -2098,7 +2099,7 @@ export default function Sidebar() {
             stackedThreadToast({
               type: "error",
               title: "重命名任务失败",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
             }),
           );
         }
@@ -2180,7 +2181,7 @@ export default function Sidebar() {
                 stackedThreadToast({
                   type: "error",
                   title: "归纳任务失败",
-                  description: error instanceof Error ? error.message : "An error occurred.",
+                  description: describeActionError(error),
                 }),
               );
             }
@@ -2208,7 +2209,7 @@ export default function Sidebar() {
             stackedThreadToast({
               type: "error",
               title: "撤销归纳失败",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
             }),
           );
         }
@@ -2226,7 +2227,7 @@ export default function Sidebar() {
             stackedThreadToast({
               type: "error",
               title: "唤醒任务失败",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
             }),
           );
         }
@@ -2319,7 +2320,7 @@ export default function Sidebar() {
             stackedThreadToast({
               type: "error",
               title: "置顶任务失败",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
             }),
           );
         }
@@ -2337,7 +2338,7 @@ export default function Sidebar() {
             stackedThreadToast({
               type: "error",
               title: "取消置顶失败",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
             }),
           );
         }
@@ -2402,7 +2403,7 @@ export default function Sidebar() {
               stackedThreadToast({
                 type: "error",
                 title: "调整置顶顺序失败",
-                description: error instanceof Error ? error.message : "An error occurred.",
+                description: describeActionError(error),
               }),
             );
             return;
@@ -2760,7 +2761,7 @@ export default function Sidebar() {
                 stackedThreadToast({
                   type: "error",
                   title: "无法新建任务",
-                  description: error instanceof Error ? error.message : "An error occurred.",
+                  description: describeActionError(error),
                 }),
               );
             }
@@ -2796,7 +2797,7 @@ export default function Sidebar() {
                 stackedThreadToast({
                   type: "error",
                   title: "重新生成标题失败",
-                  description: error instanceof Error ? error.message : "An error occurred.",
+                  description: describeActionError(error),
                 }),
               );
             }

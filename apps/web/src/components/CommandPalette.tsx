@@ -1375,6 +1375,37 @@ function OpenCommandPaletteDialog(props: {
         });
       },
     });
+  } else if (primaryEnvironmentId !== null) {
+    // No task open: there is no session to restart, but a new Skill or
+    // connector should still show up before the first message.
+    const environmentId = primaryEnvironmentId;
+    actionItems.push({
+      kind: "action",
+      value: "action:reload-skills",
+      searchTerms: [
+        "restart",
+        "reload",
+        "skills",
+        "connector",
+        "mcp",
+        "重启",
+        "会话",
+        "刷新",
+        "技能",
+        "连接器",
+      ],
+      title: "重新加载 Skill 和连接器",
+      icon: <RotateCcwIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        const refreshed = await refreshProviderSkills({ environmentId, input: {} });
+        if (refreshed._tag === "Failure") throw squashAtomCommandFailure(refreshed);
+        toastManager.add({
+          type: "success",
+          title: "Skill 和连接器已重新加载",
+          description: "新任务会使用最新的 Skill 和连接器。",
+        });
+      },
+    });
   }
 
   if (pickerProjects.length > 0) {

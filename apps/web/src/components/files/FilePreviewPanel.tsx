@@ -63,6 +63,7 @@ import {
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
+import { describeActionError } from "../../rpc/transportError";
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -848,7 +849,7 @@ export default function FilePreviewPanel({
         stackedThreadToast({
           type: "error",
           title: "Unable to open file in browser",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          description: describeActionError(error),
         }),
       );
     })();

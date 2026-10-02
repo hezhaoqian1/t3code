@@ -329,7 +329,7 @@ import {
 import type { ThreadSyncPhase } from "../threadSync";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
 import { useComposerHandleContext } from "../composerHandleContext";
-import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+import { describeActionError, sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -1166,7 +1166,7 @@ type LocalThreadErrorEntry = {
 };
 
 function chatActionErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "An error occurred.";
+  return describeActionError(error);
 }
 
 function ChatViewContent(props: ChatViewProps) {
@@ -3310,7 +3310,7 @@ function ChatViewContent(props: ChatViewProps) {
           stackedThreadToast({
             type: "error",
             title: "复制路径失败",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           }),
         );
       },
@@ -3951,7 +3951,7 @@ function ChatViewContent(props: ChatViewProps) {
           stackedThreadToast({
             type: "error",
             title: "撤销归纳失败",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           }),
         );
       }
@@ -3979,7 +3979,7 @@ function ChatViewContent(props: ChatViewProps) {
           stackedThreadToast({
             type: "error",
             title: "唤醒任务失败",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           }),
         );
       }

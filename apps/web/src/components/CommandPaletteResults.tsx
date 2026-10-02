@@ -93,9 +93,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
     return (
       <div className="py-10 text-center text-sm text-muted-foreground">
         {props.emptyStateMessage ??
-          (props.isActionsOnly
-            ? "No matching actions."
-            : "No matching commands, projects, or threads.")}
+          (props.isActionsOnly ? "没有匹配的操作。" : "没有匹配的命令、空间或任务。")}
       </div>
     );
   }

@@ -21,6 +21,7 @@ import { T3_PIERRE_ICONS } from "~/pierre-icons";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { useProjectEntriesQuery } from "./projectFilesQueryState";
+import { describeActionError } from "../../rpc/transportError";
 
 interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
@@ -166,7 +167,7 @@ export default function FileBrowserPanel({
           toastManager.add({
             type: "error",
             title: "Failed to copy mention",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           });
         }
         return;

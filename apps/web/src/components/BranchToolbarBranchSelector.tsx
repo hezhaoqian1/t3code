@@ -63,6 +63,7 @@ import {
 } from "./ui/combobox";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { describeActionError } from "../rpc/transportError";
 
 interface BranchToolbarBranchSelectorProps {
   className?: string;
@@ -80,7 +81,7 @@ interface BranchToolbarBranchSelectorProps {
 }
 
 function toBranchActionErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "An error occurred.";
+  return describeActionError(error);
 }
 
 export function BranchToolbarBranchSelector({

@@ -36,6 +36,7 @@ import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { cn } from "~/lib/utils";
+import { describeActionError } from "../../rpc/transportError";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -154,7 +155,7 @@ export const ChatHeader = memo(function ChatHeader({
           toastManager.add({
             type: "error",
             title: "Failed to rename thread",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           });
         }
       });

@@ -92,6 +92,7 @@ import {
   openUrlInPreview,
   BrowserPreviewUnavailableError,
 } from "../browser/openFileInPreview";
+import { describeActionError } from "../rpc/transportError";
 
 interface ChatMarkdownProps {
   text: string;
@@ -1102,7 +1103,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           stackedThreadToast({
             type: "error",
             title: "Unable to open file",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           }),
         );
       } catch (cause) {
@@ -1148,7 +1149,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
           stackedThreadToast({
             type: "error",
             title: "Unable to open file in browser",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           }),
         );
       } catch (cause) {
@@ -1197,7 +1198,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             stackedThreadToast({
               type: "error",
               title: `Failed to copy ${title.toLowerCase()}`,
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
             }),
           );
         },

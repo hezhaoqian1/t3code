@@ -61,6 +61,7 @@ import {
   useActiveBrowserRecordingTabIds,
 } from "~/browser/browserRecording";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
+import { describeActionError } from "../../rpc/transportError";
 
 interface Props {
   threadRef: ScopedThreadRef;
@@ -233,7 +234,7 @@ export function PreviewView({
         toastManager.add({
           type: "error",
           title: "Unable to resize browser viewport",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          description: describeActionError(error),
         });
         throw error;
       }
@@ -294,7 +295,7 @@ export function PreviewView({
       toastManager.add({
         type: "error",
         title: "Unable to update popped-out preview",
-        description: error instanceof Error ? error.message : "An error occurred.",
+        description: describeActionError(error),
       });
     });
   }, [desktopOverlay?.pictureInPicture, runtimeTabId]);
@@ -339,7 +340,7 @@ export function PreviewView({
                     stackedThreadToast({
                       type: "error",
                       title: "Unable to copy recording path",
-                      description: error instanceof Error ? error.message : "An error occurred.",
+                      description: describeActionError(error),
                       actionProps: revealAction,
                     }),
                   );
@@ -389,7 +390,7 @@ export function PreviewView({
             toastManager.add({
               type: "error",
               title: "Unable to stop recording",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              description: describeActionError(error),
             });
           },
         );
@@ -400,7 +401,7 @@ export function PreviewView({
           toastManager.add({
             type: "error",
             title: "Unable to start recording",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           });
         });
         return;
@@ -474,7 +475,7 @@ export function PreviewView({
                 updateScreenshotToast(
                   "error",
                   "Unable to copy screenshot path",
-                  error instanceof Error ? error.message : "An error occurred.",
+                  describeActionError(error),
                 );
               },
             );
@@ -494,7 +495,7 @@ export function PreviewView({
                 updateScreenshotToast(
                   "error",
                   "Unable to copy screenshot",
-                  error instanceof Error ? error.message : "An error occurred.",
+                  describeActionError(error),
                 );
               },
             );
@@ -530,7 +531,7 @@ export function PreviewView({
           toastManager.add({
             type: "error",
             title: "Unable to capture screenshot",
-            description: error instanceof Error ? error.message : "An error occurred.",
+            description: describeActionError(error),
           });
         },
       );

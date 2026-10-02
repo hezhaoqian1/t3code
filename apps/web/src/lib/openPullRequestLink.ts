@@ -4,6 +4,7 @@ import { type MouseEvent, useCallback } from "react";
 
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { readLocalApi } from "../localApi";
+import { describeActionError } from "../rpc/transportError";
 
 export class PullRequestLinkOpenError extends Schema.TaggedErrorClass<PullRequestLinkOpenError>()(
   "PullRequestLinkOpenError",
@@ -67,7 +68,7 @@ export function useOpenPrLink() {
         stackedThreadToast({
           type: "error",
           title: "Unable to open pull request link",
-          description: error instanceof Error ? error.message : "An error occurred.",
+          description: describeActionError(error),
         }),
       );
     });
