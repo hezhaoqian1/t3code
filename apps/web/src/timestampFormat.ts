@@ -51,26 +51,16 @@ export function formatTimestamp(isoDate: string, timestampFormat: TimestampForma
   return getTimestampFormatter(timestampFormat, true).format(date);
 }
 
-const monthNameFormatter = new Intl.DateTimeFormat(undefined, { month: "long" });
-
-function ordinalSuffix(day: number): string {
-  const lastTwo = day % 100;
-  if (lastTwo >= 11 && lastTwo <= 13) return "th";
-  switch (day % 10) {
-    case 1:
-      return "st";
-    case 2:
-      return "nd";
-    case 3:
-      return "rd";
-    default:
-      return "th";
-  }
-}
+const fullDateFormatter = new Intl.DateTimeFormat("zh-CN", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  weekday: "long",
+});
 
 /**
- * Long-form tooltip label, e.g. `12:04, 4th June`.
- * Renders the wall-clock time without seconds followed by the ordinal day and month name.
+ * Long-form tooltip label, e.g. `2026年6月4日星期四 12:04`: the full local date
+ * with weekday, then the wall-clock time without seconds.
  */
 export function formatChatTimestampTooltip(
   isoDate: string,
@@ -78,11 +68,36 @@ export function formatChatTimestampTooltip(
 ): string {
   const date = parseTimestampDate(isoDate);
   if (!date) return "";
-  const time = formatShortTimestamp(isoDate, timestampFormat);
-  const day = date.getDate();
-  const month = monthNameFormatter.format(date);
-  const year = date.getFullYear();
-  return `${time}, ${day}${ordinalSuffix(day)} ${month} ${year}`;
+  return `${fullDateFormatter.format(date)} ${formatShortTimestamp(isoDate, timestampFormat)}`;
+}
+
+/**
+ * Chat timestamp that adds the date once the message is no longer from today:
+ * today `14:05`, yesterday `昨天 14:05`, older `9月30日 14:05`, with the year
+ * once the calendar year differs. Boundaries are local calendar days, not
+ * 24-hour windows.
+ */
+export function formatDayAwareTimestamp(
+  isoDate: string,
+  timestampFormat: TimestampFormat,
+  nowMs: number = Date.now(),
+): string {
+  const date = parseTimestampDate(isoDate);
+  if (!date) return "";
+  const time = getTimestampFormatter(timestampFormat, false).format(date);
+
+  const now = new Date(nowMs);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfMessageDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  // Round so DST-shifted 23/25 hour days still count as whole days.
+  const dayDiff = Math.round((startOfToday - startOfMessageDay) / 86_400_000);
+
+  if (dayDiff <= 0) return time;
+  if (dayDiff === 1) return `昨天 ${time}`;
+  const monthDay = `${date.getMonth() + 1}月${date.getDate()}日`;
+  return date.getFullYear() === now.getFullYear()
+    ? `${monthDay} ${time}`
+    : `${date.getFullYear()}年${monthDay} ${time}`;
 }
 
 export function formatShortTimestamp(isoDate: string, timestampFormat: TimestampFormat): string {

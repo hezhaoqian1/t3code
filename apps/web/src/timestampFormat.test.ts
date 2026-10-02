@@ -11,6 +11,8 @@ import {
   formatTimestamp,
   getRelativeTimeState,
   getTimestampFormatOptions,
+  formatDayAwareTimestamp,
+  formatChatTimestampTooltip,
 } from "./timestampFormat";
 
 describe("getTimestampFormatOptions", () => {
@@ -170,5 +172,51 @@ describe("formatElapsedDurationLabel", () => {
     expect(formatElapsedDurationLabel("2026-04-07T11:45:00.000Z")).toBe("15m");
     expect(formatElapsedDurationLabel("2026-04-07T06:00:00.000Z")).toBe("6h");
     expect(formatElapsedDurationLabel("2026-04-03T12:00:00.000Z")).toBe("4d");
+  });
+});
+
+describe("formatDayAwareTimestamp", () => {
+  // Instants are built with the local-time Date constructor so the
+  // calendar-day boundaries hold in any test timezone.
+  const iso = (y: number, monthIndex: number, d: number, h: number, mi: number) =>
+    new Date(y, monthIndex, d, h, mi).toISOString();
+  const now = new Date(2026, 7, 14, 12, 0).getTime();
+  const time = (isoDate: string) => formatShortTimestamp(isoDate, "24-hour");
+
+  it("shows time only for today", () => {
+    const messageAt = iso(2026, 7, 14, 9, 30);
+    expect(formatDayAwareTimestamp(messageAt, "24-hour", now)).toBe(time(messageAt));
+  });
+
+  it("labels the previous calendar day as yesterday even when under 24h old", () => {
+    const messageAt = iso(2026, 7, 13, 23, 30);
+    const justPastMidnight = new Date(2026, 7, 14, 0, 30).getTime();
+    expect(formatDayAwareTimestamp(messageAt, "24-hour", justPastMidnight)).toBe(
+      `昨天 ${time(messageAt)}`,
+    );
+  });
+
+  it("prefixes older same-year messages with the month and day", () => {
+    const messageAt = iso(2026, 7, 12, 12, 34);
+    expect(formatDayAwareTimestamp(messageAt, "24-hour", now)).toBe(`8月12日 ${time(messageAt)}`);
+  });
+
+  it("includes the year once the calendar year differs", () => {
+    const messageAt = iso(2025, 11, 31, 18, 0);
+    expect(formatDayAwareTimestamp(messageAt, "24-hour", now)).toBe(
+      `2025年12月31日 ${time(messageAt)}`,
+    );
+  });
+
+  it("returns an empty string for invalid input", () => {
+    expect(formatDayAwareTimestamp("not-a-date", "24-hour", now)).toBe("");
+    expect(formatChatTimestampTooltip("not-a-date", "24-hour")).toBe("");
+  });
+
+  it("spells out the full date and weekday in the tooltip", () => {
+    const messageAt = iso(2026, 5, 4, 12, 4);
+    expect(formatChatTimestampTooltip(messageAt, "24-hour")).toBe(
+      `2026年6月4日星期四 ${time(messageAt)}`,
+    );
   });
 });
