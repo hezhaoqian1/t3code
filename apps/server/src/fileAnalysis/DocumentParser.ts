@@ -7,6 +7,13 @@ import type { ChatDocumentAttachment } from "@t3tools/contracts";
 import { DOCUMENT_EXTENSIONS } from "@t3tools/shared/documentFormats";
 import { OfficeParser, type SupportedFileType } from "officeparser";
 import * as XLSX from "xlsx";
+import {
+  SHEET_EXPORT_MAX_ROWS,
+  csvLine,
+  sheetCsvPath,
+  sheetManifestPath,
+  type SheetManifest,
+} from "./SheetData.ts";
 
 import {
   type DocumentContext,
@@ -65,7 +72,7 @@ export async function parseDocumentAttachment(input: {
       throw new DocumentParseError("unsupported", "旧版 DOC/PPT 需要先转换为 DOCX/PPTX。");
     }
     if (["xlsx", "xls", "xlsm", "xlsb", "ods"].includes(extension)) {
-      return parseWorkbookAttachment(input.attachment, bytes);
+      return await parseWorkbookAttachment(input.attachment, bytes, input.path);
     }
     if (SUPPORTED_TEXT_EXTENSIONS.has(extension)) {
       const encoding =
@@ -88,6 +95,27 @@ export async function parseDocumentAttachment(input: {
       if (!text) {
         throw new DocumentParseError("empty", "没有提取到可分析的文字。");
       }
+      let table: DocumentSection["table"];
+      if (extension === "csv" || extension === "tsv") {
+        // A CSV is already the full data; the row tool reads it by line.
+        const lines = text.split(/\r\n|\n|\r/);
+        const columns = lines[0]?.split(extension === "csv" ? "," : "\t").length ?? 0;
+        table = { rows: lines.length, columns, dataPath: input.path };
+        const manifest: SheetManifest = {
+          version: 1,
+          name: input.attachment.name,
+          sheets: [
+            {
+              index: 1,
+              name: input.attachment.name,
+              rows: lines.length,
+              columns,
+              csvPath: input.path,
+            },
+          ],
+        };
+        await NodeFSP.writeFile(sheetManifestPath(input.path), JSON.stringify(manifest), "utf8");
+      }
       return {
         attachment: input.attachment,
         parser: `native-utf8/${extension}`,
@@ -99,6 +127,7 @@ export async function parseDocumentAttachment(input: {
             text,
             tables: [],
             imageReferences: [],
+            ...(table ? { table } : {}),
           },
         ],
         warnings: [],
@@ -144,67 +173,71 @@ export async function parseDocumentAttachment(input: {
   }
 }
 
-function parseWorkbookAttachment(
+/** Rows of each sheet kept in the section text; the prompt budget cuts further. */
+const SHEET_PREVIEW_ROWS = 2_000;
+
+async function parseWorkbookAttachment(
   attachment: ChatDocumentAttachment,
   bytes: Buffer,
-): DocumentContext {
-  const workbook = XLSX.read(bytes, { type: "buffer", cellDates: true, sheetRows: 5_001 });
+  path: string,
+): Promise<DocumentContext> {
+  const workbook = XLSX.read(bytes, {
+    type: "buffer",
+    cellDates: true,
+    sheetRows: SHEET_EXPORT_MAX_ROWS + 1,
+  });
   const sections: DocumentSection[] = [];
+  const manifest: Array<SheetManifest["sheets"][number]> = [];
   let omittedRows = false;
   for (const [index, sheetName] of workbook.SheetNames.entries()) {
     const sheet = workbook.Sheets[sheetName];
     if (!sheet) continue;
     if (sheet["!fullref"] && sheet["!fullref"] !== sheet["!ref"]) omittedRows = true;
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-      header: 1,
-      raw: false,
-      blankrows: false,
-    });
-    if (rows.length > 5_000) omittedRows = true;
+    const rows = XLSX.utils
+      .sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, blankrows: false })
+      .slice(0, SHEET_EXPORT_MAX_ROWS)
+      .map((row) => row.map((cell) => String(cell ?? "")))
+      .filter((row) => row.some((cell) => cell.trim() !== ""));
+    if (rows.length === 0) continue;
+    const columns = rows.reduce((widest, row) => Math.max(widest, row.length), 0);
+    // Every row goes to a CSV beside the attachment so the agent can count,
+    // filter and group the whole sheet; the prompt only previews it.
+    const csvPath = sheetCsvPath(path, index + 1);
+    await NodeFSP.writeFile(csvPath, `\uFEFF${rows.map(csvLine).join("\n")}\n`, "utf8");
+    manifest.push({ index: index + 1, name: sheetName, rows: rows.length, columns, csvPath });
     const text = rows
-      .slice(0, 5_000)
-      .map((row) =>
-        row
-          .map((cell) => String(cell ?? ""))
-          .join("\t")
-          .trimEnd(),
-      )
-      .filter(Boolean)
-      .join("\n")
-      .trim();
-    if (!text) continue;
+      .slice(0, SHEET_PREVIEW_ROWS)
+      .map((row) => row.join("\t").trimEnd())
+      .join("\n");
     sections.push({
       location: "sheet",
       index: index + 1,
       title: sheetName,
       text,
-      tables: [text.slice(0, DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS)],
+      tables: [],
       imageReferences: [],
+      table: { rows: rows.length, columns, dataPath: csvPath },
     });
   }
-  const extractedCharacters = sections.reduce((total, section) => total + section.text.length, 0);
-  if (extractedCharacters === 0) {
+  if (sections.length === 0) {
     throw new DocumentParseError("empty", "没有提取到可分析的文字。");
   }
-  const truncated =
-    omittedRows ||
-    sections.some(
-      (section) => section.text.length > DOCUMENT_CONTEXT_SINGLE_SECTION_MAX_CHARACTERS,
-    );
+  const value: SheetManifest = { version: 1, name: attachment.name, sheets: manifest };
+  await NodeFSP.writeFile(sheetManifestPath(path), JSON.stringify(value), "utf8");
   return {
     attachment,
     parser: "xlsx@0.18.5",
     sections,
-    warnings: truncated
+    warnings: omittedRows
       ? [
           {
             code: "truncated",
-            message: "表格内容已截取，每个工作表最多读取前 5000 行；回答必须说明未覆盖全部数据。",
+            message: `表格超过 ${SHEET_EXPORT_MAX_ROWS.toLocaleString()} 行的部分未读取；回答必须说明未覆盖全部数据。`,
           },
         ]
       : [],
-    extractedCharacters,
-    truncated,
+    extractedCharacters: sections.reduce((total, section) => total + section.text.length, 0),
+    truncated: omittedRows,
     ocrUsed: false,
   };
 }

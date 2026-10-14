@@ -54,7 +54,7 @@ failing. Cancellation still stops everything.
 
 ## Page tools
 
-`PdfPageTools` registers two Codex dynamic tools for every FD Codex session
+`PdfPageTools` and `SheetTools`, combined by `combineAttachmentTools`, register Codex dynamic tools for every FD Codex session
 (`FdCodexAdapter` merges them with an FD Skill's enterprise tools; an
 enterprise tool with the same name would win):
 
@@ -72,6 +72,22 @@ text cache is missing, the tool parses the PDF again without rendering.
 
 Codex keeps only 10 KB of each tool result for custom models, so the managed
 `config.toml` sets `tool_output_token_limit = 16000`.
+
+## Spreadsheets
+
+Workbooks are read up to 200,000 rows per sheet. Every sheet is written as a
+UTF-8 CSV beside the attachment (`<attachment id>.sheet<N>-csv`, one record per
+line, in-cell line breaks flattened) with a `<attachment id>.sheets` manifest;
+attached CSV/TSV files get a manifest that points at the file itself. The
+section text holds the first 2,000 rows.
+
+`formatAttachmentDocuments` gives every attachment a fair share of the byte
+budget (water-filling), then cuts tables at row boundaries and reports how many
+rows went in. `[表格附件说明]` lists each partial table with its size, the rows
+included and the CSV path, and tells the model to read more rows with
+`fd_sheet_read_rows` (up to 500 rows and 30 KB per call, header always first)
+or to compute over the CSV with a command. Before this, a few thousand rows of
+Chinese text made the turn fail the 200 KB check.
 
 ## Other attachments
 

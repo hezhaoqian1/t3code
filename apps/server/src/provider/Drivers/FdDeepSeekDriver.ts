@@ -22,7 +22,9 @@ import { makeFdLocalTools, type FdLocalToolProfile } from "../../fd-agent/FdLoca
 import { FdResponsesClient } from "../../fd-agent/FdResponsesClient.ts";
 import { FdVisionService } from "../../fd-vision/FdVisionService.ts";
 import { prepareAttachments } from "../../fileAnalysis/PrepareAttachments.ts";
+import { combineAttachmentTools } from "../../fileAnalysis/AttachmentTools.ts";
 import { makePdfPageTools } from "../../fileAnalysis/PdfPageTools.ts";
+import { makeSheetTools } from "../../fileAnalysis/SheetTools.ts";
 import {
   FD_RESPONSES_LIMITS,
   FD_RESPONSES_MODEL,
@@ -245,15 +247,18 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       // The latest model each thread chose, so page tools that run during a
       // turn recognize pages with that thread's authorized visual model.
       const threadModels = new Map<string, string>();
-      const pdfPageTools = makePdfPageTools({
-        attachmentsDir: serverConfig.attachmentsDir,
-        platform,
-        vision: visionService,
-        modelForThread: (threadId) => threadModels.get(threadId),
-      });
+      const attachmentTools = combineAttachmentTools(
+        makePdfPageTools({
+          attachmentsDir: serverConfig.attachmentsDir,
+          platform,
+          vision: visionService,
+          modelForThread: (threadId) => threadModels.get(threadId),
+        }),
+        makeSheetTools({ attachmentsDir: serverConfig.attachmentsDir, platform }),
+      );
       const ordinaryAdapter = yield* makeFdCodexAdapter({
         instanceId,
-        documentTools: pdfPageTools,
+        documentTools: attachmentTools,
       });
       const enterpriseClient = new FdEnterpriseAgentClient({
         credentials: () => Effect.runPromise(credentials.current).then(Option.getOrUndefined),

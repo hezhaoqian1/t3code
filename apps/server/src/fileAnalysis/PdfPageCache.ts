@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
-import * as NodePath from "node:path";
+import { attachmentSiblingPath } from "./AttachmentSiblings.ts";
 import type { PdfPageSummary } from "./PdfPages.ts";
 
 /**
@@ -18,16 +18,8 @@ export interface PdfPageCache {
   readonly pages: ReadonlyArray<PdfPageSummary & { readonly text: string }>;
 }
 
-// Cache files are named `<attachment id>.<suffix>` with no further dots, so
-// the projection's attachment cleanup recognizes them as belonging to the
-// attachment's thread and deletes them with the thread.
-function cacheSibling(attachmentPath: string, suffix: string): string {
-  const parsed = NodePath.parse(attachmentPath);
-  return NodePath.join(parsed.dir, `${parsed.name}.${suffix}`);
-}
-
 export function pdfPageCachePath(attachmentPath: string): string {
-  return cacheSibling(attachmentPath, "pdfpages");
+  return attachmentSiblingPath(attachmentPath, "pdfpages");
 }
 
 /** Recognized text of one page image, keyed by the model that read it. */
@@ -36,7 +28,10 @@ export function pdfPageVisionCachePath(
   page: number,
   model: string,
 ): string {
-  return cacheSibling(attachmentPath, `vision-p${page}-${model.replace(/[^a-zA-Z0-9-]/g, "_")}`);
+  return attachmentSiblingPath(
+    attachmentPath,
+    `vision-p${page}-${model.replace(/[^a-zA-Z0-9-]/g, "_")}`,
+  );
 }
 
 export async function writePdfPageCache(

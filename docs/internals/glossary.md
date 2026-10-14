@@ -118,7 +118,7 @@ A point-in-time view of state. The word is used in multiple layers, including or
 
 #### PDF page tools
 
-The FD Codex dynamic tools `fd_pdf_read_pages` and `fd_pdf_view_pages`. A turn with a PDF gets the page text up front; the model calls these to read pages left out for length or to look at chart and scanned pages. They only open the calling thread's own attachments. See [attachment-preparation.md](./attachment-preparation.md).
+The FD Codex dynamic tools `fd_pdf_read_pages` and `fd_pdf_view_pages` (with `fd_sheet_read_rows` for spreadsheets, together the attachment tools). A turn with a PDF gets the page text up front; the model calls these to read pages left out for length or to look at chart and scanned pages. They only open the calling thread's own attachments. See [attachment-preparation.md](./attachment-preparation.md).
 
 ### Checkpointing
 

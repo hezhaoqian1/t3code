@@ -1,7 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from "node:fs/promises";
 import type { ChatAttachment } from "@t3tools/contracts";
-import type * as Schema from "effect/Schema";
 import {
   parseThreadSegmentFromAttachmentId,
   resolveAttachmentPathById,
@@ -9,6 +8,7 @@ import {
 } from "../attachmentStore.ts";
 import { resolveFdResponsesModelConfig } from "../fd-codex/ResponsesModelCatalog.ts";
 import type { FdVisionService } from "../fd-vision/FdVisionService.ts";
+import type { AttachmentToolResult, AttachmentToolSpec } from "./AttachmentTools.ts";
 import { runAttachmentWorker } from "./AttachmentWorkerClient.ts";
 import { recognizePages } from "./PageRecognition.ts";
 import {
@@ -26,17 +26,8 @@ export const PDF_READ_MAX_PAGES = 20;
 export const PDF_READ_MAX_BYTES = 30_000;
 export const PDF_VIEW_MAX_PAGES = 4;
 
-export interface PdfPageToolSpec {
-  readonly type: "function";
-  readonly name: string;
-  readonly description: string;
-  readonly inputSchema: Schema.Json;
-}
-
-export interface PdfPageToolResult {
-  readonly success: boolean;
-  readonly text: string;
-}
+export type PdfPageToolSpec = AttachmentToolSpec;
+export type PdfPageToolResult = AttachmentToolResult;
 
 const pageArguments = {
   type: "object",

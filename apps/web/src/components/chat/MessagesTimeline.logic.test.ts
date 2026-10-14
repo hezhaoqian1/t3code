@@ -283,6 +283,7 @@ describe("workEntryEmployeeSummary", () => {
       workEntryEmployeeSummary({ label: "Tool call", toolTitle, itemType: "dynamic_tool_call" });
     expect(tool("fd_pdf_view_pages")).toBe("查看 PDF 页面");
     expect(tool("fd_pdf_read_pages")).toBe("读取 PDF 页面");
+    expect(tool("fd_sheet_read_rows")).toBe("读取表格行");
     expect(tool("query_holdings")).toBe("调用工具");
   });
 });

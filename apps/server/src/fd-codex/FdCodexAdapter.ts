@@ -16,7 +16,7 @@ import {
   FdEnterpriseCodexError,
 } from "../fd-skills/FdEnterpriseCodexClient.ts";
 import { NativeSkillCatalog, selectedNativeSkillNames } from "../fd-skills/NativeSkillCatalog.ts";
-import type { PdfPageTools } from "../fileAnalysis/PdfPageTools.ts";
+import type { AttachmentToolSet } from "../fileAnalysis/AttachmentTools.ts";
 import { makeFdCodexChildEnvironment } from "./FdCodexChildEnvironment.ts";
 import { prepareFdManagedCodexHome } from "./FdManagedCodexHome.ts";
 import { FD_RESPONSES_PROVIDERS } from "./ResponsesModelCatalog.ts";
@@ -91,10 +91,11 @@ export async function prepareFdCodexRuntime(input: {
 }
 
 /**
- * Exposes the local PDF page tools to a Codex session. Calls run in this
- * process against the calling thread's own attachments.
+ * Exposes the local attachment tools (PDF pages, spreadsheet rows) to a Codex
+ * session. Calls run in this process against the calling thread's own
+ * attachments.
  */
-export function fdDocumentToolRuntime(tools: PdfPageTools, threadId: string) {
+export function fdDocumentToolRuntime(tools: AttachmentToolSet, threadId: string) {
   return {
     dynamicTools: tools.specs.map((tool) => ({
       type: "function" as const,
@@ -109,7 +110,7 @@ export function fdDocumentToolRuntime(tools: PdfPageTools, threadId: string) {
         catch: () => undefined,
       }).pipe(
         Effect.match({
-          onFailure: () => ({ success: false, text: "读取 PDF 页面失败，请稍后重试。" }),
+          onFailure: () => ({ success: false, text: "读取附件失败，请稍后重试。" }),
           onSuccess: (result) => result,
         }),
         Effect.map((result) => ({
@@ -123,8 +124,8 @@ export function fdDocumentToolRuntime(tools: PdfPageTools, threadId: string) {
 export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (input: {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath?: string;
-  /** Local PDF page tools offered to every session; FD Skill tools are added alongside. */
-  readonly documentTools?: PdfPageTools;
+  /** Local attachment tools offered to every session; FD Skill tools are added alongside. */
+  readonly documentTools?: AttachmentToolSet;
 }) {
   const credentials = yield* FdRuntimeCredentialStore;
   const serverConfig = yield* ServerConfig;

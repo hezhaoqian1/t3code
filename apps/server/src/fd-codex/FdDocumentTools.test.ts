@@ -1,10 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
-import { PDF_PAGE_TOOL_SPECS, type PdfPageTools } from "../fileAnalysis/PdfPageTools.ts";
+import type { AttachmentToolSet } from "../fileAnalysis/AttachmentTools.ts";
+import { PDF_PAGE_TOOL_SPECS } from "../fileAnalysis/PdfPageTools.ts";
 import { fdDocumentToolRuntime } from "./FdCodexAdapter.ts";
 
-function fakeTools(execute: PdfPageTools["execute"]): PdfPageTools {
+function fakeTools(execute: AttachmentToolSet["execute"]): AttachmentToolSet {
   return {
     specs: PDF_PAGE_TOOL_SPECS,
     handles: (tool) => PDF_PAGE_TOOL_SPECS.some((spec) => spec.name === tool),
@@ -58,7 +59,7 @@ describe("FD document tools in Codex sessions", () => {
         arguments: {},
       });
       expect(response.success).toBe(false);
-      expect(response.contentItems[0]?.text).toContain("读取 PDF 页面失败");
+      expect(response.contentItems[0]?.text).toContain("读取附件失败");
     }),
   );
 });
