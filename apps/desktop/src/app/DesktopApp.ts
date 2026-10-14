@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
@@ -210,6 +211,17 @@ const startup = Effect.gen(function* () {
   yield* bootstrap.pipe(Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)));
 }).pipe(Effect.withSpan("desktop.startup"));
 
+export const stopPrimaryBackend = Effect.fn("desktop.app.stopPrimaryBackend")(
+  function* (): Effect.fn.Return<void, never, DesktopBackendPool.DesktopBackendPool> {
+    // Bound the quit path: a backend that hangs during teardown must not keep
+    // the app from quitting. The timed-out close keeps running in the
+    // background and the process exit reaps it.
+    const pool = yield* DesktopBackendPool.DesktopBackendPool;
+    const primary = yield* pool.primary;
+    yield* primary.stop({ timeout: Duration.seconds(5) });
+  },
+);
+
 const scopedProgram = Effect.scoped(
   Effect.gen(function* () {
     const runId = yield* makeDesktopRunId;
@@ -219,11 +231,7 @@ const scopedProgram = Effect.scoped(
     const shutdown = yield* DesktopShutdown.DesktopShutdown;
 
     yield* Effect.addFinalizer(() =>
-      Effect.gen(function* () {
-        const pool = yield* DesktopBackendPool.DesktopBackendPool;
-        const primary = yield* pool.primary;
-        yield* primary.stop();
-      }).pipe(Effect.ensuring(shutdown.markComplete)),
+      stopPrimaryBackend().pipe(Effect.ensuring(shutdown.markComplete)),
     );
 
     yield* startup;

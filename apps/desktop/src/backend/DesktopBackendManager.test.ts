@@ -23,6 +23,8 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
+import * as DesktopApp from "../app/DesktopApp.ts";
+import * as DesktopBackendPool from "./DesktopBackendPool.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopTelemetryPublisher from "../telemetry/DesktopTelemetryPublisher.ts";
 import * as FdCredentialPublisher from "../fd-identity/FdCredentialPublisher.ts";
@@ -1420,6 +1422,58 @@ describe("DesktopBackendManager", () => {
 
         assert.equal(yield* Queue.size(starts), 0);
         assert.equal((yield* instance.snapshot).desiredRunning, false);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+  it.effect("stopPrimaryBackend bounds the quit finalizer when the backend hangs", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const teardownStarted = yield* Deferred.make<void>();
+        const teardownFinished = yield* Deferred.make<void>();
+        const allowTeardown = yield* Deferred.make<void>();
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer: Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.gen(function* () {
+                const scope = yield* Scope.Scope;
+                yield* Scope.addFinalizer(
+                  scope,
+                  Deferred.succeed(teardownStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(allowTeardown)),
+                    Effect.andThen(Deferred.succeed(teardownFinished, undefined)),
+                    Effect.asVoid,
+                  ),
+                );
+                return makeProcess({ exitCode: Effect.never });
+              }),
+            ),
+          ),
+          httpClientLayer: httpClientLayer(() => Effect.never),
+        });
+        yield* instance.start;
+
+        const pool = Layer.succeed(DesktopBackendPool.DesktopBackendPool, {
+          primary: Effect.succeed(instance),
+          list: Effect.succeed([instance]),
+        });
+
+        // Mirror the quit path: the scope close runs the finalizer.
+        const quitFiber = yield* Effect.scoped(
+          Effect.addFinalizer(() => DesktopApp.stopPrimaryBackend()),
+        ).pipe(Effect.provide(pool), Effect.forkChild);
+
+        yield* Deferred.await(teardownStarted);
+        // The backend is hung in teardown. Advancing past the 5s budget must
+        // let the quit finalizer return without it.
+        yield* TestClock.adjust(Duration.seconds(5));
+        yield* Fiber.join(quitFiber);
+        assert.isFalse(yield* Deferred.isDone(teardownFinished));
+
+        // The timed-out close keeps running and finishes once unblocked.
+        yield* Deferred.succeed(allowTeardown, undefined);
+        yield* Deferred.await(teardownFinished);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );
