@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
 
 import * as NodeStream from "@effect/platform-node/NodeStream";
 import {
@@ -256,9 +256,11 @@ export const make = Effect.fn("fdRuntimeCredentialStore.make")(function* () {
   const store = yield* makeStore();
   const fd = config.fdRuntimeCredentialFd;
   if (fd !== undefined) {
+    // The desktop keeps this pipe open for the server's whole life. Socket
+    // reads can be cancelled at shutdown; filesystem reads keep Node alive.
     const readable = yield* Effect.acquireRelease(
       Effect.try({
-        try: () => NodeFS.createReadStream("", { fd, autoClose: true }),
+        try: () => new NodeNet.Socket({ fd, readable: true, writable: false }),
         catch: () => new FdRuntimeCredentialProtocolError("stream"),
       }),
       (stream) => Effect.sync(() => stream.destroy()),
