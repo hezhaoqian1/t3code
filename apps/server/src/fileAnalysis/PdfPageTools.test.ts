@@ -110,6 +110,7 @@ describe("PDF page tools", () => {
     await call(pageTools, FD_PDF_VIEW_PAGES_TOOL, { document_id: documentId, pages: "2" });
     expect(requests).toHaveLength(2);
     expect(requests[1]?.userPrompt).toContain("请完整、准确地提取本页内容");
+    expect(requests[1]?.userPrompt).toContain("只沿该颜色的线或柱读数");
   });
 
   it("hands visual models the page images instead of a second model's reading", async () => {
