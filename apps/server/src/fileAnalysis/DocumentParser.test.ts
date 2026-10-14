@@ -59,6 +59,37 @@ describe("DocumentParser", () => {
     },
   );
 
+  it("reads each Word paragraph and table cell once, with rows kept apart", async () => {
+    const paragraph = (text: string) =>
+      `<w:p><w:r><w:t xml:space="preserve">${text.slice(0, 2)}</w:t></w:r><w:r><w:t>${text.slice(2)}</w:t></w:r></w:p>`;
+    const cell = (text: string) => `<w:tc>${paragraph(text)}</w:tc>`;
+    const body = `${paragraph("第一条 合同标的")}${paragraph("第二条 付款方式")}<w:tbl><w:tr>${cell("产品名称")}${cell("持仓金额")}</w:tr><w:tr>${cell("鸣石未来")}${cell("1500万元")}</w:tr></w:tbl>`;
+    const bytes = zipSync({
+      "[Content_Types].xml": strToU8(
+        '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+      ),
+      "_rels/.rels": strToU8(
+        '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+      ),
+      "word/document.xml": strToU8(
+        `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`,
+      ),
+    });
+    await withTempFile("contract.docx", bytes, async (path) => {
+      const result = await parseDocumentAttachment({
+        path,
+        attachment: attachment("contract.docx", "application/octet-stream", bytes.length),
+      });
+      const text = result.sections.map((section) => section.text).join("\n");
+      expect(text.split("\n")).toEqual([
+        "第一条 合同标的",
+        "第二条 付款方式",
+        "产品名称 | 持仓金额",
+        "鸣石未来 | 1500万元",
+      ]);
+    });
+  });
+
   it.each(["odt", "odp"])("reads %s text from a real OpenDocument container", async (format) => {
     const body =
       format === "odt"

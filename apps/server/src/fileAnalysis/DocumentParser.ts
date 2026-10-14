@@ -305,11 +305,31 @@ function collectSections(ast: OfficeAst): DocumentSection[] {
     : [];
 }
 
+/**
+ * A node's `text` already combines all of its children (a paragraph's runs, a
+ * cell's paragraphs), so it is used instead of them, never beside them:
+ * taking both repeated every Word paragraph twice and table cells three times.
+ * Table rows keep their cells apart; nodes without text (slides, tables, the
+ * document) join their children by line. Notes are never part of `text`.
+ */
 function collectNodeText(node: OfficeNode): string {
-  const own = typeof node.text === "string" ? node.text : "";
-  const children = (node.children ?? []).map(collectNodeText).filter(Boolean).join("\n");
+  const children = node.children ?? [];
+  const own =
+    node.type === "row"
+      ? children
+          .map((cell) =>
+            collectNodeText(cell)
+              .replace(/\s*\n\s*/g, " ")
+              .trim(),
+          )
+          .join(" | ")
+      : node.type === "cell" && children.length > 0
+        ? children.map(collectNodeText).filter(Boolean).join(" ")
+        : typeof node.text === "string" && node.text !== ""
+          ? node.text
+          : children.map(collectNodeText).filter(Boolean).join("\n");
   const notes = (node.notes ?? []).map(collectNodeText).filter(Boolean).join("\n");
-  return [own, children, notes].filter(Boolean).join("\n");
+  return [own, notes].filter(Boolean).join("\n");
 }
 
 function collectTableText(node: OfficeNode): string[] {
