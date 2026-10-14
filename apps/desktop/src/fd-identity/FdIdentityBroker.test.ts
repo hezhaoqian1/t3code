@@ -689,6 +689,61 @@ describe("FdIdentityBroker", () => {
     }
   });
 
+  it("stays signed in when a periodic check cannot reach the service, until a check says otherwise", async () => {
+    const active = credentials();
+    const validate = vi
+      .fn<(value: StoredFdCredentials) => Promise<StoredFdCredentials>>()
+      .mockResolvedValueOnce(active)
+      .mockRejectedValueOnce(new NewApiClientError("service_unavailable", "企业 AI 服务暂时不可用"))
+      .mockRejectedValueOnce(new NewApiClientError("account_unavailable", "账号已停用"));
+    const publisher = mockPublisher();
+    const broker = new FdIdentityBroker({
+      vault: mockVault({ load: vi.fn(async () => ({ active, pendingRevocations: [] })) }),
+      client: mockClient({ validate }),
+      publisher,
+      refreshIntervalMs: 0,
+    });
+    try {
+      await broker.initialize();
+      expect(broker.getState().status).toBe("authenticated");
+
+      // A network blip: the session and the server's credentials are kept.
+      await broker.reload();
+      expect(broker.getState().status).toBe("authenticated");
+      expect(publisher.clear).not.toHaveBeenCalled();
+
+      // A definite answer about the account still signs out.
+      await broker.reload();
+      expect(broker.getState().status).toBe("revocation_pending");
+      expect(publisher.clear).toHaveBeenCalledWith("reload-validation-failed");
+    } finally {
+      await broker.dispose();
+    }
+  });
+
+  it("does not publish stored credentials when startup validation cannot reach the service", async () => {
+    const publisher = mockPublisher();
+    const broker = new FdIdentityBroker({
+      vault: mockVault({
+        load: vi.fn(async () => ({ active: credentials(), pendingRevocations: [] })),
+      }),
+      client: mockClient({
+        validate: vi.fn(async () => {
+          throw new NewApiClientError("service_unavailable", "企业 AI 服务暂时不可用");
+        }),
+      }),
+      publisher,
+      refreshIntervalMs: 0,
+    });
+    try {
+      await broker.initialize();
+      expect(broker.getState()).toMatchObject({ status: "credentials_unavailable" });
+      expect(publisher.set).not.toHaveBeenCalled();
+    } finally {
+      await broker.dispose();
+    }
+  });
+
   it("keeps expired pending revocation durable when refresh is offline", async () => {
     const pending = pendingCredentials({ accessExpiresAt: 1 });
     const revokeRuntimeTokens = vi.fn();

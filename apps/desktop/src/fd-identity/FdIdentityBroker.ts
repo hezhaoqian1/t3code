@@ -398,6 +398,22 @@ export class FdIdentityBroker {
       await this.#publishProjection(validated);
       this.#setState(this.#authenticatedState(validated));
     } catch (error) {
+      // A periodic check that cannot reach the service says nothing about the
+      // account, and the gateway still checks every request. Keep a session
+      // that was already validated while its token is valid; the next check
+      // runs on the refresh interval. Startup stays strict: stored
+      // credentials are never published without a successful validation.
+      // @effect-diagnostics globalDate:off
+      const stillValid = active.accessExpiresAt > Math.floor(Date.now() / 1_000) + 60;
+      if (
+        reason !== "bootstrap" &&
+        error instanceof NewApiClientError &&
+        error.code === "service_unavailable" &&
+        stillValid &&
+        this.#state.status === "authenticated"
+      ) {
+        return;
+      }
       await this.#clearProjection(`${reason}-validation-failed`);
       if (error instanceof NewApiClientError && error.code === "account_unavailable") {
         try {
