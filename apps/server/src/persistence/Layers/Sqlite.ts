@@ -36,6 +36,12 @@ const setup = Layer.effectDiscard(
     const sql = yield* SqlClient.SqlClient;
     yield* sql`PRAGMA foreign_keys = ON;`;
     yield* sql`PRAGMA journal_mode = WAL;`;
+    // FULL fsyncs the WAL on every commit, on the main thread. Every provider
+    // event is its own commit, so a slow or antivirus-scanned disk stalls the
+    // event loop and clients drop. In WAL mode NORMAL only fsyncs at
+    // checkpoints: it cannot corrupt the database and an app crash loses
+    // nothing; an OS crash or power loss can roll back the newest commits.
+    yield* sql`PRAGMA synchronous = NORMAL;`;
     yield* runMigrations();
   }),
 );
