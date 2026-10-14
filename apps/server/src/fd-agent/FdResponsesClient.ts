@@ -902,7 +902,8 @@ function validateReasoningParts(
   expectedType: "summary_text" | "reasoning_text",
   kind: "invalid_request" | "malformed_response",
 ): void {
-  if (value === undefined) return;
+  // Kimi K3 on the Aliyun route sends `content: null` beside a summary.
+  if (value === undefined || value === null) return;
   if (!Array.isArray(value)) throw new FdResponsesError(kind);
   for (const part of value) {
     if (

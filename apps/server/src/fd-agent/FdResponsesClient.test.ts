@@ -106,14 +106,20 @@ describe("FdResponsesClient", () => {
     expect(events.at(-1)).toEqual({ type: "completed", finishReason: "stop" });
   });
 
-  it("accepts reasoning items with the null status and summary the Aliyun route sends", async () => {
+  it.each([
+    ["DeepSeek Flash", { summary: [], encrypted_content: null, status: null }],
+    [
+      "Kimi K3",
+      {
+        summary: [{ type: "summary_text", text: "Public summary." }],
+        content: null,
+        encrypted_content: null,
+        status: null,
+      },
+    ],
+  ])("accepts the reasoning item shape %s sends on the Aliyun route", async (_model, shape) => {
     const events = textAndReasoningEvents().map((event) =>
-      isReasoningDone(event)
-        ? {
-            ...event,
-            item: { ...event.item, summary: [], encrypted_content: null, status: null },
-          }
-        : event,
+      isReasoningDone(event) ? { ...event, item: { ...event.item, ...shape } } : event,
     );
     const client = new FdResponsesClient(
       {
