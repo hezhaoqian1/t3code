@@ -42,6 +42,8 @@ const setup = Layer.effectDiscard(
     // checkpoints: it cannot corrupt the database and an app crash loses
     // nothing; an OS crash or power loss can roll back the newest commits.
     yield* sql`PRAGMA synchronous = NORMAL;`;
+    // Flush the drive cache at checkpoints on macOS; other platforms ignore this.
+    yield* sql`PRAGMA checkpoint_fullfsync = ON;`;
     yield* runMigrations();
   }),
 );

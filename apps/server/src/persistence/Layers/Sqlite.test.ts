@@ -6,7 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
-import { makeSqlitePersistenceLive } from "./Sqlite.ts";
+import { makeSqlitePersistenceLive, SqlitePersistenceMemory } from "./Sqlite.ts";
 
 it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
   it.effect("only fsyncs the database file at WAL checkpoints", () =>
@@ -26,3 +26,13 @@ it.layer(NodeServices.layer)("SqlitePersistence", (it) => {
     }),
   );
 });
+
+it.effect("enables checkpoint_fullfsync in the shared persistence setup", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{
+      readonly checkpoint_fullfsync: number;
+    }>`PRAGMA checkpoint_fullfsync`;
+    assert.equal(rows[0]?.checkpoint_fullfsync, 1);
+  }).pipe(Effect.provide(SqlitePersistenceMemory)),
+);
