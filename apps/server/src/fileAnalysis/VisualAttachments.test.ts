@@ -5,8 +5,14 @@ import * as NodePath from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { describe, expect, it } from "@effect/vitest";
-import { processAttachment, imageTiles, type AttachmentWork } from "./VisualAttachments.ts";
+import {
+  PDF_LIMITS,
+  processAttachment,
+  imageTiles,
+  type AttachmentWork,
+} from "./VisualAttachments.ts";
 import { runAttachmentWorker } from "./AttachmentWorkerClient.ts";
+import { reportPdf } from "./testing/reportPdf.ts";
 
 async function fixture(
   name: string,
@@ -99,7 +105,12 @@ describe("visual attachments", () => {
       const pixel = ctx.getImageData(100, 100, 1, 1).data;
       expect(pixel[0]).toBeGreaterThan(200);
       expect(pixel[1]).toBeLessThan(40);
-      await expect(processAttachment({ ...work, visual: false })).rejects.toThrow("第 2 页");
+      expect(result.pdf?.pages.map((page) => page.kind)).toEqual(["text", "scanned"]);
+      // Without a visual route the text still arrives; the scan is left for later.
+      const textOnly = await processAttachment({ ...work, visual: false });
+      expect(textOnly.images).toEqual([]);
+      expect(textOnly.context?.sections[0]?.text).toContain("revenue 123");
+      expect(textOnly.pdf?.deferredScannedPages).toEqual([2]);
     });
   });
 
@@ -127,11 +138,39 @@ describe("visual attachments", () => {
     });
   });
 
+  it("reads logo and chart pages from their text and renders only the scanned page", async () => {
+    await fixture("report.pdf", await reportPdf(), async (work) => {
+      const result = await processAttachment(work);
+      expect(result.pdf?.pages.map((page) => page.kind)).toEqual(["text", "figure", "scanned"]);
+      expect(result.pdf?.pages[0]?.title).toBe("Holdings by industry");
+      expect(result.context?.sections[0]?.text).toContain("Electronics | 69.31");
+      expect(result.images.map((image) => image.page)).toEqual([3]);
+      expect(result.pdf?.deferredScannedPages).toEqual([]);
+    });
+  });
+
+  it("renders requested pages on demand without parsing the rest", async () => {
+    await fixture("report.pdf", await reportPdf(), async (work) => {
+      const result = await processAttachment({ ...work, renderPages: [2] });
+      expect(result.context).toBeUndefined();
+      expect(result.images.map((image) => image.label)).toEqual(["report.pdf：第 2/3 页"]);
+      const rendered = await loadImage(Buffer.from(result.images[0]!.bytes));
+      const canvas = createCanvas(rendered.width, rendered.height);
+      const context = canvas.getContext("2d");
+      context.drawImage(rendered, 0, 0);
+      // The chart image sits in the middle of the page and is green.
+      const pixel = context.getImageData(rendered.width / 2, rendered.height / 2, 1, 1).data;
+      expect(pixel[1]).toBeGreaterThan(100);
+      expect(pixel[0]).toBeLessThan(60);
+      await expect(processAttachment({ ...work, renderPages: [4] })).rejects.toThrow("共 3 页");
+    });
+  });
+
   it("refuses oversized PDFs without silently dropping pages", async () => {
     const pdf = await PDFDocument.create();
-    for (let index = 0; index < 61; index++) pdf.addPage([100, 100]);
+    for (let index = 0; index < PDF_LIMITS.maxPages + 1; index++) pdf.addPage([100, 100]);
     await fixture("large.pdf", await pdf.save(), async (work) => {
-      await expect(processAttachment(work)).rejects.toThrow("61 页");
+      await expect(processAttachment(work)).rejects.toThrow(`${PDF_LIMITS.maxPages + 1} 页`);
     });
   });
 });

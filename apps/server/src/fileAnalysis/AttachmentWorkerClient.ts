@@ -66,8 +66,8 @@ export async function runAttachmentWorker(
     return await new Promise<ProcessedAttachment>((resolve, reject) => {
       const abort = () => reject(new Error("附件处理已取消。"));
       const timer = setTimeout(
-        () => reject(new Error("附件解析超过 90 秒，请缩小文件后重试。")),
-        90_000,
+        () => reject(new Error("附件解析超过 3 分钟，请缩小文件后重试。")),
+        180_000,
       );
       const cleanup = () => {
         clearTimeout(timer);

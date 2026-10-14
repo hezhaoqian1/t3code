@@ -116,6 +116,10 @@ Controls how assistant text reaches the thread timeline. In [the contracts][1], 
 
 A point-in-time view of state. The word is used in multiple layers, including orchestration, provider, and checkpointing. See [ProjectionSnapshotQuery.ts][10], [ProviderAdapter.ts][15], and [CheckpointStore.ts][19].
 
+#### PDF page tools
+
+The FD Codex dynamic tools `fd_pdf_read_pages` and `fd_pdf_view_pages`. A turn with a PDF gets the page text up front; the model calls these to read pages left out for length or to look at chart and scanned pages. They only open the calling thread's own attachments. See [attachment-preparation.md](./attachment-preparation.md).
+
 ### Checkpointing
 
 Checkpointing captures workspace state over time so the app can diff turns and restore earlier points. The main pieces are [CheckpointStore.ts][19], [CheckpointDiffQuery.ts][20], and [CheckpointReactor.ts][6].

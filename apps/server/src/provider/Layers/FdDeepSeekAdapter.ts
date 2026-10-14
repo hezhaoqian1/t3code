@@ -169,6 +169,8 @@ export interface FdDeepSeekAdapterOptions {
     attachments: ReadonlyArray<ChatAttachment>,
   ) => Effect.Effect<ReadonlyArray<FdResponsesInputImageContentPart>, ProviderAdapterRequestError>;
   readonly visionService?: FdVisionService;
+  /** Called with each turn's model before it starts, for tools that run during the turn. */
+  readonly observeTurnModel?: (threadId: ThreadId, model: string) => void;
   readonly nativeSkillCatalogForSession?: (
     input: ProviderSessionStartInput,
   ) => Promise<NativeSkillCatalog>;
@@ -1077,6 +1079,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         detail: "A turn is already active.",
       });
     }
+    options.observeTurnModel?.(input.threadId, selectedModel);
     if (
       input.fdSkillVersionId !== undefined &&
       !options.ordinaryAdapter &&

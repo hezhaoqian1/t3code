@@ -61,7 +61,7 @@ describe("FdVisionService", () => {
     ).rejects.toBeInstanceOf(FdResponsesError);
   });
 
-  it("rejects overflowing evidence instead of returning a truncated transcription", async () => {
+  it("keeps the first part of an overflowing page and says it was cut", async () => {
     const service = new FdVisionService(
       streamer([
         { type: "text-delta", text: "a".repeat(FD_VISION_LIMITS.maxEvidenceBytes) },
@@ -69,8 +69,9 @@ describe("FdVisionService", () => {
         { type: "completed", finishReason: "stop" },
       ]),
     );
-    await expect(service.analyze({ images: [image] })).rejects.toMatchObject({
-      kind: "response_too_large",
-    });
+    const evidence = await service.analyze({ images: [image] });
+    expect(evidence.startsWith("a".repeat(FD_VISION_LIMITS.maxEvidenceBytes))).toBe(true);
+    expect(evidence).not.toContain("中");
+    expect(evidence).toContain("[本页识别结果较长，以上为前一部分]");
   });
 });

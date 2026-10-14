@@ -71,6 +71,8 @@ export async function prepareResponsesCodexHome(
   return configPath;
 }
 
+export const FD_TOOL_OUTPUT_TOKEN_LIMIT = 16_000;
+
 export function renderResponsesCodexConfig(provider: ResponsesCodexProviderConfig): string {
   validateProviderConfig(provider);
   return [
@@ -78,6 +80,9 @@ export function renderResponsesCodexConfig(provider: ResponsesCodexProviderConfi
     `model_provider = ${tomlString(provider.providerId)}`,
     'approval_policy = "on-request"',
     'sandbox_mode = "workspace-write"',
+    // Codex keeps 10 KB of each tool result for custom models, about 3,000
+    // Chinese characters: too little for a page of a document or a file.
+    `tool_output_token_limit = ${FD_TOOL_OUTPUT_TOKEN_LIMIT}`,
     "",
     `[model_providers.${provider.providerId}]`,
     `name = ${tomlString(provider.displayName)}`,

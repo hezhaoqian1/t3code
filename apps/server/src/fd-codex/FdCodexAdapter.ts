@@ -16,6 +16,7 @@ import {
   FdEnterpriseCodexError,
 } from "../fd-skills/FdEnterpriseCodexClient.ts";
 import { NativeSkillCatalog, selectedNativeSkillNames } from "../fd-skills/NativeSkillCatalog.ts";
+import type { PdfPageTools } from "../fileAnalysis/PdfPageTools.ts";
 import { makeFdCodexChildEnvironment } from "./FdCodexChildEnvironment.ts";
 import { prepareFdManagedCodexHome } from "./FdManagedCodexHome.ts";
 import { FD_RESPONSES_PROVIDERS } from "./ResponsesModelCatalog.ts";
@@ -89,9 +90,41 @@ export async function prepareFdCodexRuntime(input: {
   };
 }
 
+/**
+ * Exposes the local PDF page tools to a Codex session. Calls run in this
+ * process against the calling thread's own attachments.
+ */
+export function fdDocumentToolRuntime(tools: PdfPageTools, threadId: string) {
+  return {
+    dynamicTools: tools.specs.map((tool) => ({
+      type: "function" as const,
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    })),
+    dynamicToolExecutor: (request: { readonly tool: string; readonly arguments: unknown }) =>
+      Effect.tryPromise({
+        try: (signal) =>
+          tools.execute({ threadId, tool: request.tool, arguments: request.arguments, signal }),
+        catch: () => undefined,
+      }).pipe(
+        Effect.match({
+          onFailure: () => ({ success: false, text: "读取 PDF 页面失败，请稍后重试。" }),
+          onSuccess: (result) => result,
+        }),
+        Effect.map((result) => ({
+          success: result.success,
+          contentItems: [{ type: "inputText" as const, text: result.text }],
+        })),
+      ),
+  };
+}
+
 export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (input: {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath?: string;
+  /** Local PDF page tools offered to every session; FD Skill tools are added alongside. */
+  readonly documentTools?: PdfPageTools;
 }) {
   const credentials = yield* FdRuntimeCredentialStore;
   const serverConfig = yield* ServerConfig;
@@ -183,7 +216,10 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
             }),
         }),
       resolveSessionRuntime: (session) => {
-        if (session.fdSkillVersionId === undefined) return Effect.succeed({});
+        const documents = input.documentTools
+          ? fdDocumentToolRuntime(input.documentTools, session.threadId)
+          : undefined;
+        if (session.fdSkillVersionId === undefined) return Effect.succeed(documents ?? {});
         const skillVersionId = session.fdSkillVersionId;
         return Effect.tryPromise({
           try: () =>
@@ -201,51 +237,62 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
         }).pipe(
           Effect.map((runtimeContext) => ({
             developerInstructions: runtimeContext.developer_instructions,
-            dynamicTools: runtimeContext.tools.map((tool) => ({
-              type: "function" as const,
-              name: tool.name,
-              description: tool.description,
-              inputSchema: tool.input_schema,
-            })),
-            dynamicToolExecutor: (request) =>
-              Effect.tryPromise(() =>
-                enterpriseClient.executeToolCall({
-                  skillVersionId,
-                  releaseDigest: runtimeContext.release_digest,
-                  clientThreadId: session.threadId,
-                  providerThreadId: request.threadId,
-                  turnId: request.turnId,
-                  callId: request.callId,
-                  tool: request.tool,
-                  arguments: request.arguments,
-                }),
-              ).pipe(
-                Effect.match({
-                  onFailure: (cause) => ({
-                    success: false,
-                    contentItems: [
-                      {
-                        type: "inputText" as const,
-                        text: fdEnterpriseToolFailureMessage(cause),
-                      },
-                    ],
-                  }),
-                  onSuccess: (result) => ({
-                    success: true,
-                    contentItems: [
-                      {
-                        type: "inputText" as const,
-                        text: JSON.stringify({
-                          audit_id: result.audit_id,
-                          content: result.content,
-                          row_count: result.row_count ?? 0,
-                          truncated: result.truncated ?? false,
-                        }),
-                      },
-                    ],
-                  }),
-                }),
+            dynamicTools: [
+              ...runtimeContext.tools.map((tool) => ({
+                type: "function" as const,
+                name: tool.name,
+                description: tool.description,
+                inputSchema: tool.input_schema,
+              })),
+              // The gateway owns an FD Skill session's tool contract: if one
+              // of its tools ever shares a name with a document tool, it wins.
+              ...(documents?.dynamicTools ?? []).filter(
+                (tool) => !runtimeContext.tools.some((skillTool) => skillTool.name === tool.name),
               ),
+            ],
+            dynamicToolExecutor: (request) =>
+              documents &&
+              input.documentTools?.handles(request.tool) &&
+              !runtimeContext.tools.some((skillTool) => skillTool.name === request.tool)
+                ? documents.dynamicToolExecutor(request)
+                : Effect.tryPromise(() =>
+                    enterpriseClient.executeToolCall({
+                      skillVersionId,
+                      releaseDigest: runtimeContext.release_digest,
+                      clientThreadId: session.threadId,
+                      providerThreadId: request.threadId,
+                      turnId: request.turnId,
+                      callId: request.callId,
+                      tool: request.tool,
+                      arguments: request.arguments,
+                    }),
+                  ).pipe(
+                    Effect.match({
+                      onFailure: (cause) => ({
+                        success: false,
+                        contentItems: [
+                          {
+                            type: "inputText" as const,
+                            text: fdEnterpriseToolFailureMessage(cause),
+                          },
+                        ],
+                      }),
+                      onSuccess: (result) => ({
+                        success: true,
+                        contentItems: [
+                          {
+                            type: "inputText" as const,
+                            text: JSON.stringify({
+                              audit_id: result.audit_id,
+                              content: result.content,
+                              row_count: result.row_count ?? 0,
+                              truncated: result.truncated ?? false,
+                            }),
+                          },
+                        ],
+                      }),
+                    }),
+                  ),
           })),
         );
       },

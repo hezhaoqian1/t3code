@@ -241,9 +241,12 @@ describe("FD attachment preparation lifecycle", () => {
     () =>
       Effect.gen(function* () {
         const sent: ProviderSendTurnInput[] = [];
+        const observed: Array<[string, string]> = [];
         const adapter = yield* makeFdDeepSeekAdapter({
           kernel: new FdAgentKernel({ stream: async function* () {} }),
           ordinaryAdapter: ordinary(sent),
+          // Page tools run during the turn and read the thread's model from here.
+          observeTurnModel: (id, model) => observed.push([id, model]),
           prepareAttachments: async (input, model) => {
             expect(model).toBe("kimi-k3");
             expect(input.attachments?.[0]?.type).toBe("document");
@@ -259,6 +262,7 @@ describe("FD attachment preparation lifecycle", () => {
         expect(sent).toHaveLength(1);
         expect(sent[0]?.input).toContain("page 1");
         expect(sent[0]?.attachments).toEqual([]);
+        expect(observed).toEqual([[threadId, "kimi-k3"]]);
       }),
   );
 

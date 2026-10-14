@@ -51,6 +51,7 @@ export class FdVisionService {
     let evidence = "";
     let evidenceBytes = 0;
     let completed = false;
+    let truncated = false;
     for await (const event of this.#streamer.stream({
       // Dynamic models are authorized by the FD provider catalog before this
       // service is called; the wire protocol's legacy union is kept for the
@@ -65,14 +66,19 @@ export class FdVisionService {
     })) {
       if (event.type === "text-delta") {
         evidenceBytes += new TextEncoder().encode(event.text).byteLength;
-        if (evidenceBytes > FD_VISION_LIMITS.maxEvidenceBytes)
-          throw new FdResponsesError("response_too_large");
+        if (evidenceBytes > FD_VISION_LIMITS.maxEvidenceBytes) {
+          // A dense page can describe more than the evidence budget. Keep
+          // what was read and say so, rather than losing the whole page.
+          truncated = true;
+          break;
+        }
         evidence += event.text;
       } else if (event.type === "completed") {
         completed = event.finishReason === "stop";
       }
     }
     const trimmed = evidence.trim();
+    if (truncated && trimmed) return `${trimmed}\n[本页识别结果较长，以上为前一部分]`;
     if (!completed || !trimmed) throw new FdResponsesError("malformed_response");
     return trimmed;
   }

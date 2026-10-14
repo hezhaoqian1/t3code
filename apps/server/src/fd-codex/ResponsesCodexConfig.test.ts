@@ -11,6 +11,8 @@ describe("Responses-backed Codex configuration", () => {
     expect(config).toContain('model_provider = "fd_new_api"');
     expect(config).toContain('env_key = "FD_NEW_API_KEY"');
     expect(config).toContain('wire_api = "responses"');
+    // Custom models otherwise keep only 10 KB of each tool result.
+    expect(config).toContain("tool_output_token_limit = 16000");
     expect(config).not.toContain("sk-");
   });
 
