@@ -276,6 +276,11 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
   if (itemType === "mcp_tool_call" && item?.type === "mcpToolCall") {
     return `${item.server} · ${item.tool}`;
   }
+  // The tool name lets the timeline describe the call (for example the FD
+  // PDF page tools) instead of a generic "Tool call".
+  if (itemType === "dynamic_tool_call" && item?.type === "dynamicToolCall" && item.tool) {
+    return item.tool;
+  }
   switch (itemType) {
     case "assistant_message":
       return "Assistant message";

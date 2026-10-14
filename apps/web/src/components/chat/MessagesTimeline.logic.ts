@@ -280,6 +280,8 @@ export function workEntryEmployeeSummary(
     return "查看图片";
   }
   if (entry.itemType === "mcp_tool_call") return "调用企业工具";
+  if (descriptor.includes("fd_pdf_view_pages")) return "查看 PDF 页面";
+  if (descriptor.includes("fd_pdf_read_pages")) return "读取 PDF 页面";
   if (entry.itemType === "dynamic_tool_call") return "调用工具";
   if (entry.itemType === "collab_agent_tool_call" || entry.taskId) return "协同处理";
   if (

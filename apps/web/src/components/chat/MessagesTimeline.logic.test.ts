@@ -277,6 +277,14 @@ describe("workEntryEmployeeSummary", () => {
       }),
     ).toBe("调用企业工具");
   });
+
+  it("names the PDF page tools and keeps other dynamic tools generic", () => {
+    const tool = (toolTitle: string) =>
+      workEntryEmployeeSummary({ label: "Tool call", toolTitle, itemType: "dynamic_tool_call" });
+    expect(tool("fd_pdf_view_pages")).toBe("查看 PDF 页面");
+    expect(tool("fd_pdf_read_pages")).toBe("读取 PDF 页面");
+    expect(tool("query_holdings")).toBe("调用工具");
+  });
 });
 
 describe("resolveAssistantMessageCopyState", () => {

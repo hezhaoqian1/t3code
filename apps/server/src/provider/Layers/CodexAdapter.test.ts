@@ -760,6 +760,45 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("labels dynamic tool calls with the tool name", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-dynamic-complete"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("tool_1"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "dynamicToolCall",
+            id: "tool_1",
+            tool: "fd_pdf_view_pages",
+            arguments: { document_id: "thread-1-doc", pages: "22" },
+            status: "completed",
+            success: true,
+          },
+        },
+      });
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "item.completed") {
+        return;
+      }
+      NodeAssert.equal(firstEvent.value.payload.itemType, "dynamic_tool_call");
+      NodeAssert.equal(firstEvent.value.payload.title, "fd_pdf_view_pages");
+    }),
+  );
+
   it.effect("maps completed plan items to canonical proposed-plan completion events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
