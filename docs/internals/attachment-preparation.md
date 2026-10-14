@@ -13,6 +13,30 @@ limits. `attachmentWorker.mjs` is a second server build entry. It must be includ
 with all generated chunks, PDF.js assets, and the native canvas dependency in
 releases.
 
+## Turn budget
+
+A prepared turn carries at most 200,000 UTF-8 bytes
+(`PREPARED_PROMPT_MAX_BYTES`), about a quarter of the 258,400-token window Codex
+manages for these models. The rest of every attachment stays readable through
+the attachment tools, so the budget limits what arrives up front, not what the
+model can read.
+
+After the question and a reserve for the guides, pasted text (up to 120 KB),
+recognition results (up to 60 KB) and document text share the room by
+water-filling (`fairShares`), so a large paste cannot leave a contract out
+entirely; document text also gets whatever the others leave. If the composed
+prompt still overflows, `prepareAttachments` shrinks what can be read again
+later, in this order: document text, pasted text, recognition results. It never
+fails the turn for attachment size. Only a typed message that alone exceeds the
+budget is refused, with a hint to send it as a file.
+
+Before 0.2.41 the turn failed with "附件与问题的总文本超过本轮容量" far too
+often: documents were capped at 160,000 characters but checked against 200,000
+bytes (a Chinese character is three bytes), and the Office walker emitted every
+Word paragraph twice and table cells three times or more, because officeparser
+already puts the combined text of a node's children on the node. A Chinese
+contract of about 33,000 characters was enough.
+
 ## PDFs: text first, pages on demand
 
 `VisualAttachments.processPdf` reads every page (up to 500) with PDF.js and
@@ -113,6 +137,23 @@ included and the CSV path, and tells the model to read more rows with
 or to compute over the CSV with a command. Before this, a few thousand rows of
 Chinese text made the turn fail the 200 KB check.
 
+## Word, PowerPoint, text and pasted text
+
+`DocumentContext` cuts a long body at the budget and records how many lines it
+carried (`cutSections`); slides go in whole and the rest are listed
+(`omitted`). `[文档附件说明]` gives each such document's id, its total lines, and
+where to continue: the line the prompt stopped on, or the first slide left out
+and the line it starts on. The in-text marker repeats the line range.
+
+`fd_document_read(document_id, lines | search)` reads up to 1,000 lines and
+30 KB per call, or returns up to 40 lines containing a keyword with their line
+numbers. The text comes from `<attachment id>.doctext`, written for every
+document the turn cut and for every paste, laid out as `layoutDocumentText`
+does (a header line per page or slide); if it is missing the tool parses the
+file again. Pasted text is marked as the employee's own words rather than
+untrusted content. PDFs and tables are redirected to their own tools, and only
+the calling thread's documents open.
+
 ## Other attachments
 
 Ordinary small images retain their native input route. Large images become
@@ -129,7 +170,9 @@ are removed after processing. LibreOffice is optional and is not bundled.
 
 ## Verification
 
-- Server: `pnpm exec vp test run src/fileAnalysis src/fd-vision src/fd-codex/FdDocumentTools.test.ts src/fd-codex/ResponsesCodexConfig.test.ts src/provider/Layers/FdAttachmentPreparation.test.ts`
+- Server: `pnpm exec vp test run src/fileAnalysis src/fd-vision src/fd-codex/FdDocumentTools.test.ts src/fd-codex/ResponsesCodexConfig.test.ts src/provider/Layers/FdAttachmentPreparation.test.ts`.
+  `Capacity.test.ts` sends a worst-case turn: a 600 KB paste, a 6,000-line
+  contract, 80 slides, three 300-page PDFs and 42 recognized images.
 - Renderer: `pnpm exec vp test run src/lib/imageCompression.test.ts src/lib/documentAttachments.test.ts`
 - Server bundle: `pnpm exec vp pack --out-dir test-artifacts/attachment-bundle`
 - Packaged worker: `node scripts/attachment-smoke.mjs` from `apps/server`.
