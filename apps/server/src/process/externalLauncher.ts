@@ -14,6 +14,7 @@ import {
   ExternalLauncherEditorSpawnError,
   ExternalLauncherUnknownEditorError,
   ExternalLauncherUnsupportedEditorError,
+  ExternalLauncherUnsupportedTargetError,
   type EditorId,
   type LaunchEditorInput,
 } from "@t3tools/contracts";
@@ -43,6 +44,7 @@ export {
   ExternalLauncherEditorSpawnError,
   ExternalLauncherUnknownEditorError,
   ExternalLauncherUnsupportedEditorError,
+  ExternalLauncherUnsupportedTargetError,
   isExternalLauncherError,
 } from "@t3tools/contracts";
 export type { LaunchEditorInput };
@@ -65,6 +67,14 @@ interface TargetPathAndPosition {
   readonly column: Option.Option<string>;
 }
 
+/**
+ * Windows command shims (`code.cmd`) forward arguments through `%*`, which
+ * cmd.exe parses a second time after the first escaping layer is gone: a
+ * line break ends the command there, and a double quote closes the quoting
+ * that keeps `&` or `|` literal. Neither can occur in a Windows path.
+ */
+// oxlint-disable-next-line no-control-regex
+const WINDOWS_SHIM_UNSAFE_ARG_PATTERN = /[\u0000-\u001f\u007f"]/;
 const TARGET_WITH_POSITION_PATTERN = /^(.*?):(\d+)(?::(\d+))?$/;
 const POWERSHELL_ARGUMENTS_PREFIX = [
   "-NoProfile",
@@ -431,6 +441,9 @@ const launchEditorProcess = Effect.fn("externalLauncher.launchEditorProcess")(fu
   }
 
   const spawnCommand = yield* resolveSpawnCommand(launch.command, launch.args, { env });
+  if (spawnCommand.shell && launch.args.some((arg) => WINDOWS_SHIM_UNSAFE_ARG_PATTERN.test(arg))) {
+    return yield* new ExternalLauncherUnsupportedTargetError({ editor: launch.editor });
+  }
   yield* launchAndUnref(
     {
       command: spawnCommand.command,
