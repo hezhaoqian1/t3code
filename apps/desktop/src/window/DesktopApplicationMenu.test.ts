@@ -98,6 +98,7 @@ const makeElectronMenuLayer = (
 const configureMenu = (
   selectedAction: Deferred.Deferred<string>,
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
+  platform: DesktopEnvironment.MakeDesktopEnvironmentInput["platform"] = environmentInput.platform,
 ) =>
   Effect.gen(function* () {
     const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
@@ -111,7 +112,7 @@ const configureMenu = (
         Layer.provideMerge(electronDialogLayer),
         Layer.provideMerge(electronAppLayer),
         Layer.provideMerge(
-          DesktopEnvironment.layer(environmentInput).pipe(
+          DesktopEnvironment.layer({ ...environmentInput, platform }).pipe(
             Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))),
           ),
         ),
@@ -143,6 +144,46 @@ describe("DesktopApplicationMenu", () => {
 
       settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
       assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+    }),
+  );
+
+  // Chromium pastes as plain text for the accelerator on its own. Dispatching
+  // the action as well injects a second paste, which doubles the pasted text.
+  it.effect("leaves the accelerator to Chromium instead of injecting a paste", () =>
+    Effect.gen(function* () {
+      const selectedAction = yield* Deferred.make<string>();
+      const applicationMenuTemplate =
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+
+      yield* configureMenu(selectedAction, applicationMenuTemplate, "darwin");
+
+      const template = yield* Deferred.await(applicationMenuTemplate);
+      const editMenu = template.find((item) => item.label === "Edit");
+      if (!Array.isArray(editMenu?.submenu)) {
+        throw new Error("Expected Edit menu submenu to be an array.");
+      }
+      const pasteAsTextItem = editMenu.submenu.find((item) => item.label === "Paste as Plain Text");
+      if (typeof pasteAsTextItem?.click !== "function") {
+        throw new Error("Expected Paste as Plain Text menu item to have a click handler.");
+      }
+
+      pasteAsTextItem.click(
+        {} as Electron.MenuItem,
+        {} as Electron.BrowserWindow,
+        {
+          triggeredByAccelerator: true,
+        } as unknown as KeyboardEvent,
+      );
+      assert.isFalse(yield* Deferred.isDone(selectedAction));
+
+      // A mouse click on the menu item has no keystroke for the composer to
+      // see, so it still routes the paste through the renderer.
+      pasteAsTextItem.click(
+        {} as Electron.MenuItem,
+        {} as Electron.BrowserWindow,
+        {} as unknown as KeyboardEvent,
+      );
+      assert.equal(yield* Deferred.await(selectedAction), "paste-as-text");
     }),
   );
 

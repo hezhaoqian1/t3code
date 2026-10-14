@@ -134,7 +134,17 @@ export const make = Effect.gen(function* () {
     const settingsClick = () => {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
-    const pasteAsTextClick = () => {
+    // Chromium already pastes as plain text for this chord, so the accelerator
+    // needs nothing from the menu: the composer arms itself from the same
+    // keydown. Routing it through the renderer anyway lands a second, injected
+    // paste and doubles the text. Only a menu click, which produces no
+    // keystroke for the composer to see, needs that round trip.
+    const pasteAsTextClick = (
+      _item: Electron.MenuItem,
+      _window: Electron.BaseWindow | undefined,
+      event: Electron.KeyboardEvent,
+    ) => {
+      if (event.triggeredByAccelerator === true) return;
       runMenuEffect("paste-as-text", dispatchMenuAction("paste-as-text"));
     };
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {
@@ -186,9 +196,9 @@ export const make = Effect.gen(function* () {
           { role: environment.platform === "darwin" ? "close" : "quit" },
         ],
       },
-      // macOS has no native ⌘⇧V, so the menu provides "paste as plain text"
-      // (keeps a large paste in the composer instead of attaching it).
-      // Elsewhere Chromium handles Ctrl+Shift+V itself.
+      // macOS lists "paste as plain text" in the Edit menu (keeps a large paste
+      // in the composer instead of attaching it). Chromium performs the ⌘⇧V
+      // paste itself; elsewhere it handles Ctrl+Shift+V without a menu item.
       environment.platform === "darwin"
         ? {
             label: "Edit",
