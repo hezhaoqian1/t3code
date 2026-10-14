@@ -223,6 +223,7 @@ describe("PDF pages", () => {
     expect(result.input).toContain(`document_id=${turn.attachments[0]!.id}`);
     expect(result.input).toContain("第 2–3 页含图表或图片");
     expect(result.input).toContain("fd_pdf_view_pages");
+    expect(result.input).toContain("不要在磁盘上搜索、复制或用脚本处理 PDF 文件");
     expect(cached).toMatchObject([
       {
         name: "report.pdf",

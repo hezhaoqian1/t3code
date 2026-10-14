@@ -60,11 +60,21 @@ enterprise tool with the same name would win):
 
 - `fd_pdf_read_pages(document_id, pages)`: cached page text, up to 20 pages and
   30 KB per call, with notes pointing chart and scanned pages at the viewer.
-- `fd_pdf_view_pages(document_id, pages)`: renders up to 4 pages in the worker
-  and recognizes them in parallel with the thread's latest model when it has a
-  native visual route, otherwise with the authorized `deepseek-flash`
-  preprocessor. Results are cached per page and model
-  (`<attachment id>.vision-p<N>-<model>`).
+- `fd_pdf_view_pages(document_id, pages, focus?)`: renders up to 4 pages in the
+  worker. When the thread's latest model has a native visual route, the tool
+  result carries the page images themselves (`inputImage` content items after a
+  text header), so the model reads charts with its own eyes and can look again.
+  Other models get a reading by the authorized `deepseek-flash` preprocessor,
+  pages in parallel; a full reading is cached per page
+  (`<attachment id>.vision-p<N>-deepseek-flash`). `focus` asks the
+  preprocessor for one specific value instead (for example a curve's peak and
+  its date) and is never cached. The Aliyun Responses route accepts images in
+  `function_call_output` for every native-vision model in the catalog.
+
+Both PDF tool descriptions and `[PDF 附件说明]` say that attachment files are
+not in the workspace and must be read through the tools: without that, a model
+once spent minutes running `Get-ChildItem -Recurse` over the user's profile
+looking for the PDF and cropping it with Python.
 
 Tools only open attachments whose id carries the calling thread's segment. The
 thread's model comes from `FdDeepSeekAdapter`'s `observeTurnModel` hook. If the

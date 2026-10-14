@@ -11,6 +11,8 @@ export interface AttachmentToolSpec {
 export interface AttachmentToolResult {
   readonly success: boolean;
   readonly text: string;
+  /** Page images for models with a native image route, as data URLs. */
+  readonly images?: ReadonlyArray<{ readonly label: string; readonly dataUrl: string }>;
 }
 
 export interface AttachmentToolCall {

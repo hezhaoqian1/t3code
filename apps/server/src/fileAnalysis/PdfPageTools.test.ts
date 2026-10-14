@@ -97,13 +97,46 @@ describe("PDF page tools", () => {
     expect(requests).toHaveLength(1);
   });
 
-  it("uses the thread's own visual model when it has one", async () => {
+  it("reads one requested value with focus and does not cache the narrow reading", async () => {
     const requests: FdVisionAnalyzeInput[] = [];
-    await call(tools("kimi-k3", requests), FD_PDF_VIEW_PAGES_TOOL, {
+    const pageTools = tools("glm-5.2", requests);
+    const focused = await call(pageTools, FD_PDF_VIEW_PAGES_TOOL, {
+      document_id: documentId,
+      pages: "2",
+      focus: "PE 曲线最高点的数值和日期",
+    });
+    expect(focused.text).toContain("画面识别：PE 曲线最高点的数值和日期");
+    expect(requests[0]?.userPrompt).toContain("请从本页画面中准确读出：PE 曲线最高点的数值和日期");
+    await call(pageTools, FD_PDF_VIEW_PAGES_TOOL, { document_id: documentId, pages: "2" });
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.userPrompt).toContain("请完整、准确地提取本页内容");
+  });
+
+  it("hands visual models the page images instead of a second model's reading", async () => {
+    const requests: FdVisionAnalyzeInput[] = [];
+    const result = await call(tools("kimi-k3", requests), FD_PDF_VIEW_PAGES_TOOL, {
       document_id: documentId,
       pages: [2, 3],
     });
-    expect(requests.map((request) => request.model)).toEqual(["kimi-k3", "kimi-k3"]);
+    expect(requests).toHaveLength(0);
+    expect(result.success).toBe(true);
+    expect(result.text).toContain("trust=none");
+    expect(result.text).toContain("第 2、3 页的画面（共 3 页）");
+    expect("images" in result ? result.images : undefined).toEqual([
+      {
+        label: expect.stringContaining("第 2/3 页"),
+        dataUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+      },
+      {
+        label: expect.stringContaining("第 3/3 页"),
+        dataUrl: expect.stringMatching(/^data:image\/jpeg;base64,/),
+      },
+    ]);
+  });
+
+  it("tells the model to use the tools rather than look for the files", () => {
+    const pageTools = tools("deepseek-flash", []);
+    for (const spec of pageTools.specs) expect(spec.description).toContain("不要在磁盘上搜索");
   });
 
   it("refuses another thread's document and explains bad page numbers", async () => {

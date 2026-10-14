@@ -341,5 +341,10 @@ export function formatPdfGuide(input: {
     "[PDF 附件说明]",
     ...blocks,
     "上面“第 N 页”是 PDF 的页序；正文里印刷的页码（如页脚“第 19 页”）可能不同，回答时以用户所指为准并核对。",
+    ...(input.pageTools
+      ? [
+          `PDF 原文件不在工作区中：读取文字用 ${FD_PDF_READ_PAGES_TOOL}，查看画面用 ${FD_PDF_VIEW_PAGES_TOOL}；不要在磁盘上搜索、复制或用脚本处理 PDF 文件。`,
+        ]
+      : []),
   ].join("\n");
 }

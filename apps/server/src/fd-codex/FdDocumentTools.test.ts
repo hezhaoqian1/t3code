@@ -46,6 +46,28 @@ describe("FD document tools in Codex sessions", () => {
     }),
   );
 
+  it.effect("passes page images through to models that can see them", () =>
+    Effect.gen(function* () {
+      const runtime = fdDocumentToolRuntime(
+        fakeTools(async () => ({
+          success: true,
+          text: "以下是 report.pdf 第 2 页的画面",
+          images: [{ label: "report.pdf：第 2/3 页", dataUrl: "data:image/jpeg;base64,AAAA" }],
+        })),
+        "thread-a",
+      );
+      const response = yield* runtime.dynamicToolExecutor({
+        tool: "fd_pdf_view_pages",
+        arguments: { document_id: "x", pages: "2" },
+      });
+      expect(response.contentItems).toEqual([
+        { type: "inputText", text: "以下是 report.pdf 第 2 页的画面" },
+        { type: "inputText", text: "report.pdf：第 2/3 页" },
+        { type: "inputImage", imageUrl: "data:image/jpeg;base64,AAAA" },
+      ]);
+    }),
+  );
+
   it.effect("turns an unexpected failure into a tool error instead of failing the turn", () =>
     Effect.gen(function* () {
       const runtime = fdDocumentToolRuntime(

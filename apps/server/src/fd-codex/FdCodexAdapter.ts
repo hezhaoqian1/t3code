@@ -115,7 +115,15 @@ export function fdDocumentToolRuntime(tools: AttachmentToolSet, threadId: string
         }),
         Effect.map((result) => ({
           success: result.success,
-          contentItems: [{ type: "inputText" as const, text: result.text }],
+          contentItems: [
+            { type: "inputText" as const, text: result.text },
+            ...("images" in result
+              ? (result.images ?? []).flatMap((image) => [
+                  { type: "inputText" as const, text: image.label },
+                  { type: "inputImage" as const, imageUrl: image.dataUrl },
+                ])
+              : []),
+          ],
         })),
       ),
   };
