@@ -106,6 +106,35 @@ describe("FdResponsesClient", () => {
     expect(events.at(-1)).toEqual({ type: "completed", finishReason: "stop" });
   });
 
+  it("accepts reasoning items with the null status and summary the Aliyun route sends", async () => {
+    const events = textAndReasoningEvents().map((event) =>
+      isReasoningDone(event)
+        ? {
+            ...event,
+            item: { ...event.item, summary: [], encrypted_content: null, status: null },
+          }
+        : event,
+    );
+    const client = new FdResponsesClient(
+      {
+        subscribe: Effect.sync(() => ({
+          current: Option.some(credentials()),
+          changes: Stream.never,
+        })),
+      },
+      { fetch: vi.fn(async () => sseResponse(events)) },
+    );
+    const output = await collect(
+      client.stream({
+        model: FD_RESPONSES_MODEL,
+        round: 1,
+        input: [{ role: "user", content: "read the chart" }],
+      }),
+    );
+    expect(output).toContainEqual({ type: "text-delta", text: "Hello" });
+    expect(output.at(-1)).toEqual({ type: "completed", finishReason: "stop" });
+  });
+
   it("sends and validates the exact Pro model when the credential authorizes it", async () => {
     let requestBody: Record<string, unknown> | undefined;
     const dualCredentials: FdServerRuntimeCredentialProjection = {
@@ -1028,6 +1057,11 @@ function textEvents(id: string, text: string, terminal = true): unknown[] {
   ];
   if (terminal) events.push(...completed());
   return events;
+}
+
+function isReasoningDone(event: unknown): event is { type: string; item: Record<string, unknown> } {
+  const value = event as { type?: unknown; item?: { type?: unknown } };
+  return value.type === "response.output_item.done" && value.item?.type === "reasoning";
 }
 
 function textAndReasoningEvents(): unknown[] {

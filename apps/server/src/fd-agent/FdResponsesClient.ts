@@ -888,7 +888,8 @@ function validateReasoningOutputItem(
       value.encrypted_content !== null &&
       (typeof value.encrypted_content !== "string" ||
         byteLength(value.encrypted_content) > FD_RESPONSES_LIMITS.maxReasoningBytes)) ||
-    (value.status !== undefined && !validIdentifier(value.status, 32))
+    // The Aliyun route sends `status: null` on reasoning items.
+    (value.status !== undefined && value.status !== null && !validIdentifier(value.status, 32))
   ) {
     throw new FdResponsesError(kind);
   }
