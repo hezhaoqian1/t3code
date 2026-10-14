@@ -65,6 +65,30 @@ export interface AttachmentWork {
   readonly visual: boolean;
   /** Render only these PDF pages (1-based), for on-demand page viewing. */
   readonly renderPages?: ReadonlyArray<number>;
+  /** Render each requested page as two overlapping halves (see `pageHalves`). */
+  readonly splitPages?: boolean;
+}
+
+/**
+ * Two overlapping halves of a page, split across its longer side. The vision
+ * route shrinks every image to a fixed budget, so a whole page leaves chart
+ * ticks and legends too small to read; each half gets that budget to itself.
+ */
+export function pageHalves(width: number, height: number) {
+  const tall = height >= width;
+  const length = tall ? height : width;
+  const overlap = Math.round(length * 0.08);
+  const first = Math.ceil(length / 2) + overlap;
+  const secondStart = Math.floor(length / 2) - overlap;
+  return tall
+    ? [
+        { x: 0, y: 0, width, height: first, region: "上半部分" },
+        { x: 0, y: secondStart, width, height: height - secondStart, region: "下半部分" },
+      ]
+    : [
+        { x: 0, y: 0, width: first, height, region: "左半部分" },
+        { x: secondStart, y: 0, width: width - secondStart, height, region: "右半部分" },
+      ];
 }
 
 export function imageTiles(width: number, height: number) {
@@ -219,7 +243,15 @@ async function processPdf(work: AttachmentWork, bytes: Buffer): Promise<Processe
       viewport.height < 1
     )
       throw new Error(`PDF 第 ${index} 页尺寸无效。`);
-    const tiles = imageTiles(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const width = Math.ceil(viewport.width);
+    const height = Math.ceil(viewport.height);
+    const tiles: ReadonlyArray<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      region?: string;
+    }> = work.splitPages ? pageHalves(width, height) : imageTiles(width, height);
     if (images.length + tiles.length > VISUAL_LIMITS.maxTiles)
       throw new Error("PDF 渲染分段超过 64 个，请拆分后上传。");
     for (const [tileIndex, tile] of tiles.entries()) {
@@ -233,8 +265,9 @@ async function processPdf(work: AttachmentWork, bytes: Buffer): Promise<Processe
       totalBytes += output.length;
       if (totalBytes > VISUAL_LIMITS.maxOutputBytes)
         throw new Error("PDF 页面图片总体积过大，请拆分后上传。");
-      const region =
-        tiles.length > 1
+      const region = tile.region
+        ? `，${tile.region}（两部分在中间有重叠）`
+        : tiles.length > 1
           ? `，分段 ${tileIndex + 1}/${tiles.length}，像素位置 (${tile.x},${tile.y})，相邻分段有重叠`
           : "";
       images.push({

@@ -9,6 +9,7 @@ import {
   PDF_LIMITS,
   processAttachment,
   imageTiles,
+  pageHalves,
   type AttachmentWork,
 } from "./VisualAttachments.ts";
 import { runAttachmentWorker } from "./AttachmentWorkerClient.ts";
@@ -90,6 +91,18 @@ describe("visual attachments", () => {
     }
     expect(tiles.at(-1)!.y + tiles.at(-1)!.height).toBe(20000);
     expect(() => imageTiles(100000, 100000)).toThrow("像素");
+  });
+
+  it("splits a page into two overlapping halves across its longer side", () => {
+    const [top, bottom] = pageHalves(1190, 1684);
+    expect(top).toMatchObject({ x: 0, y: 0, width: 1190 });
+    expect(bottom).toMatchObject({ x: 0, width: 1190 });
+    expect(bottom!.y).toBeLessThan(top!.height);
+    expect(bottom!.y + bottom!.height).toBe(1684);
+    const [left, right] = pageHalves(1684, 1190);
+    expect(left).toMatchObject({ x: 0, y: 0, height: 1190 });
+    expect(right!.x + right!.width).toBe(1684);
+    expect(right!.x).toBeLessThan(left!.width);
   });
 
   it("extracts text pages and renders scanned pages with original page numbers", async () => {

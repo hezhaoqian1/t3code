@@ -107,8 +107,14 @@ describe("PDF page tools", () => {
     });
     expect(focused.text).toContain("画面识别：PE 曲线最高点的数值和日期");
     expect(requests[0]?.userPrompt).toContain("请从本页画面中准确读出：PE 曲线最高点的数值和日期");
+    // Both halves of the page, in one request, each labeled.
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.images).toHaveLength(2);
+    expect(requests[0]?.userPrompt).toContain("上半部分（两部分在中间有重叠）");
+    expect(requests[0]?.userPrompt).toContain("下半部分（两部分在中间有重叠）");
     await call(pageTools, FD_PDF_VIEW_PAGES_TOOL, { document_id: documentId, pages: "2" });
     expect(requests).toHaveLength(2);
+    expect(requests[1]?.images).toHaveLength(1);
     expect(requests[1]?.userPrompt).toContain("请完整、准确地提取本页内容");
     expect(requests[1]?.userPrompt).toContain("只沿该颜色的线或柱读数");
   });

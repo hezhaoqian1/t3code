@@ -68,13 +68,27 @@ enterprise tool with the same name would win):
   pages in parallel; a full reading is cached per page
   (`<attachment id>.vision-p<N>-deepseek-flash`). `focus` asks the
   preprocessor for one specific value instead (for example a curve's peak and
-  its date) and is never cached. The Aliyun Responses route accepts images in
+  its date) and is never cached. A focused reading renders each page as two
+  overlapping halves (`splitPages`, split across the longer side) and sends
+  both in one request. The Aliyun Responses route accepts images in
   `function_call_output` for every native-vision model in the catalog.
 
 Both PDF tool descriptions and `[PDF 附件说明]` say that attachment files are
 not in the workspace and must be read through the tools: without that, a model
 once spent minutes running `Get-ChildItem -Recurse` over the user's profile
 looking for the PDF and cropping it with Python.
+
+Every page reading and every page image comes with a chart rule: confirm each
+series' color from the legend, follow only that color, name the axis used, and
+read dates from the tick under the point.
+
+The vision route shrinks every image to a fixed budget (about 1,000 image
+tokens for a whole A4 page), which leaves chart ticks and legends barely
+legible. With a whole page, the preprocessor took a yellow ROE spike on a
+dual-axis chart for the blue PE line's peak, or misread its date, in about half
+the runs; with two halves (about 1,450 tokens) it read the right date every
+time, in the same 6-7 seconds. Medium reasoning on top added about 45 seconds
+for little gain, so readings run without reasoning.
 
 Tools only open attachments whose id carries the calling thread's segment. The
 thread's model comes from `FdDeepSeekAdapter`'s `observeTurnModel` hook. If the

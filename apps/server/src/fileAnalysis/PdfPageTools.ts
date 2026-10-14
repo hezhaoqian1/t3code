@@ -198,6 +198,7 @@ export function makePdfPageTools(deps: {
     cache: PdfPageCache,
     pages: ReadonlyArray<number>,
     signal: AbortSignal,
+    splitPages = false,
   ) => {
     const attachment: ChatAttachment = {
       type: "document",
@@ -207,7 +208,17 @@ export function makePdfPageTools(deps: {
       sizeBytes: (await NodeFSP.stat(path)).size,
     };
     return (
-      await process({ attachment, path, visual: true, renderPages: pages }, signal, deps.platform)
+      await process(
+        {
+          attachment,
+          path,
+          visual: true,
+          renderPages: pages,
+          ...(splitPages ? { splitPages } : {}),
+        },
+        signal,
+        deps.platform,
+      )
     ).images;
   };
 
@@ -250,27 +261,46 @@ export function makePdfPageTools(deps: {
     const fresh = new Map<number, string>();
     const failures = new Map<number, string>();
     if (missing.length > 0) {
-      const rendered = await renderPages(path, cache, missing, signal);
+      // A focused reading looks at each page as two overlapping halves in one
+      // request: each half gets the full image budget, so chart ticks stay
+      // legible, and a chart crossing the middle is still seen whole. In QA
+      // this turned a coin-flip reading of a curve's peak into a reliable one
+      // at no extra latency.
+      const rendered = await renderPages(path, cache, missing, signal, Boolean(focus));
+      const partsByPage = new Map<number, typeof rendered>();
+      for (const part of rendered)
+        partsByPage.set(part.page ?? 0, [...(partsByPage.get(part.page ?? 0) ?? []), part]);
+      const jobs = focus
+        ? [...partsByPage].map(([page, parts]) => ({
+            label: `${cache.name}：第 ${page}/${cache.pageCount} 页`,
+            page,
+            bytes: parts[0]!.bytes,
+          }))
+        : rendered;
       const outcomes = await recognizePages({
-        jobs: rendered,
+        jobs,
         signal,
         concurrency: PDF_VIEW_MAX_PAGES,
-        analyze: (job, jobSignal) =>
-          deps.vision.analyze({
+        analyze: (job, jobSignal) => {
+          const parts = focus ? (partsByPage.get(job.page ?? 0) ?? [job]) : [job];
+          const layout =
+            parts.length > 1
+              ? `\n下面 ${parts.length} 张图依次是：${parts.map((part) => part.label).join("；")}。重叠处的内容不要重复计数。`
+              : "";
+          return deps.vision.analyze({
             model,
-            images: [
-              {
-                type: "input_image",
-                image_url: `data:image/jpeg;base64,${Buffer.from(job.bytes).toString("base64")}`,
-              },
-            ],
+            images: parts.map((part) => ({
+              type: "input_image" as const,
+              image_url: `data:image/jpeg;base64,${Buffer.from(part.bytes).toString("base64")}`,
+            })),
             userPrompt: `${
               focus
-                ? `来源：${job.label}\n请从本页画面中准确读出：${focus}\n给出读数和依据（对应的坐标轴刻度、图例、表格行列），估读要说明；看不清处明确标注，不要猜测。`
+                ? `来源：${job.label}${layout}\n请从本页画面中准确读出：${focus}\n给出读数和依据（对应的坐标轴刻度、图例、表格行列），估读要说明；看不清处明确标注，不要猜测。`
                 : `来源：${job.label}\n请完整、准确地提取本页内容：所有文字和数值；表格按行列逐行列出；图表写明标题、坐标轴、图例、各系列的关键数据点、最大最小值和趋势；看不清处明确标注，不要猜测。`
             }\n${CHART_READING_RULE}`,
             signal: jobSignal,
-          }),
+          });
+        },
       });
       for (const outcome of outcomes) {
         const page = outcome.page ?? 0;
