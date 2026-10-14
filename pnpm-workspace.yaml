@@ -69,6 +69,8 @@ overrides:
   "@pierre/diffs>@shikijs/transformers": ^4.2.0
   "@types/node": "catalog:"
   effect: "catalog:"
+  # Electron 44 needs node-abi >= 4.33 for @electron/rebuild on macOS.
+  node-abi: 4.35.0
   vite: "catalog:"
   yaml: "catalog:"
 
