@@ -283,6 +283,7 @@ export function workEntryEmployeeSummary(
   if (descriptor.includes("fd_pdf_view_pages")) return "查看 PDF 页面";
   if (descriptor.includes("fd_pdf_read_pages")) return "读取 PDF 页面";
   if (descriptor.includes("fd_sheet_read_rows")) return "读取表格行";
+  if (descriptor.includes("fd_document_read")) return "读取文档内容";
   if (entry.itemType === "dynamic_tool_call") return "调用工具";
   if (entry.itemType === "collab_agent_tool_call" || entry.taskId) return "协同处理";
   if (

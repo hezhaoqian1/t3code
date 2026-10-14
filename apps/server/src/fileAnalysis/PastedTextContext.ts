@@ -5,6 +5,8 @@
  * not as untrusted document content.
  */
 export interface PastedText {
+  /** The attachment id, for reading the rest with the document tool. */
+  readonly id?: string;
   readonly name: string;
   readonly text: string;
   /** Where the full text is saved, for the part that does not fit. */
@@ -35,6 +37,8 @@ export function utf8Prefix(text: string, maxBytes: number): string {
 export function formatPastedTextContext(
   pasted: ReadonlyArray<PastedText>,
   maxBytes = PASTED_TEXT_CONTEXT_MAX_BYTES,
+  /** How to read the rest of a cut entry; defaults to its saved file. */
+  continuation?: (entry: PastedText, includedLines: number) => string,
 ): string {
   if (pasted.length === 0) return "";
   let remaining = maxBytes;
@@ -47,7 +51,11 @@ export function formatPastedTextContext(
     }
     return [
       `<pasted-text name="${entry.name}" truncated="true">\n${excerpt}\n</pasted-text>`,
-      `“${entry.name}”共 ${normalized.length.toLocaleString("en-US")} 个字符，上面只包含开头的 ${excerpt.length.toLocaleString("en-US")} 个字符。完整内容保存在 ${entry.path}，需要其余部分时请读取这个文件，不要猜测未显示的内容。`,
+      `“${entry.name}”共 ${normalized.length.toLocaleString("en-US")} 个字符，上面只包含开头的 ${excerpt.length.toLocaleString("en-US")} 个字符。${
+        continuation
+          ? continuation(entry, Math.max(1, excerpt.split("\n").length))
+          : `完整内容保存在 ${entry.path}，需要其余部分时请读取这个文件，不要猜测未显示的内容。`
+      }`,
     ].join("\n");
   });
   return [

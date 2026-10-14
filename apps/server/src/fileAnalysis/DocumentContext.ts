@@ -57,6 +57,16 @@ export interface FormattedDocuments {
   readonly omitted: ReadonlyMap<string, ReadonlyArray<number>>;
   /** Tables cut short per attachment id. */
   readonly partialTables: ReadonlyMap<string, ReadonlyArray<PartialTable>>;
+  /** Text sections cut short per attachment id, with the lines they carry. */
+  readonly cutSections: ReadonlyMap<string, ReadonlyArray<CutSection>>;
+}
+
+/** A text section (a Word body, a long text file) the prompt carries only partly. */
+export interface CutSection {
+  readonly sectionIndex: number | null;
+  /** Lines of the section placed in the prompt; the last may be partial. */
+  readonly includedLines: number;
+  readonly totalLines: number;
 }
 
 const SECTION_SEPARATOR = "\n\n---\n\n";
@@ -75,7 +85,7 @@ function utf8Prefix(value: string, maxBytes: number): string {
  * Splits `budget` among demands so small ones are met in full and the rest
  * share what is left equally (water-filling).
  */
-function fairShares(demands: ReadonlyArray<number>, budget: number): number[] {
+export function fairShares(demands: ReadonlyArray<number>, budget: number): number[] {
   const shares = demands.map(() => 0);
   let remaining = Math.max(0, budget);
   let open = demands.map((_, index) => index);
@@ -127,8 +137,11 @@ export function formatAttachmentDocuments(
   contexts: ReadonlyArray<DocumentContext>,
   options: {
     readonly maxBytes: number;
-    readonly omittedNotice?: (name: string) => string;
+    readonly omittedNotice?: (context: DocumentContext) => string;
     readonly partialTableNotice?: (name: string) => string;
+    /** The notice for a document whose text was cut, and the in-text marker. */
+    readonly cutNotice?: (context: DocumentContext) => string;
+    readonly cutMarker?: (context: DocumentContext, cut: CutSection) => string;
   },
 ): FormattedDocuments {
   const rendered = contexts.map((context, attachmentIndex) =>
@@ -145,7 +158,7 @@ export function formatAttachmentDocuments(
   const sections: string[] = [];
   const omitted = new Map<string, number[]>();
   const partialTables = new Map<string, PartialTable[]>();
-  let cut = false;
+  const cutSections = new Map<string, CutSection[]>();
 
   for (const [attachmentIndex, context] of contexts.entries()) {
     const items = rendered[attachmentIndex]!;
@@ -229,9 +242,20 @@ export function formatAttachmentDocuments(
         );
         continue;
       }
-      cut = true;
-      if (bodyBudget <= 0) continue;
-      sections.push(`${prefix}${utf8Prefix(item.section.text, bodyBudget)}\n[本段内容已截断]`);
+      const included = bodyBudget > 0 ? utf8Prefix(item.section.text, bodyBudget) : "";
+      const cut: CutSection = {
+        sectionIndex: item.section.index,
+        includedLines: included ? included.split("\n").length : 0,
+        totalLines: item.section.text.split("\n").length,
+      };
+      cutSections.set(context.attachment.id, [
+        ...(cutSections.get(context.attachment.id) ?? []),
+        cut,
+      ]);
+      if (!included) continue;
+      sections.push(
+        `${prefix}${included}\n${options.cutMarker?.(context, cut) ?? "[本段内容已截断]"}`,
+      );
     }
   }
 
@@ -241,7 +265,7 @@ export function formatAttachmentDocuments(
   for (const context of contexts) {
     if (omitted.has(context.attachment.id))
       warnings.push(
-        options.omittedNotice?.(context.attachment.name) ??
+        options.omittedNotice?.(context) ??
           `附件 ${context.attachment.name} 的部分页面未放入本轮，不能声称已完整阅读。`,
       );
     if (partialTables.has(context.attachment.id))
@@ -249,9 +273,14 @@ export function formatAttachmentDocuments(
         options.partialTableNotice?.(context.attachment.name) ??
           `附件 ${context.attachment.name} 的表格只放入了前面部分行，不能据此推断全表结果。`,
       );
+    if (cutSections.has(context.attachment.id))
+      warnings.push(
+        options.cutNotice?.(context) ??
+          `附件 ${context.attachment.name} 的正文超过本轮容量，只放入了前面部分，不能声称已完整阅读。`,
+      );
   }
-  if (cut) warnings.push("附件总文本超过本轮容量，部分内容未提供，不能声称已完整阅读。");
-  if (sections.length === 0 && warnings.length === 0) return { text: "", omitted, partialTables };
+  if (sections.length === 0 && warnings.length === 0)
+    return { text: "", omitted, partialTables, cutSections };
   return {
     text: [
       "以下是用户本轮上传文件的可读内容。请引用页码、幻灯片或工作表来源；如果内容已截断或来自扫描件，请明确说明。",
@@ -262,6 +291,7 @@ export function formatAttachmentDocuments(
       .join("\n\n"),
     omitted,
     partialTables,
+    cutSections,
   };
 }
 

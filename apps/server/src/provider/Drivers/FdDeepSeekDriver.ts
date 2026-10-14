@@ -24,6 +24,7 @@ import { FdVisionService } from "../../fd-vision/FdVisionService.ts";
 import { prepareAttachments } from "../../fileAnalysis/PrepareAttachments.ts";
 import { combineAttachmentTools } from "../../fileAnalysis/AttachmentTools.ts";
 import { makePdfPageTools } from "../../fileAnalysis/PdfPageTools.ts";
+import { makeDocumentTools } from "../../fileAnalysis/DocumentTools.ts";
 import { makeSheetTools } from "../../fileAnalysis/SheetTools.ts";
 import {
   FD_RESPONSES_LIMITS,
@@ -255,6 +256,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
           modelForThread: (threadId) => threadModels.get(threadId),
         }),
         makeSheetTools({ attachmentsDir: serverConfig.attachmentsDir, platform }),
+        makeDocumentTools({ attachmentsDir: serverConfig.attachmentsDir, platform }),
       );
       const ordinaryAdapter = yield* makeFdCodexAdapter({
         instanceId,
