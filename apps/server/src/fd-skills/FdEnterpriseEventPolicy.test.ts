@@ -20,9 +20,36 @@ it.each([
   ["HTTP 429: Too many requests", "模型服务暂时繁忙（限流）。请稍后在当前任务中继续。"],
   [
     "Allocated quota exceeded, please increase your quota limit",
-    "模型服务额度已达上限。请联系管理员检查上游额度，或切换可用模型后继续。",
+    "模型服务触发 Token 吞吐限流。请等待约一分钟后在当前任务中继续；频繁发生时请联系管理员调整调用速率。",
   ],
-  ["insufficient_quota", "模型服务额度已达上限。请联系管理员检查上游额度，或切换可用模型后继续。"],
+  [
+    "Throttling.AllocationQuota",
+    "模型服务触发 Token 吞吐限流。请等待约一分钟后在当前任务中继续；频繁发生时请联系管理员调整调用速率。",
+  ],
+  ["insufficient_quota", "模型服务配额或调用速率已达上限。请联系管理员确认具体限制后继续。"],
+  [
+    "403 insufficient_user_quota",
+    "你的 FD 个人可用额度不足以继续此任务。请联系管理员调整 FD 额度后继续。",
+  ],
+  [
+    "预扣费额度失败, 用户剩余额度: private",
+    "你的 FD 个人可用额度不足以继续此任务。请联系管理员调整 FD 额度后继续。",
+  ],
+  ["用户额度不足", "你的 FD 个人可用额度不足以继续此任务。请联系管理员调整 FD 额度后继续。"],
+  [
+    "429 BudgetLimitExceeded insufficient_quota",
+    "模型服务的账务或预算限制阻止了调用。请联系管理员检查上游账户设置后继续。",
+  ],
+  ["429 Arrearage", "模型服务的账务或预算限制阻止了调用。请联系管理员检查上游账户设置后继续。"],
+  [
+    "Free allocated quota exceeded",
+    "模型服务配额或调用速率已达上限。请联系管理员确认具体限制后继续。",
+  ],
+  [
+    "hour allocated quota exceeded",
+    "模型服务配额或调用速率已达上限。请联系管理员确认具体限制后继续。",
+  ],
+  ["429 Throttling.RateQuota", "模型服务暂时繁忙（限流）。请稍后在当前任务中继续。"],
   ["context window exceeded", "当前任务内容超出模型上下文上限。请压缩上下文，或新建任务后继续。"],
   ["stream disconnected before completion", "模型连接中断。请稍后在当前任务中继续。"],
   ["request timed out", "模型响应超时。请稍后在当前任务中继续。"],

@@ -12,10 +12,36 @@ const isAssistantCompletion = Schema.is(AssistantCompletion);
 
 /** Return only fixed messages: provider errors can contain enterprise data. */
 function enterpriseFailureMessage(message: string): string {
-  if (/allocated quota exceeded|insufficient_quota|quota exceeded|quota limit/i.test(message)) {
-    return "模型服务额度已达上限。请联系管理员检查上游额度，或切换可用模型后继续。";
+  if (/insufficient_user_quota|用户额度不足|预扣费额度失败/i.test(message)) {
+    return "你的 FD 个人可用额度不足以继续此任务。请联系管理员调整 FD 额度后继续。";
   }
-  if (/\b429\b|too many requests|rate[ _-]?limit/i.test(message)) {
+  if (
+    /arrearage|billoverdue|budgetlimitexceeded|insufficient balance|payment required/i.test(message)
+  ) {
+    return "模型服务的账务或预算限制阻止了调用。请联系管理员检查上游账户设置后继续。";
+  }
+  if (/\b(?:free|hour|week|month|usage) allocated quota exceeded/i.test(message)) {
+    return "模型服务配额或调用速率已达上限。请联系管理员确认具体限制后继续。";
+  }
+  // Aliyun's token-limit wording describes TPS/TPM, not an empty wallet.
+  if (
+    /throttling\.allocationquota|allocated quota exceeded, please increase your quota limit|model-studio\/error-code#token-limit/i.test(
+      message,
+    )
+  ) {
+    return "模型服务触发 Token 吞吐限流。请等待约一分钟后在当前任务中继续；频繁发生时请联系管理员调整调用速率。";
+  }
+  if (
+    /insufficient_quota|quota exceeded|quota limit/i.test(message) &&
+    !/throttling\.|concurrency allocated quota/i.test(message)
+  ) {
+    return "模型服务配额或调用速率已达上限。请联系管理员确认具体限制后继续。";
+  }
+  if (
+    /\b429\b|too many requests|rate[ _-]?limit|throttling\.|concurrency allocated quota/i.test(
+      message,
+    )
+  ) {
     return "模型服务暂时繁忙（限流）。请稍后在当前任务中继续。";
   }
   if (/context (?:window|length).*exceed|context_length_exceeded/i.test(message)) {
