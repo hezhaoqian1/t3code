@@ -1140,7 +1140,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
           return yield* new ProviderAdapterValidationError({
             provider: FD_DEEPSEEK_DRIVER_KIND,
             operation: "sendTurn",
-            issue: `当前模型 ${selectedModel} 不支持图片输入，请切换支持视觉的模型后重试。`,
+            issue: `当前模型 ${selectedModel} 不支持图片输入，请切换 Flash 后重试。`,
           });
         }
       }

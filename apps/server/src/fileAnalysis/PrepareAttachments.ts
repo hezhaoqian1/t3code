@@ -121,7 +121,7 @@ export async function prepareAttachments(input: {
       if (route === "native" || route === "fd-preprocessor")
         return route === "native" ? input.model : "deepseek-flash";
       if (isPdf) return "deepseek-flash";
-      throw new Error(`${part.label}：当前模型未开通视觉识别，请切换 Kimi K3。`);
+      throw new Error(`${part.label}：当前模型未开通视觉识别，请切换 Flash 后重试。`);
     };
     for (const part of result.images) {
       visualBytes += part.bytes.byteLength;

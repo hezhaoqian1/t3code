@@ -137,7 +137,7 @@ export async function processAttachment(work: AttachmentWork): Promise<Processed
     throw new Error("图片内容与格式不匹配，请重新导出 PNG 或 JPEG。");
   const dimensions = imageSize(bytes);
   const tiles = imageTiles(dimensions.width, dimensions.height);
-  if (!work.visual) throw new Error("当前模型未开通图片识别，请切换 Kimi K3 后重试。");
+  if (!work.visual) throw new Error("当前模型未开通图片识别，请切换 Flash 后重试。");
   if (tiles.length === 1) return { images: [], passthrough: true };
   const image = await loadImage(bytes);
   const images: VisualPart[] = [];
