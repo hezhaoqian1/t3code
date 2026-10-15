@@ -62,4 +62,12 @@ describe("assetResponseHeaders", () => {
       "text/html; charset=utf-8",
     );
   });
+
+  it("isolates generated HTML from the authenticated server origin", () => {
+    for (const path of ["/workspace/中文报告.html", "/workspace/PAGE.HTM"]) {
+      expect(assetResponseHeaders(path)["Content-Security-Policy"]).toBe(
+        "sandbox allow-scripts allow-forms allow-popups allow-downloads",
+      );
+    }
+  });
 });

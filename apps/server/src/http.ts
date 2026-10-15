@@ -47,6 +47,10 @@ import {
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 const DESKTOP_RENDERER_ORIGINS = ["fdai://app", "fdai-dev://app"];
 const SVG_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+// Generated HTML runs with an opaque origin and cannot access the local server's
+// authenticated origin. Keep scripts, forms and downloads usable in previews.
+const HTML_CONTENT_SECURITY_POLICY =
+  "sandbox allow-scripts allow-forms allow-popups allow-downloads";
 
 // Attachments and project files are user-provided; an SVG opened from them must
 // not run scripts with the renderer's server origin.
@@ -56,7 +60,10 @@ export function assetResponseHeaders(filePath: string): Record<string, string> {
     "Cache-Control": "private, max-age=3600",
     "X-Content-Type-Options": "nosniff",
     ...(lowerPath.endsWith(".html") || lowerPath.endsWith(".htm")
-      ? { "Content-Type": "text/html; charset=utf-8" }
+      ? {
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Security-Policy": HTML_CONTENT_SECURITY_POLICY,
+        }
       : {}),
     ...(lowerPath.endsWith(".svg")
       ? { "Content-Security-Policy": SVG_CONTENT_SECURITY_POLICY }
