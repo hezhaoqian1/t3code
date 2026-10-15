@@ -40,7 +40,13 @@ HTML 预览同时增加不含 `allow-same-origin` 的 CSP sandbox。脚本、表
 
 ## GLM 5.3 Flash 可用性
 
-对当前渠道 17 的同一 Responses 地址做了小请求验证，`glm-5.3-flash` 返回 HTTP 400 / `Unsupported model: 'glm-5.3-flash'`。保留 `glm-5.2`。模型替换需先具备可用上游，再同步模型授权、能力与桌面目录，不能仅替换显示名称。
+用户明确只接受阿里云百炼提供推理服务的版本，不接入智谱原厂直供。2026-10-15 进一步核对[官方模型目录](https://help.aliyun.com/zh/model-studio/model-list-text-generation/)和当前渠道 Key 的 `/compatible-mode/v1/models`（HTTP 200）：两者均未列出阿里直供的 `glm-5.3-flash`。
+
+- [glm-5.3](https://help.aliyun.com/zh/model-studio/glm-5-3)：官方明确推理供应商为阿里云百炼，属于普通版，输入模态为文本。
+- [glm-5.2-fast-preview](https://help.aliyun.com/zh/model-studio/glm-5-2-fast)：官方明确推理供应商为阿里云百炼，属于 5.2 高速预览版，并非 5.3 Flash，输入模态为文本。
+- [ZHIPU/GLM-5.3-Flash](https://help.aliyun.com/zh/model-studio/glm-5-3-flash-by-zhipu)：百炼市场确有此模型，但官方明确推理供应商为智谱 AI，不符合用户指定范围。[调用文档](https://help.aliyun.com/zh/model-studio/glm-zhipu)要求北京地域并开通智谱直供服务。
+
+此前不带前缀的 `glm-5.3-flash` 在当前 Responses 地址返回 HTTP 400 Unsupported model，不能据此推断整个百炼平台没有该模型。补测带前缀的型号：Chat 返回产品未开通，Responses 返回 Unsupported model；没有开通服务或修改配置。当前保留 `glm-5.2`，不擅自替换成普通 5.3 或智谱直供版。公开目录与当前账号可见范围不能证明未来或定向开放情况。
 
 ## 验证范围
 
