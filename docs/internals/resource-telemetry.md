@@ -147,11 +147,11 @@ available for explicit refreshes and identity validation.
 
 The server adjusts native sampling without restarting the sidecar:
 
-- suspended, locked, low-power, or serious/critical thermal state: 15 seconds;
+- no live diagnostics subscriber: on demand only (interval 0);
+- with live diagnostics, suspended, locked, low-power, or serious/critical thermal state: 15 seconds;
 - battery: 5 seconds;
 - normal AC: 1 second;
-- unknown or stale power: 5 seconds in the background and 1 second while live
-  diagnostics is open.
+- unknown or stale power: 1 second while live diagnostics is open.
 
 ### Sampling limits
 
