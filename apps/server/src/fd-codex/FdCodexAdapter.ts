@@ -3,8 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { ProviderInstanceId } from "@t3tools/contracts";
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import { ServerConfig } from "../config.ts";
 import { FdRuntimeCredentialStore } from "../fd/FdRuntimeCredentialStore.ts";
@@ -67,7 +67,7 @@ export async function prepareFdCodexRuntime(input: {
   readonly homePath: string;
   readonly skillExtraRoots?: ReadonlyArray<string>;
 }> {
-  const codexHome = join(input.stateDir, "codex-home");
+  const codexHome = NodePath.join(input.stateDir, "codex-home");
   const connectorEnabled = await readConnectorEnabled(input.connectorStatePath);
   if (!input.credentials) throw new Error("Sign in to FD before starting an Agent session.");
   await prepareFdManagedCodexHome({
@@ -167,7 +167,6 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
       resolveRuntime: (session) =>
         Effect.gen(function* () {
           const current = yield* credentials.current;
-          const requestedModel = session.modelSelection?.model;
           if (Option.isNone(current)) {
             return yield* new ProviderAdapterRequestError({
               provider: FD_DEEPSEEK_DRIVER_KIND,
@@ -288,12 +287,20 @@ export function executeFdEnterpriseToolCall(
 ) {
   return Effect.tryPromise({
     try: (signal) => client.executeToolCall({ ...input, signal }),
-    catch: (cause) => cause,
+    catch: (cause) =>
+      new ProviderAdapterRequestError({
+        provider: FD_DEEPSEEK_DRIVER_KIND,
+        method: "tool/call",
+        detail: "FD enterprise tool call failed.",
+        cause,
+      }),
   }).pipe(
     Effect.match({
       onFailure: (cause) => ({
         success: false,
-        contentItems: [{ type: "inputText" as const, text: fdEnterpriseToolFailureMessage(cause) }],
+        contentItems: [
+          { type: "inputText" as const, text: fdEnterpriseToolFailureMessage(cause.cause) },
+        ],
       }),
       onSuccess: (result) => ({
         success: true,
@@ -333,7 +340,7 @@ export function fdEnterpriseToolFailureMessage(cause: unknown): string {
 async function readConnectorEnabled(statePath: string | undefined): Promise<boolean> {
   if (!statePath) return false;
   try {
-    const parsed = JSON.parse(await readFile(statePath, "utf8")) as { enabled?: unknown };
+    const parsed = JSON.parse(await NodeFSP.readFile(statePath, "utf8")) as { enabled?: unknown };
     return parsed.enabled === true;
   } catch {
     return false;
