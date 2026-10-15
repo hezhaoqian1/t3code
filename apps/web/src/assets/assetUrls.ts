@@ -1,8 +1,8 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { assetEnvironment } from "~/state/assets";
 import { usePreparedConnection } from "~/state/session";
@@ -17,14 +17,20 @@ export type AssetUrlState =
 export function useAssetUrlState(
   environmentId: EnvironmentId,
   resource: AssetResource,
+  retryFailedOnce = false,
 ): AssetUrlState {
   const preparedConnection = usePreparedConnection(environmentId);
-  const result = useAtomValue(
-    assetEnvironment.createUrl({
-      environmentId,
-      input: { resource },
-    }),
-  );
+  const atom = assetEnvironment.createUrl({ environmentId, input: { resource } });
+  const result = useAtomValue(atom);
+  const refresh = useAtomRefresh(atom);
+  const retriedAtom = useRef<typeof atom | null>(null);
+  useEffect(() => {
+    // A prompt can reference an image before the agent creates it. Recheck a
+    // cached miss once when its answer finishes, without polling missing files.
+    if (!retryFailedOnce || result._tag !== "Failure" || retriedAtom.current === atom) return;
+    retriedAtom.current = atom;
+    refresh();
+  }, [atom, refresh, result._tag, retryFailedOnce]);
   if (result._tag === "Failure") {
     return { _tag: "Failure" };
   }

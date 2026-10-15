@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./favicon": {
+      "types": "./src/favicon.ts",
+      "import": "./src/favicon.ts"
+    },
     "./documentFormats": {
       "types": "./src/documentFormats.ts",
       "import": "./src/documentFormats.ts"
