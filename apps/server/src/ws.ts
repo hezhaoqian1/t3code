@@ -42,7 +42,6 @@ import {
   ProjectWriteFileError,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
-  AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
@@ -1877,10 +1876,10 @@ const makeWsRpcLayer = (
                       }),
                   ),
                 );
+              // Without a workspace, desktop still serves an absolute file from
+              // its own directory; other modes report the missing context.
               if (Option.isNone(thread)) {
-                return yield* new AssetWorkspaceContextNotFoundError({
-                  resource: input.resource,
-                });
+                return yield* issueAssetUrl({ resource: input.resource });
               }
               const project = yield* projectionSnapshotQuery
                 .getProjectShellById(thread.value.projectId)
@@ -1894,9 +1893,7 @@ const makeWsRpcLayer = (
                   ),
                 );
               if (Option.isNone(project)) {
-                return yield* new AssetWorkspaceContextNotFoundError({
-                  resource: input.resource,
-                });
+                return yield* issueAssetUrl({ resource: input.resource });
               }
               return yield* issueAssetUrl({
                 resource: input.resource,

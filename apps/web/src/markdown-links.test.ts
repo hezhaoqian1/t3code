@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  isWindowsFilePathHref,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   resolveMarkdownFileLinkTarget,
@@ -32,6 +33,22 @@ describe("rewriteMarkdownFileUriHref", () => {
     expect(
       rewriteMarkdownFileUriHref(" <file:///D:/Programme/t3code/apps/web/src/markdown-links.ts> "),
     ).toBe("D:/Programme/t3code/apps/web/src/markdown-links.ts");
+  });
+});
+
+describe("isWindowsFilePathHref", () => {
+  it("keeps windows drive and UNC destinations that read as URL schemes", () => {
+    expect(isWindowsFilePathHref("C:/Users/fd/FangdeAI/Tasks/2026-10-15/report.html")).toBe(true);
+    expect(isWindowsFilePathHref("C:\\Users\\fd\\report.html")).toBe(true);
+    expect(isWindowsFilePathHref("<D:/报告/预览.html>")).toBe(true);
+    expect(isWindowsFilePathHref("\\\\server\\share\\report.html")).toBe(true);
+  });
+
+  it("leaves URLs and relative paths to the default transform", () => {
+    expect(isWindowsFilePathHref("https://example.com/a.html")).toBe(false);
+    expect(isWindowsFilePathHref("javascript:alert(1)")).toBe(false);
+    expect(isWindowsFilePathHref("report.html")).toBe(false);
+    expect(isWindowsFilePathHref(undefined)).toBe(false);
   });
 });
 

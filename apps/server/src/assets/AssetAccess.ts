@@ -166,6 +166,63 @@ const resolveCanonicalWorkspaceFileForRequest = (input: {
     Effect.orElseSucceed(() => null),
   );
 
+type WorkspaceFileResource = Extract<AssetResource, { readonly _tag: "workspace-file" }>;
+
+/**
+ * The root a workspace file is served from and its path inside that root.
+ *
+ * On desktop, an absolute file link that the thread's workspace cannot serve
+ * is served from the file's own directory instead: the agent may have saved
+ * the file elsewhere (for example on the Desktop), or the task folder was
+ * moved, renamed or became unreadable. Only the signed-in local user can ask
+ * for these links, and the agent already has the same file access.
+ */
+const resolveWorkspaceFileTarget = Effect.fn("AssetAccess.resolveWorkspaceFileTarget")(function* (
+  resource: WorkspaceFileResource,
+  workspaceRoot: string | undefined,
+) {
+  const path = yield* Path.Path;
+  const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
+  const config = yield* ServerConfig.ServerConfig;
+  const servesOwnDirectory = config.mode === "desktop" && path.isAbsolute(resource.path);
+  const ownDirectoryTarget = workspacePaths
+    .normalizeWorkspaceRoot(path.dirname(resource.path))
+    .pipe(
+      Effect.map((root) => ({ workspaceRoot: root, relativePath: path.basename(resource.path) })),
+      Effect.mapError(() => new AssetWorkspaceAssetNotFoundError({ resource })),
+    );
+
+  if (!workspaceRoot) {
+    if (servesOwnDirectory) return yield* ownDirectoryTarget;
+    return yield* new AssetWorkspaceContextNotFoundError({ resource });
+  }
+  const normalizedRoot = yield* workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
+    Effect.map(Option.some),
+    Effect.catch((cause) =>
+      servesOwnDirectory
+        ? Effect.succeed(Option.none<string>())
+        : Effect.fail(new AssetWorkspaceRootNormalizationError({ resource, cause })),
+    ),
+  );
+  if (Option.isNone(normalizedRoot)) return yield* ownDirectoryTarget;
+
+  const relativePath = path.isAbsolute(resource.path)
+    ? path.relative(normalizedRoot.value, resource.path)
+    : resource.path;
+  const resolved = yield* workspacePaths
+    .resolveRelativePathWithinRoot({ workspaceRoot: normalizedRoot.value, relativePath })
+    .pipe(
+      Effect.map(Option.some),
+      Effect.catch((cause) =>
+        servesOwnDirectory
+          ? Effect.succeed(Option.none<{ absolutePath: string; relativePath: string }>())
+          : Effect.fail(new AssetWorkspacePathValidationError({ resource, cause })),
+      ),
+    );
+  if (Option.isNone(resolved)) return yield* ownDirectoryTarget;
+  return { workspaceRoot: normalizedRoot.value, relativePath: resolved.value.relativePath };
+});
+
 export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (input: {
   readonly resource: AssetResource;
   readonly workspaceRoot?: string;
@@ -179,42 +236,18 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
 
   switch (input.resource._tag) {
     case "workspace-file": {
-      if (!input.workspaceRoot) {
-        return yield* new AssetWorkspaceContextNotFoundError({
-          resource: input.resource,
-        });
-      }
-      const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.workspaceRoot).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AssetWorkspaceRootNormalizationError({
-              resource: input.resource,
-              cause,
-            }),
-        ),
+      const { workspaceRoot, relativePath } = yield* resolveWorkspaceFileTarget(
+        input.resource,
+        input.workspaceRoot,
       );
-      const relativePath = path.isAbsolute(input.resource.path)
-        ? path.relative(workspaceRoot, input.resource.path)
-        : input.resource.path;
-      const resolved = yield* workspacePaths
-        .resolveRelativePathWithinRoot({ workspaceRoot, relativePath })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new AssetWorkspacePathValidationError({
-                resource: input.resource,
-                cause,
-              }),
-          ),
-        );
-      if (!isWorkspacePreviewEntryPath(resolved.relativePath)) {
+      if (!isWorkspacePreviewEntryPath(relativePath)) {
         return yield* new AssetPreviewTypeValidationError({
           resource: input.resource,
         });
       }
       const canonicalFile = yield* resolveCanonicalWorkspaceFile({
         workspaceRoot,
-        relativePath: resolved.relativePath,
+        relativePath,
       }).pipe(
         Effect.mapError(
           (cause) =>
@@ -238,22 +271,22 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
             }),
         ),
       );
-      claims = isWorkspaceImagePreviewPath(resolved.relativePath)
+      claims = isWorkspaceImagePreviewPath(relativePath)
         ? {
             version: 1,
             kind: "workspace-file-exact",
             workspaceRoot: canonicalWorkspaceRoot,
-            relativePath: resolved.relativePath,
+            relativePath,
             expiresAt,
           }
         : {
             version: 1,
             kind: "workspace-file",
             workspaceRoot: canonicalWorkspaceRoot,
-            baseRelativePath: path.dirname(resolved.relativePath),
+            baseRelativePath: path.dirname(relativePath),
             expiresAt,
           };
-      fileName = path.basename(resolved.relativePath);
+      fileName = path.basename(relativePath);
       break;
     }
     case "attachment": {

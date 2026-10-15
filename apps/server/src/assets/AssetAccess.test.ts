@@ -30,6 +30,11 @@ const testLayer = Layer.mergeAll(
   ServerSecretStore.layer.pipe(Layer.provide(configLayer)),
 ).pipe(Layer.provideMerge(NodeServices.layer));
 
+function tokenOf(relativeUrl: string): string {
+  const suffix = relativeUrl.slice(`${ASSET_ROUTE_PREFIX}/`.length);
+  return suffix.slice(0, suffix.indexOf("/"));
+}
+
 describe("AssetAccess", () => {
   it.effect("issues workspace URLs that resolve the entry file and sibling assets", () =>
     Effect.gen(function* () {
@@ -103,6 +108,88 @@ describe("AssetAccess", () => {
         },
       });
       expect(error.cause).toBeInstanceOf(WorkspacePaths.WorkspacePathOutsideRootError);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("serves an absolute desktop file outside the workspace from its own directory", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig.ServerConfig;
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-asset-root-" });
+      const outside = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-asset-desktop-" });
+      const htmlPath = path.join(outside, "report.html");
+      yield* fileSystem.writeFileString(htmlPath, '<link rel="stylesheet" href="report.css">');
+      yield* fileSystem.writeFileString(path.join(outside, "report.css"), "body {}");
+
+      const result = yield* issueAssetUrl({
+        resource: { _tag: "workspace-file", threadId: ThreadId.make("thread-1"), path: htmlPath },
+        workspaceRoot: root,
+      }).pipe(Effect.provideService(ServerConfig.ServerConfig, { ...config, mode: "desktop" }));
+      const token = tokenOf(result.relativeUrl);
+
+      expect(result.relativeUrl.endsWith("/report.html")).toBe(true);
+      expect(yield* resolveAsset(token, "report.html")).toEqual({
+        kind: "file",
+        path: yield* fileSystem.realPath(htmlPath),
+      });
+      expect(yield* resolveAsset(token, "report.css")).toEqual({
+        kind: "file",
+        path: yield* fileSystem.realPath(path.join(outside, "report.css")),
+      });
+      expect(yield* resolveAsset(token, "../report.html")).toBeNull();
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("serves an absolute desktop file when the workspace root is gone", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig.ServerConfig;
+      const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-asset-gone-" });
+      const missingRoot = path.join(parent, "moved-task");
+      const outside = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-asset-desktop-" });
+      const htmlPath = path.join(outside, "report.html");
+      yield* fileSystem.writeFileString(htmlPath, "<p>report</p>");
+      const desktop = Effect.provideService(ServerConfig.ServerConfig, {
+        ...config,
+        mode: "desktop",
+      });
+
+      const result = yield* issueAssetUrl({
+        resource: { _tag: "workspace-file", threadId: ThreadId.make("thread-1"), path: htmlPath },
+        workspaceRoot: missingRoot,
+      }).pipe(desktop);
+      expect(yield* resolveAsset(tokenOf(result.relativeUrl), "report.html")).toEqual({
+        kind: "file",
+        path: yield* fileSystem.realPath(htmlPath),
+      });
+
+      const withoutWorkspace = yield* issueAssetUrl({
+        resource: { _tag: "workspace-file", threadId: ThreadId.make("thread-1"), path: htmlPath },
+      }).pipe(desktop);
+      expect(withoutWorkspace.relativeUrl.endsWith("/report.html")).toBe(true);
+
+      const missingFile = path.join(missingRoot, "report.html");
+      const notFound = yield* issueAssetUrl({
+        resource: {
+          _tag: "workspace-file",
+          threadId: ThreadId.make("thread-1"),
+          path: missingFile,
+        },
+        workspaceRoot: missingRoot,
+      }).pipe(desktop, Effect.flip);
+      expect(notFound._tag).toBe("AssetWorkspaceAssetNotFoundError");
+
+      const relative = yield* issueAssetUrl({
+        resource: {
+          _tag: "workspace-file",
+          threadId: ThreadId.make("thread-1"),
+          path: "report.html",
+        },
+        workspaceRoot: missingRoot,
+      }).pipe(desktop, Effect.flip);
+      expect(relative._tag).toBe("AssetWorkspaceRootNormalizationError");
     }).pipe(Effect.provide(testLayer)),
   );
 

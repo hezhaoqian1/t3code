@@ -68,6 +68,7 @@ import {
 } from "../markdown-clipboard";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
 import {
+  isWindowsFilePathHref,
   normalizeMarkdownLinkDestination,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
@@ -87,6 +88,7 @@ import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { isPreviewSupportedInRuntime } from "../previewStateStore";
 import {
+  describeOpenFileInPreviewError,
   isBrowserPreviewFile,
   openFileInPreview,
   openUrlInPreview,
@@ -140,6 +142,12 @@ function findTaskListMarkerOffset(markdown: string, listItemStart: number): numb
   if (!match?.[1]) return null;
   return listItemStart + firstLine.indexOf(match[1]);
 }
+// The sanitizer reads `C:/report.html` as the one-letter scheme `C:` and drops
+// the href, so Windows file links from agents would render as dead text.
+const WINDOWS_DRIVE_LETTER_PROTOCOLS = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"].flatMap((letter) => [
+  letter,
+  letter.toLowerCase(),
+]);
 const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   ...defaultSchema,
   attributes: {
@@ -149,7 +157,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   },
   protocols: {
     ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "file"],
+    href: [...(defaultSchema.protocols?.href ?? []), "file", ...WINDOWS_DRIVE_LETTER_PROTOCOLS],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
@@ -1148,8 +1156,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Unable to open file in browser",
-            description: describeActionError(error),
+            title: "无法在浏览器中打开文件",
+            description: describeOpenFileInPreviewError(error),
           }),
         );
       } catch (cause) {
@@ -1160,8 +1168,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Unable to open file in browser",
-            description: cause instanceof Error ? cause.message : "An error occurred.",
+            title: "无法在浏览器中打开文件",
+            description: describeOpenFileInPreviewError(cause),
           }),
         );
       }
@@ -1368,7 +1376,9 @@ function ChatMarkdown({
     return buildFileLinkParentSuffixByPath(filePaths);
   }, [inlineCodeFileLinkMetaByText, markdownFileLinkMetaByHref]);
   const markdownUrlTransform = useCallback((href: string) => {
-    return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
+    const fileHref = rewriteMarkdownFileUriHref(href);
+    if (fileHref !== null) return fileHref;
+    return isWindowsFilePathHref(href) ? href : defaultUrlTransform(href);
   }, []);
   // Re-emit highlighted content as markdown so copying out of the rendered
   // view keeps links, emphasis, lists, and code fences intact.

@@ -16,7 +16,11 @@ import { ChevronRight, Code2, Eye, FolderTree, Globe2, LoaderCircle } from "luci
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
+import {
+  describeOpenFileInPreviewError,
+  isBrowserPreviewFile,
+  openFileInPreview,
+} from "~/browser/openFileInPreview";
 import { useAssetUrlState } from "~/assets/assetUrls";
 import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
@@ -63,7 +67,6 @@ import {
   setProjectFileQueryData,
   useProjectFileQuery,
 } from "./projectFilesQueryState";
-import { describeActionError } from "../../rpc/transportError";
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -848,8 +851,8 @@ export default function FilePreviewPanel({
       toastManager.add(
         stackedThreadToast({
           type: "error",
-          title: "Unable to open file in browser",
-          description: describeActionError(error),
+          title: "无法在浏览器中打开文件",
+          description: describeOpenFileInPreviewError(error),
         }),
       );
     })();

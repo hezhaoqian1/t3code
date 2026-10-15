@@ -15,6 +15,7 @@ import * as Data from "effect/Data";
 import { AsyncResult } from "effect/unstable/reactivity";
 
 import { resolveAssetUrl } from "~/assets/assetUrls";
+import { describeActionError } from "~/rpc/transportError";
 import {
   applyPreviewServerSnapshot,
   isPreviewSupportedInRuntime,
@@ -50,6 +51,28 @@ export async function openUrlInPreview<E>(input: {
     rememberPreviewUrl(input.threadRef, input.url);
     useRightPanelStore.getState().openBrowser(input.threadRef, snapshot.tabId);
   });
+}
+
+/** Why a file did not open in the integrated browser, in terms an employee can act on. */
+export function describeOpenFileInPreviewError(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("_tag" in error)) {
+    return describeActionError(error);
+  }
+  const resource =
+    "resource" in error ? (error.resource as { path?: unknown } | undefined) : undefined;
+  const path = typeof resource?.path === "string" ? `：${resource.path}` : "";
+  switch (error._tag) {
+    case "AssetWorkspaceAssetNotFoundError":
+      return `找不到文件${path}。它可能已被移动、改名或删除。`;
+    case "AssetWorkspaceRootNormalizationError":
+      return "无法访问这个任务的文件夹，它可能已被移动、改名或删除。";
+    case "AssetWorkspacePathValidationError":
+      return `只能打开当前任务文件夹里的文件${path}。`;
+    case "AssetPreviewTypeValidationError":
+      return "内置浏览器只能打开 HTML、PDF 和图片文件。";
+    default:
+      return describeActionError(error);
+  }
 }
 
 export async function openFileInPreview<AssetError, PreviewError>(input: {

@@ -111,6 +111,17 @@ export function rewriteMarkdownFileUriHref(href: string | undefined): string | n
   return `${target.path}${target.hash}`;
 }
 
+/**
+ * `C:/x.html` parses as a URL with the scheme `c:`, which react-markdown's
+ * default URL transform strips, leaving a dead link. Agents on Windows link
+ * files this way, so these destinations are kept for the file-link renderer.
+ */
+export function isWindowsFilePathHref(href: string | undefined): boolean {
+  if (!href) return false;
+  const destination = normalizeMarkdownLinkDestination(href);
+  return WINDOWS_DRIVE_PATH_PATTERN.test(destination) || WINDOWS_UNC_PATH_PATTERN.test(destination);
+}
+
 function looksLikePosixFilesystemPath(path: string): boolean {
   if (!path.startsWith("/")) return false;
   if (POSIX_FILE_ROOT_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
