@@ -1,0 +1,76 @@
+name: FD Desktop Native Archive Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful FD Desktop Internal Release run ID
+        required: true
+        type: string
+      version:
+        description: Release version
+        required: true
+        type: string
+      source_sha:
+        description: Full source commit of that release
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Validate release provenance
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" = refs/heads/main ]]
+          [[ "$RELEASE_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RELEASE_RUN_ID" > release-run.json
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .conclusion == "success" and .head_branch == "main" and
+            .head_sha == $sha and .head_repository.full_name == $repo and
+            .path == ".github/workflows/fd-desktop-release.yml"
+          ' release-run.json
+          git merge-base --is-ancestor "$SOURCE_SHA" HEAD
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.release_run_id }}
+          name: fd-desktop-release-${{ inputs.version }}
+          path: release-assets
+      - name: Verify the mounted DMG and extracted updater ZIP
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/verify-macos-release-archives.sh release-assets "$VERSION"
+          mkdir verification
+          cp release-assets/SHA256SUMS verification/SHA256SUMS
+          jq -n --arg version "$VERSION" --arg sha "$SOURCE_SHA" --arg run "$RELEASE_RUN_ID" \
+            '{version: $version, source_sha: $sha, release_run_id: $run, native_dmg_and_zip: "passed"}' \
+            > verification/result.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fd-desktop-native-verification-${{ inputs.version }}
+          path: verification/*
+          if-no-files-found: error
+          retention-days: 14
