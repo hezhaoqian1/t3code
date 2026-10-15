@@ -10,6 +10,8 @@ const ApiEnvelopeSchema = Schema.Struct({
   success: Schema.Boolean,
   code: Schema.optional(Schema.String),
   message: Schema.optional(Schema.String),
+  audit_id: Schema.optional(Schema.String),
+  retryable: Schema.optional(Schema.Boolean),
   data: Schema.optional(Schema.Unknown),
 });
 
@@ -72,12 +74,24 @@ export interface FdEnterpriseCodexToolCallInput {
 export class FdEnterpriseCodexError extends Error {
   readonly code: string;
   readonly status: number;
+  readonly diagnostic:
+    | {
+        readonly audit_id: string;
+        readonly retryable: boolean;
+      }
+    | undefined;
 
-  constructor(code: string, status: number, message = "FD enterprise Codex request failed.") {
+  constructor(
+    code: string,
+    status: number,
+    message = "FD enterprise Codex request failed.",
+    diagnostic?: { readonly audit_id: string; readonly retryable: boolean },
+  ) {
     super(message);
     this.code = code;
     this.status = status;
     this.name = "FdEnterpriseCodexError";
+    this.diagnostic = diagnostic;
   }
 }
 
@@ -176,10 +190,24 @@ export class FdEnterpriseCodexClient {
       throw new FdEnterpriseCodexError("invalid_response", response.status);
     }
     if (!response.ok || !envelope.success) {
+      const code = fdEnterpriseToolFailureCode(
+        envelope.code,
+        response.ok ? "request_rejected" : "http_error",
+      );
+      const diagnostic =
+        code === envelope.code &&
+        envelope.audit_id &&
+        /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(envelope.audit_id) &&
+        typeof envelope.retryable === "boolean" &&
+        envelope.message &&
+        envelope.message.length <= 2000
+          ? { audit_id: envelope.audit_id, retryable: envelope.retryable }
+          : undefined;
       throw new FdEnterpriseCodexError(
-        fdEnterpriseToolFailureCode(envelope.code, response.ok ? "request_rejected" : "http_error"),
+        code,
         response.status,
         envelope.message || "FD enterprise Codex request was rejected.",
+        diagnostic,
       );
     }
     return envelope.data;
@@ -191,6 +219,16 @@ function fdEnterpriseToolFailureCode(code: string | undefined, fallback: string)
     case "query_timed_out":
     case "connector_query_failed":
     case "tool_execution_failed":
+    case "binding_filter_required":
+    case "binding_query_busy":
+    case "query_not_allowed":
+    case "invalid_arguments":
+    case "resource_not_allowed":
+    case "row_scope_not_allowed":
+    case "column_not_allowed":
+    case "capability_revoked":
+    case "query_execution_failed":
+    case "incomplete_aggregate":
       return code;
     default:
       return fallback;

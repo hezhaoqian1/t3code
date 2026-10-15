@@ -3,6 +3,11 @@ import { describe, expect, it, vi } from "@effect/vitest";
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
 
 import { FdEnterpriseCodexClient } from "./FdEnterpriseCodexClient.ts";
+import {
+  executeFdEnterpriseToolCall,
+  fdEnterpriseToolFailureMessage,
+} from "../fd-codex/FdCodexAdapter.ts";
+import * as Effect from "effect/Effect";
 
 const credentials: FdServerRuntimeCredentialProjection = {
   userId: 7,
@@ -33,6 +38,64 @@ function jsonResponse(data: unknown, status = 200): Response {
 }
 
 describe("FdEnterpriseCodexClient", () => {
+  it("delivers audited rejection guidance and retry policy to the model", async () => {
+    const message =
+      "绑定查询被规则拒绝；请使用 fd_bindings_check_multiple_advisors，不要原样重试。";
+    const client = new FdEnterpriseCodexClient({
+      credentials: async () => credentials,
+      fetch: async () =>
+        jsonResponse({
+          success: false,
+          code: "binding_filter_required",
+          message,
+          audit_id: turnId,
+          retryable: false,
+        }),
+    });
+    const output = await Effect.runPromise(
+      executeFdEnterpriseToolCall(client, {
+        skillVersionId: 9,
+        releaseDigest,
+        clientThreadId,
+        providerThreadId,
+        turnId,
+        callId: "call-1",
+        tool: "fd_data_query",
+        arguments: {},
+      }),
+    );
+    expect(output.success).toBe(false);
+    expect(JSON.parse(output.contentItems[0]!.text)).toEqual({
+      error: {
+        code: "binding_filter_required",
+        message,
+        audit_id: turnId,
+        retryable: false,
+      },
+    });
+  });
+
+  it("does not expose unaudited or unknown gateway errors to the model", async () => {
+    for (const code of ["binding_filter_required", "private_internal_error"]) {
+      const client = new FdEnterpriseCodexClient({
+        credentials: async () => credentials,
+        fetch: async () => jsonResponse({ success: false, code, message: "password=secret" }),
+      });
+      const error = await client
+        .executeToolCall({
+          skillVersionId: 9,
+          releaseDigest,
+          clientThreadId,
+          providerThreadId,
+          turnId,
+          callId: "call-1",
+          tool: "fd_data_query",
+          arguments: {},
+        })
+        .catch((cause: unknown) => cause);
+      expect(fdEnterpriseToolFailureMessage(error)).not.toContain("secret");
+    }
+  });
   it("loads an authorized runtime projection without sending authority inputs", async () => {
     const fetch = vi.fn(async (_url: URL, init?: RequestInit) =>
       jsonResponse({

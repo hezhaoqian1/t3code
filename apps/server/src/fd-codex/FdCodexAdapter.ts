@@ -14,6 +14,7 @@ import { FD_DEEPSEEK_DRIVER_KIND } from "../provider/Layers/FdDeepSeekAdapter.ts
 import {
   FdEnterpriseCodexClient,
   FdEnterpriseCodexError,
+  type FdEnterpriseCodexToolCallInput,
 } from "../fd-skills/FdEnterpriseCodexClient.ts";
 import { NativeSkillCatalog, selectedNativeSkillNames } from "../fd-skills/NativeSkillCatalog.ts";
 import type { AttachmentToolSet } from "../fileAnalysis/AttachmentTools.ts";
@@ -264,44 +265,16 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
               input.documentTools?.handles(request.tool) &&
               !runtimeContext.tools.some((skillTool) => skillTool.name === request.tool)
                 ? documents.dynamicToolExecutor(request)
-                : Effect.tryPromise(() =>
-                    enterpriseClient.executeToolCall({
-                      skillVersionId,
-                      releaseDigest: runtimeContext.release_digest,
-                      clientThreadId: session.threadId,
-                      providerThreadId: request.threadId,
-                      turnId: request.turnId,
-                      callId: request.callId,
-                      tool: request.tool,
-                      arguments: request.arguments,
-                    }),
-                  ).pipe(
-                    Effect.match({
-                      onFailure: (cause) => ({
-                        success: false,
-                        contentItems: [
-                          {
-                            type: "inputText" as const,
-                            text: fdEnterpriseToolFailureMessage(cause),
-                          },
-                        ],
-                      }),
-                      onSuccess: (result) => ({
-                        success: true,
-                        contentItems: [
-                          {
-                            type: "inputText" as const,
-                            text: JSON.stringify({
-                              audit_id: result.audit_id,
-                              content: result.content,
-                              row_count: result.row_count ?? 0,
-                              truncated: result.truncated ?? false,
-                            }),
-                          },
-                        ],
-                      }),
-                    }),
-                  ),
+                : executeFdEnterpriseToolCall(enterpriseClient, {
+                    skillVersionId,
+                    releaseDigest: runtimeContext.release_digest,
+                    clientThreadId: session.threadId,
+                    providerThreadId: request.threadId,
+                    turnId: request.turnId,
+                    callId: request.callId,
+                    tool: request.tool,
+                    arguments: request.arguments,
+                  }),
           })),
         );
       },
@@ -309,8 +282,44 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
   );
 });
 
+export function executeFdEnterpriseToolCall(
+  client: FdEnterpriseCodexClient,
+  input: FdEnterpriseCodexToolCallInput,
+) {
+  return Effect.tryPromise({
+    try: (signal) => client.executeToolCall({ ...input, signal }),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.match({
+      onFailure: (cause) => ({
+        success: false,
+        contentItems: [{ type: "inputText" as const, text: fdEnterpriseToolFailureMessage(cause) }],
+      }),
+      onSuccess: (result) => ({
+        success: true,
+        contentItems: [
+          {
+            type: "inputText" as const,
+            text: JSON.stringify({
+              audit_id: result.audit_id,
+              content: result.content,
+              row_count: result.row_count ?? 0,
+              truncated: result.truncated ?? false,
+            }),
+          },
+        ],
+      }),
+    }),
+  );
+}
+
 export function fdEnterpriseToolFailureMessage(cause: unknown): string {
   if (cause instanceof FdEnterpriseCodexError) {
+    if (cause.diagnostic) {
+      return JSON.stringify({
+        error: { code: cause.code, message: cause.message, ...cause.diagnostic },
+      });
+    }
     switch (cause.code) {
       case "query_timed_out":
         return "企业数据查询超时，未返回结果，请稍后重试。";
