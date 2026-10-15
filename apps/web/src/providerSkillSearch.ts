@@ -75,7 +75,7 @@ export function searchProviderSkills(
   // boundary. Keeping them out of the native `$skill` menu prevents a token
   // insertion from accidentally selecting a local-looking route.
   const enabledSkills = skills.filter((skill) => skill.enabled && skill.scope !== "fd-managed");
-  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
+  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\p{Sc}+/u });
 
   if (!normalizedQuery) {
     return enabledSkills;

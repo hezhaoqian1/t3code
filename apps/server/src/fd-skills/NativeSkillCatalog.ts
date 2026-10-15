@@ -400,7 +400,7 @@ export class NativeSkillCatalog {
 
 export function selectedNativeSkillNames(input: string): ReadonlyArray<string> {
   const names: string[] = [];
-  const matches = input.matchAll(/(?:^|\s)\$([a-zA-Z][a-zA-Z0-9_-]{0,127})(?=\s|$)/g);
+  const matches = input.matchAll(/(?:^|\s)\p{Sc}([a-zA-Z][a-zA-Z0-9_-]{0,127})(?=\s|$)/gu);
   for (const match of matches) {
     const name = match[1];
     if (name && !names.includes(name)) names.push(name);

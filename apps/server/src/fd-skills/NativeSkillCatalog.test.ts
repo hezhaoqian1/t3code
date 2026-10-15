@@ -161,6 +161,11 @@ describe("NativeSkillCatalog", () => {
       expect.stringContaining("two instructions"),
     ]);
     expect(selectedNativeSkillNames("$one then $two $three")).toEqual(["one", "two", "three"]);
+    expect(selectedNativeSkillNames("￥one ¥two $one 𑿝three ￥100 ￥20k")).toEqual([
+      "one",
+      "two",
+      "three",
+    ]);
   });
 
   it("discovers FD-managed connector Skill roots without moving them into user home", async () => {
