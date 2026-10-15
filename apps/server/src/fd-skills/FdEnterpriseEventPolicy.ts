@@ -10,6 +10,26 @@ const AssistantCompletion = Schema.Struct({
 });
 const isAssistantCompletion = Schema.is(AssistantCompletion);
 
+/** Return only fixed messages: provider errors can contain enterprise data. */
+function enterpriseFailureMessage(message: string): string {
+  if (/allocated quota exceeded|insufficient_quota|quota exceeded|quota limit/i.test(message)) {
+    return "模型服务额度已达上限。请联系管理员检查上游额度，或切换可用模型后继续。";
+  }
+  if (/\b429\b|too many requests|rate[ _-]?limit/i.test(message)) {
+    return "模型服务暂时繁忙（限流）。请稍后在当前任务中继续。";
+  }
+  if (/context (?:window|length).*exceed|context_length_exceeded/i.test(message)) {
+    return "当前任务内容超出模型上下文上限。请压缩上下文，或新建任务后继续。";
+  }
+  if (/timed? out|timeout/i.test(message)) {
+    return "模型响应超时。请稍后在当前任务中继续。";
+  }
+  if (/stream disconnected|connection (?:closed|reset)|unexpected eof/i.test(message)) {
+    return "模型连接中断。请稍后在当前任务中继续。";
+  }
+  return "FD 技能执行失败。请重试；若仍失败，请联系管理员并提供任务名称和报错时间。";
+}
+
 /** Keep enterprise execution data out of T3's durable event stream. */
 export function projectFdEnterpriseEvent(
   event: ProviderRuntimeEvent,
@@ -32,11 +52,13 @@ export function projectFdEnterpriseEvent(
         ...event,
         payload: {
           state: event.payload.state,
-          ...(event.payload.errorMessage ? { errorMessage: "FD Skill execution failed." } : {}),
+          ...(event.payload.errorMessage
+            ? { errorMessage: enterpriseFailureMessage(event.payload.errorMessage) }
+            : {}),
         },
       };
     case "turn.aborted":
-      return { ...event, payload: { reason: "FD Skill execution stopped." } };
+      return { ...event, payload: { reason: "FD 技能执行已停止。" } };
     case "request.opened":
       return { ...event, payload: { requestType: event.payload.requestType } };
     case "request.resolved":
