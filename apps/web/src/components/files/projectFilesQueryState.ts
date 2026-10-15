@@ -4,8 +4,10 @@ import type {
   ProjectListEntriesResult,
   ProjectReadFileResult,
 } from "@t3tools/contracts";
+import { ProjectReadFileError } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback } from "react";
 
@@ -28,6 +30,12 @@ interface ProjectQueryState<A> {
   readonly isPending: boolean;
   readonly refresh: () => void;
 }
+
+interface ProjectFileQueryState extends ProjectQueryState<ProjectReadFileResult> {
+  readonly readError: ProjectReadFileError | null;
+}
+
+const isProjectReadFileError = Schema.is(ProjectReadFileError);
 
 export function getProjectEntriesQueryAtom(environmentId: EnvironmentId, cwd: string) {
   return projectEnvironment.listEntries({ environmentId, input: { cwd } });
@@ -168,7 +176,7 @@ export function useProjectFileQuery(
   cwd: string,
   relativePath: string | null,
   enabled = true,
-): ProjectQueryState<ProjectReadFileResult> {
+): ProjectFileQueryState {
   const atom = enabled
     ? getProjectFileQueryAtom(environmentId, cwd, relativePath)
     : EMPTY_PROJECT_FILE_QUERY_ATOM;
@@ -180,10 +188,12 @@ export function useProjectFileQuery(
     optimisticFileAtom(environmentId, cwd, relativePath ?? EMPTY_PROJECT_FILE_PATH),
   );
   const optimisticFile = relativePath === null ? null : optimisticResult;
+  const cause = result._tag === "Failure" ? Cause.squash(result.cause) : null;
 
   return {
     data: optimisticFile?.data ?? data,
     error: errorMessage(result),
+    readError: isProjectReadFileError(cause) ? cause : null,
     isPending: result.waiting,
     refresh,
   };

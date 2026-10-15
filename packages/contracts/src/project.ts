@@ -72,6 +72,8 @@ export type ProjectSearchContentsResult = typeof ProjectSearchContentsResult.Typ
 
 export const ProjectListEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
+  // Immediate filesystem children; empty means root. Omitted keeps indexed search.
+  directoryPath: Schema.optional(TrimmedString),
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 
@@ -124,6 +126,7 @@ export class ProjectListSkillsError extends Schema.TaggedErrorClass<ProjectListS
 }
 
 export const ProjectEntriesFailure = Schema.Literals([
+  "directory_list_failed",
   "workspace_root_not_found",
   "workspace_root_create_failed",
   "workspace_root_stat_failed",

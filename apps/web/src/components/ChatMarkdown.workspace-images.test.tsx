@@ -46,6 +46,49 @@ function renderWithoutThread(markdown: string): string {
 }
 
 describe("ChatMarkdown workspace images", () => {
+  it("keeps both Windows drive link forms usable through the Markdown pipeline", () => {
+    const forward = "C:/Users/shawn/project/报告.md";
+    const backward = "C:\\Users\\shawn\\project\\报告.md";
+    expect(render(`[forward](${forward})`)).toContain(`href="${forward}"`);
+    expect(render(`[backward](${backward})`)).toContain(`href="${backward}"`);
+    const qaPath = "C:\\fd019\\qa-batch2\\runs\\file-preview-recovery\\task\\正常报告.md";
+    expect(render(`[Windows绝对路径](${qaPath})`)).toContain(`href="${qaPath}"`);
+  });
+
+  it("resolves rendered document images and links from their own directory", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd="C:/Users/shawn/project"
+        baseDir="C:/Users/shawn/project/成果"
+        threadRef={threadRef}
+        text={"[附录](附录.md)\n\n![图](图片.svg)"}
+      />,
+    );
+    expect(html).toContain('href="C:/Users/shawn/project/成果\\附录.md"');
+    expect(testState.resources).toContainEqual({
+      _tag: "workspace-file",
+      threadId: threadRef.threadId,
+      path: "C:/Users/shawn/project/成果\\图片.svg",
+    });
+  });
+
+  it("renders macOS file URLs, spaces and sibling images through the same pipeline", () => {
+    const cwd = "/Users/fd/FangdeAI/Tasks/中文任务";
+    const html = renderToStaticMarkup(
+      <ChatMarkdown
+        cwd={cwd}
+        baseDir={`${cwd}/成果`}
+        threadRef={threadRef}
+        text={`[报告](file://${cwd}/成果/季度%20报告.md)\n\n![图](./图片.svg)`}
+      />,
+    );
+    expect(html).toContain(`href="${cwd}/成果/季度 报告.md"`);
+    expect(testState.resources).toContainEqual({
+      _tag: "workspace-file",
+      threadId: threadRef.threadId,
+      path: `${cwd}/成果/./图片.svg`,
+    });
+  });
   beforeEach(() => {
     testState.resources = [];
     testState.assetState = "success";

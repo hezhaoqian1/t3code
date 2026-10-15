@@ -96,6 +96,69 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
   });
 
   describe("list", () => {
+    it.effect("lists generated documents and ignored files as immediate children", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ git: true });
+        yield* writeTextFile(cwd, ".gitignore", "成果/\n*.pdf\n");
+        for (const name of [
+          "报告.pdf",
+          "报告.docx",
+          "报表.xlsx",
+          "演示.pptx",
+          "成果/季度 报告.md",
+        ]) {
+          yield* writeTextFile(cwd, name, "fixture");
+        }
+        const service = yield* WorkspaceEntries.WorkspaceEntries;
+        const root = yield* service.list({ cwd, directoryPath: "" });
+        expect(root.entries).toEqual(
+          expect.arrayContaining([
+            { path: "报告.pdf", kind: "file" },
+            { path: "报告.docx", kind: "file" },
+            { path: "报表.xlsx", kind: "file" },
+            { path: "演示.pptx", kind: "file" },
+            { path: "成果", kind: "directory" },
+          ]),
+        );
+        expect(
+          root.entries.some(
+            (entry) =>
+              entry.path.startsWith(".git/") ||
+              entry.path === ".git" ||
+              entry.path.includes("季度"),
+          ),
+        ).toBe(false);
+        expect((yield* service.list({ cwd, directoryPath: "成果" })).entries).toEqual([
+          { path: "成果/季度 报告.md", kind: "file" },
+        ]);
+      }),
+    );
+
+    it.effect("rejects traversal, git internals, missing folders and file-as-directory", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ git: true });
+        yield* writeTextFile(cwd, "report.md");
+        const service = yield* WorkspaceEntries.WorkspaceEntries;
+        for (const directoryPath of ["..", ".git", "missing", "report.md"]) {
+          const error = yield* Effect.flip(service.list({ cwd, directoryPath }));
+          expect(error._tag).toBe("WorkspaceEntriesReadDirectoryError");
+        }
+      }),
+    );
+
+    it.effect("rejects directory junctions pointing outside the workspace", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir();
+        const outside = yield* makeTempDir();
+        const path = yield* Path.Path;
+        yield* Effect.promise(() => NodeFSP.symlink(outside, path.join(cwd, "escape"), "junction"));
+        const service = yield* WorkspaceEntries.WorkspaceEntries;
+        const error = yield* Effect.flip(service.list({ cwd, directoryPath: "escape" }));
+        expect(error._tag).toBe("WorkspaceEntriesReadDirectoryError");
+        expect((yield* service.list({ cwd, directoryPath: "" })).entries).toEqual([]);
+      }),
+    );
+
     it.effect("returns the complete cached workspace index", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir();

@@ -29,6 +29,8 @@ import { useTheme } from "~/hooks/useTheme";
 import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
 import { DIFF_SURFACE_THEME_UNSAFE_CSS, resolveDiffThemeName } from "~/lib/diffRendering";
 import { cn } from "~/lib/utils";
+import { readLocalApi } from "~/localApi";
+import { Button } from "~/components/ui/button";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { resolvePathLinkTarget } from "~/terminal-links";
 import { ScrollArea } from "~/components/ui/scroll-area";
@@ -59,6 +61,7 @@ import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { LocalCommentAnnotation } from "./LocalCommentAnnotation";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs } from "./filePath";
+import { fileReadErrorPresentation } from "./fileReadError";
 import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
@@ -733,6 +736,7 @@ function RenderedMarkdownSurface({
       <ChatMarkdown
         text={contents}
         cwd={cwd}
+        baseDir={resolvePathLinkTarget(relativePath, cwd).replace(/[\\/][^\\/]*$/, "")}
         threadRef={threadRef}
         className="mx-auto max-w-4xl px-6 py-5"
         onTaskListChange={({ markerOffset, checked }) => {
@@ -784,6 +788,7 @@ export default function FilePreviewPanel({
   });
   const isImage = relativePath !== null && isWorkspaceImagePreviewPath(relativePath);
   const file = useProjectFileQuery(environmentId, cwd, relativePath, !isImage);
+  const readError = fileReadErrorPresentation(file.readError ?? file.error);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
@@ -993,8 +998,59 @@ export default function FilePreviewPanel({
               alt={relativePath}
             />
           ) : relativePath && file.error && file.data === null ? (
-            <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
-              {file.error}
+            <div
+              role="alert"
+              className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 overflow-auto px-6 text-center text-xs leading-relaxed"
+            >
+              <p className="text-destructive">{readError.message}</p>
+              <p className="max-w-full break-all text-muted-foreground">
+                读取位置：
+                <code className="select-text">
+                  {file.readError?.resolvedPath ??
+                    file.readError?.operationPath ??
+                    absolutePath ??
+                    relativePath}
+                </code>
+              </p>
+              <p className="max-w-full break-all text-muted-foreground">
+                任务文件夹：<code className="select-text">{cwd}</code>
+              </p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={file.isPending}
+                  onClick={file.refresh}
+                >
+                  {file.isPending ? "正在读取…" : "重新读取"}
+                </Button>
+                {readError.canOpenWithSystemApp &&
+                absolutePath &&
+                environmentId === primaryEnvironmentId &&
+                typeof window !== "undefined" &&
+                window.desktopBridge ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      void readLocalApi()
+                        ?.shell.openPath(absolutePath)
+                        .catch(() => {
+                          toastManager.add(
+                            stackedThreadToast({
+                              type: "error",
+                              title: "无法用系统应用打开文件",
+                              description:
+                                "请确认文件仍然存在，并已安装可打开此类文档的应用（如 WPS 或 Office）。",
+                            }),
+                          );
+                        });
+                    }}
+                  >
+                    用系统应用打开
+                  </Button>
+                ) : null}
+              </div>
             </div>
           ) : relativePath && file.data === null ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">

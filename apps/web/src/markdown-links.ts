@@ -6,10 +6,11 @@ const WINDOWS_UNC_PATH_PATTERN = /^\\\\/;
 const EXTERNAL_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/;
 const RELATIVE_PATH_PREFIX_PATTERN = /^(~\/|\.{1,2}\/)/;
 // Relative workspace paths may contain Unicode names (for example Chinese
-// output folders). Keep separators, whitespace and control characters out of
-// this shape check while allowing normal filename punctuation.
-const RELATIVE_FILE_PATH_PATTERN = /^[^\s\\/:]+(?:\/[^\s\\/:]+)+(?::\d+){0,2}$/u;
-const RELATIVE_FILE_NAME_PATTERN = /^[^\s\\/:]+\.[^\s\\/:]+(?::\d+){0,2}$/u;
+// output folders). Explicit links also allow spaces, as upstream does, while
+// inline prose keeps the stricter whitespace check below.
+const RELATIVE_FILE_PATH_PATTERN =
+  /^[^\s\\/:]+(?: +[^\s\\/:]+)*(?:\/[^\s\\/:]+(?: +[^\s\\/:]+)*)+(?::\d+){0,2}$/u;
+const RELATIVE_FILE_NAME_PATTERN = /^[^\s\\/:]+(?: +[^\s\\/:]+)*\.[^\s\\/:]+(?::\d+){0,2}$/u;
 const POSITION_SUFFIX_PATTERN = /:\d+(?::\d+)?$/;
 const POSITION_ONLY_PATTERN = /^\d+(?::\d+)?$/;
 // Standard OS and dev-container roots; deliberately excludes app-route-ish
@@ -77,7 +78,9 @@ function stripSearchAndHash(value: string): { path: string; hash: string } {
 }
 
 function normalizeWindowsDrivePath(path: string): string {
-  return /^\/[A-Za-z]:[\\/]/.test(path) ? path.slice(1) : path;
+  const drivePath = /^\/[A-Za-z]:[\\/]/.test(path) ? path.slice(1) : path;
+  // A browser may serialize C:%5C... as C:/%5C... before we decode it.
+  return drivePath.replace(/^([A-Za-z]:)([\\/])[\\/]+/, "$1$2");
 }
 
 function parseFileUrlHref(
@@ -121,7 +124,7 @@ export function rewriteMarkdownFileUriHref(href: string | undefined): string | n
  */
 export function isWindowsFilePathHref(href: string | undefined): boolean {
   if (!href) return false;
-  const destination = normalizeMarkdownLinkDestination(href);
+  const destination = safeDecode(normalizeMarkdownLinkDestination(href));
   return WINDOWS_DRIVE_PATH_PATTERN.test(destination) || WINDOWS_UNC_PATH_PATTERN.test(destination);
 }
 
@@ -169,6 +172,7 @@ function hasExternalScheme(path: string): boolean {
 export function resolveMarkdownFileLinkTarget(
   href: string | undefined,
   cwd?: string,
+  baseDir: string | undefined = cwd,
 ): string | null {
   if (!href) return null;
   const rawHref = normalizeMarkdownLinkDestination(href);
@@ -178,9 +182,13 @@ export function resolveMarkdownFileLinkTarget(
     ? parseFileUrlHref(rawHref)
     : null;
   const source = fileUrlTarget ?? stripSearchAndHash(rawHref);
-  const decodedPath = normalizeWindowsDrivePath(
+  const rawPath = normalizeWindowsDrivePath(
     fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim()),
   );
+  const decodedPath =
+    WINDOWS_DRIVE_PATH_PATTERN.test(rawPath) || WINDOWS_UNC_PATH_PATTERN.test(rawPath)
+      ? rawPath
+      : rawPath.replaceAll("\\", "/");
   const decodedHash = safeDecode(source.hash.trim());
 
   if (decodedPath.length === 0) return null;
@@ -199,8 +207,9 @@ export function resolveMarkdownFileLinkTarget(
     return pathWithPosition;
   }
 
-  if (!cwd) return null;
-  return resolvePathLinkTarget(pathWithPosition, cwd);
+  const relativeBase = pathWithPosition.startsWith("~/") ? cwd : baseDir;
+  if (!relativeBase) return null;
+  return resolvePathLinkTarget(pathWithPosition, relativeBase);
 }
 
 const INLINE_CODE_DISQUALIFIER_PATTERN = /[\s`]/;
@@ -330,6 +339,7 @@ function looksLikeHostname(segment: string, hasPosition: boolean): boolean {
 export function resolveInlineCodeFileLinkMeta(
   codeText: string,
   cwd?: string,
+  baseDir: string | undefined = cwd,
 ): MarkdownFileLinkMeta | null {
   const trimmed = codeText.trim();
   if (trimmed.length === 0 || INLINE_CODE_DISQUALIFIER_PATTERN.test(trimmed)) return null;
@@ -362,18 +372,28 @@ export function resolveInlineCodeFileLinkMeta(
     }
   }
 
-  const resolved = resolveMarkdownFileLinkMeta(candidate, cwd);
+  // Upstream #16950: repo-shaped prose remains workspace-relative, while
+  // explicit ./ and ../ references in a rendered document use its directory.
+  const fromWorkspaceRoot =
+    cwd &&
+    baseDir &&
+    isRelativePath(candidate) &&
+    !RELATIVE_PATH_PREFIX_PATTERN.test(candidate) &&
+    splitPathAndPosition(candidate).path.includes("/") &&
+    workspaceRelativePath(baseDir, cwd) !== null;
+  const linkBase = fromWorkspaceRoot ? cwd : baseDir;
+  const resolved = resolveMarkdownFileLinkMeta(candidate, cwd, linkBase);
   if (resolved) return resolved;
 
   // `Makefile:12` — conventional extensionless names fail the generic
   // markdown-link candidate patterns, but here the :line suffix already
   // marked the span as a file reference.
   if (
-    cwd &&
+    linkBase &&
     BARE_EXTENSIONLESS_POSITION_PATTERN.test(candidate) &&
     EXTENSIONLESS_FILE_NAMES.has(candidate.replace(POSITION_SUFFIX_PATTERN, ""))
   ) {
-    return buildFileLinkMetaFromTarget(resolvePathLinkTarget(candidate, cwd), cwd);
+    return buildFileLinkMetaFromTarget(resolvePathLinkTarget(candidate, linkBase), cwd);
   }
   return null;
 }
@@ -390,17 +410,28 @@ function workspaceRelativePath(path: string, workspaceRoot: string | undefined):
     /\/+$/,
     "",
   );
-  const pathForCompare = normalizedPath.toLowerCase();
-  const rootForCompare = normalizedRoot.toLowerCase();
+  const windows =
+    WINDOWS_DRIVE_PATH_PATTERN.test(normalizedRoot) || normalizedRoot.startsWith("//");
+  const pathForCompare = windows ? normalizedPath.toLowerCase() : normalizedPath;
+  const rootForCompare = windows ? normalizedRoot.toLowerCase() : normalizedRoot;
   if (!pathForCompare.startsWith(`${rootForCompare}/`)) return null;
-  return normalizedPath.slice(normalizedRoot.length + 1);
+  const segments: string[] = [];
+  for (const segment of normalizedPath.slice(normalizedRoot.length + 1).split("/")) {
+    if (!segment || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) return null;
+      segments.pop();
+    } else segments.push(segment);
+  }
+  return segments.length > 0 ? segments.join("/") : null;
 }
 
 export function resolveMarkdownFileLinkMeta(
   href: string | undefined,
   cwd?: string,
+  baseDir: string | undefined = cwd,
 ): MarkdownFileLinkMeta | null {
-  const targetPath = resolveMarkdownFileLinkTarget(href, cwd);
+  const targetPath = resolveMarkdownFileLinkTarget(href, cwd, baseDir);
   if (!targetPath) return null;
   return buildFileLinkMetaFromTarget(targetPath, cwd);
 }

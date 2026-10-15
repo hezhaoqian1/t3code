@@ -327,3 +327,84 @@ describe("resolveInlineCodeFileLinkMeta", () => {
     expect(resolveInlineCodeFileLinkMeta(".plans/worktree-management-v1.md")).toBeNull();
   });
 });
+describe("generated document links", () => {
+  const cwd = "C:/Users/test/Tasks/demo";
+  const baseDir = `${cwd}/成果`;
+
+  it("opens explicit Unicode paths containing encoded spaces", () => {
+    expect(resolveMarkdownFileLinkMeta("成果/季度%20报告.md", cwd)).toMatchObject({
+      workspaceRelativePath: "成果/季度 报告.md",
+    });
+  });
+
+  it("normalizes Windows relative separators in explicit links", () => {
+    expect(resolveMarkdownFileLinkMeta("成果\\报告.md", cwd)).toMatchObject({
+      workspaceRelativePath: "成果/报告.md",
+    });
+  });
+
+  it("resolves links in a rendered document relative to that document", () => {
+    expect(resolveMarkdownFileLinkMeta("附录.md", cwd, baseDir)).toMatchObject({
+      workspaceRelativePath: "成果/附录.md",
+    });
+    expect(resolveMarkdownFileLinkMeta("./图片.svg", cwd, baseDir)).toMatchObject({
+      workspaceRelativePath: "成果/图片.svg",
+    });
+  });
+
+  it("keeps repo-shaped inline references rooted at the workspace", () => {
+    expect(resolveInlineCodeFileLinkMeta("成果/附录.md", cwd, baseDir)).toMatchObject({
+      workspaceRelativePath: "成果/附录.md",
+    });
+    expect(resolveInlineCodeFileLinkMeta("./附录.md", cwd, baseDir)).toMatchObject({
+      workspaceRelativePath: "成果/附录.md",
+    });
+  });
+
+  it("expands Windows home with either separator", () => {
+    expect(resolveMarkdownFileLinkMeta("~/报告.md", cwd)?.filePath.replaceAll("\\", "/")).toBe(
+      "C:/Users/test/报告.md",
+    );
+  });
+
+  it("handles a browser-inserted slash before an encoded Windows separator", () => {
+    expect(
+      resolveMarkdownFileLinkMeta("C:/%5CUsers%5Ctest%5CTasks%5Cdemo%5C报告.md", cwd),
+    ).toMatchObject({
+      workspaceRelativePath: "报告.md",
+    });
+  });
+});
+
+describe("macOS document links", () => {
+  const cwd = "/Users/fd/FangdeAI/Tasks/中文任务";
+  it.each([
+    [`${cwd}/季度 报告.md`, "季度 报告.md"],
+    [`file://${cwd}/季度%20报告.md`, "季度 报告.md"],
+    ["成果/季度%20报告.md", "成果/季度 报告.md"],
+    ["报告%23最终.md", "报告#最终.md"],
+    ["报告%2520.md", "报告%20.md"],
+    ["./成果/../报告.md", "报告.md"],
+  ])("resolves %s without Windows separators or double decoding", (href, relativePath) => {
+    const result = resolveMarkdownFileLinkMeta(href, cwd);
+    expect(result?.workspaceRelativePath).toBe(relativePath);
+    expect(result?.filePath).not.toContain("\\");
+  });
+  it("preserves case-sensitive volume boundaries and rejects traversal", () => {
+    expect(
+      resolveMarkdownFileLinkMeta("/Users/fd/work/报告.md", "/Users/fd/Work")
+        ?.workspaceRelativePath,
+    ).toBeNull();
+    expect(resolveMarkdownFileLinkMeta("../outside.md", cwd)?.workspaceRelativePath).toBeNull();
+    expect(
+      resolveMarkdownFileLinkMeta("file:///Volumes/共享/报告.md", "/Volumes/共享")
+        ?.workspaceRelativePath,
+    ).toBe("报告.md");
+  });
+  it("expands home and resolves sibling and parent links", () => {
+    expect(resolveMarkdownFileLinkTarget("~/报告.md", cwd)).toBe("/Users/fd/报告.md");
+    expect(
+      resolveMarkdownFileLinkMeta("../附录.md", cwd, `${cwd}/成果`)?.workspaceRelativePath,
+    ).toBe("附录.md");
+  });
+});

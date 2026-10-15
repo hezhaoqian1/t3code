@@ -6,7 +6,7 @@ import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import { FileTree, useFileTree, useFileTreeSearch } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { RotateCw } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
@@ -20,7 +20,8 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
-import { useProjectEntriesQuery } from "./projectFilesQueryState";
+import { useDirectoryEntries } from "./useDirectoryEntries";
+import { useProjectPathSearch } from "~/state/queries";
 import { describeActionError } from "../../rpc/transportError";
 
 interface FileBrowserPanelProps {
@@ -109,8 +110,24 @@ export default function FileBrowserPanel({
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const composerRef = useComposerHandleContext();
-  const entriesQuery = useProjectEntriesQuery(environmentId, cwd);
-  const entries = entriesQuery.data?.entries ?? [];
+  const entriesQuery = useDirectoryEntries(environmentId, cwd);
+  const { load } = entriesQuery;
+  const [query, setQuery] = useState("");
+  const pathSearch = useProjectPathSearch({ environmentId, cwd, query: query.slice(0, 256) }, 200);
+  const entries = useMemo(() => {
+    const result = new Map(entriesQuery.entries.map((entry) => [entry.path, entry]));
+    if (query.trim() && !pathSearch.isPending) {
+      for (const entry of pathSearch.entries) {
+        if (!result.has(entry.path)) result.set(entry.path, entry);
+        const segments = entry.path.split("/");
+        for (let index = 1; index < segments.length; index++) {
+          const path = segments.slice(0, index).join("/");
+          if (!result.has(path)) result.set(path, { path, kind: "directory" });
+        }
+      }
+    }
+    return [...result.values()];
+  }, [entriesQuery.entries, pathSearch.entries, pathSearch.isPending, query]);
   const entryKinds = useMemo(
     () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
     [entries],
@@ -223,7 +240,7 @@ export default function FileBrowserPanel({
     density: "compact",
     fileTreeSearchMode: "hide-non-matches",
     flattenEmptyDirectories: true,
-    initialExpansion: 1,
+    initialExpansion: "closed",
     icons: T3_PIERRE_ICONS,
     onSelectionChange: (selectedPaths) => {
       // The drag controller's selection cache must track every change,
@@ -245,10 +262,12 @@ export default function FileBrowserPanel({
     },
     paths: [],
     search: false,
+    onSearchChange: (value) => setQuery(value ?? ""),
     unsafeCSS: TREE_UNSAFE_CSS,
   });
   const search = useFileTreeSearch(model);
   const handleSearchValueChange = (value: string) => {
+    setQuery(value);
     if (value.trim().length === 0) {
       search.close();
       return;
@@ -259,9 +278,42 @@ export default function FileBrowserPanel({
   useEffect(() => {
     if (previousTreePathsRef.current === treePaths) return;
     entryKindsRef.current = entryKinds;
+    const expanded = previousTreePathsRef.current.filter((path) => {
+      const item = model.getItem(path);
+      return item?.isDirectory() && "isExpanded" in item && item.isExpanded();
+    });
     previousTreePathsRef.current = treePaths;
     model.resetPaths(treePaths);
+    for (const path of expanded) {
+      const item = model.getItem(path);
+      if (item && "expand" in item) item.expand();
+    }
   }, [entryKinds, model, treePaths]);
+
+  useEffect(() => {
+    const loadExpanded = () => {
+      if (model.isSearchOpen()) return;
+      for (const entry of entries) {
+        if (entry.kind !== "directory") continue;
+        const item = model.getItem(treePath(entry));
+        if (item && "isExpanded" in item && item.isExpanded()) void load(entry.path);
+      }
+    };
+    loadExpanded();
+    return model.subscribe(loadExpanded);
+  }, [entries, load, model]);
+
+  useEffect(() => {
+    if (!selectedPath) return;
+    const controller = new AbortController();
+    void (async () => {
+      const segments = selectedPath.split("/");
+      for (let index = 0; index < segments.length && !controller.signal.aborted; index++) {
+        await load(segments.slice(0, index).join("/"));
+      }
+    })();
+    return () => controller.abort();
+  }, [load, selectedPath]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -298,6 +350,7 @@ export default function FileBrowserPanel({
     handledRevealRef.current = revealRequest;
 
     syncingSelectionRef.current = true;
+    setQuery("");
     model.closeSearch();
     for (const path of model.getSelectedPaths()) {
       model.getItem(path)?.deselect();
@@ -352,28 +405,42 @@ export default function FileBrowserPanel({
       data-file-browser-panel={`${environmentId}:${cwd}`}
     >
       <div className="surface-subheader gap-1 px-2" data-surface-subheader>
-        <RefreshFilesButton isPending={entriesQuery.isPending} onRefresh={entriesQuery.refresh} />
+        <RefreshFilesButton
+          isPending={entriesQuery.isPending}
+          onRefresh={() => {
+            entriesQuery.refresh();
+            if (query.trim()) pathSearch.refresh();
+          }}
+        />
         <FileSearchField
           name="project-files-search"
           ariaLabel={`Search ${projectName} files`}
           value={search.value}
           onValueChange={handleSearchValueChange}
-          onClose={search.close}
-        />
-      </div>
-      {entriesQuery.error && entriesQuery.data === null ? (
-        <div className="p-4 text-xs leading-relaxed text-destructive">{entriesQuery.error}</div>
-      ) : (
-        <FileTree
-          model={model}
-          aria-label={`${projectName} files`}
-          className="min-h-0 flex-1 overflow-hidden"
-          style={{
-            colorScheme: resolvedTheme,
-            ["--trees-fg-override" as string]: "var(--foreground)",
+          onClose={() => {
+            setQuery("");
+            search.close();
           }}
         />
-      )}
+      </div>
+      {entriesQuery.error ? (
+        <button
+          type="button"
+          onClick={entriesQuery.refresh}
+          className="p-4 text-left text-xs leading-relaxed text-destructive"
+        >
+          无法读取文件夹，请点击重试。{entriesQuery.error}
+        </button>
+      ) : null}
+      <FileTree
+        model={model}
+        aria-label={`${projectName} files`}
+        className="min-h-0 flex-1 overflow-hidden"
+        style={{
+          colorScheme: resolvedTheme,
+          ["--trees-fg-override" as string]: "var(--foreground)",
+        }}
+      />
     </div>
   );
 }

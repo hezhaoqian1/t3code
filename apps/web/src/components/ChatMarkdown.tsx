@@ -103,6 +103,8 @@ import { describeActionError } from "../rpc/transportError";
 interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
+  /** Directory of a rendered document; chat links default to the workspace. */
+  baseDir?: string | undefined;
   threadRef?: ScopedThreadRef | undefined;
   onTaskListChange?: ((input: { markerOffset: number; checked: boolean }) => void) | undefined;
   isStreaming?: boolean;
@@ -1410,6 +1412,7 @@ function areMarkdownFileLinkPropsEqual(
 function ChatMarkdown({
   text,
   cwd,
+  baseDir = cwd,
   threadRef,
   onTaskListChange,
   isStreaming = false,
@@ -1440,24 +1443,24 @@ function ChatMarkdown({
     for (const href of extractMarkdownLinkHrefs(text)) {
       const normalizedHref = normalizeMarkdownLinkHrefKey(href);
       if (metaByHref.has(normalizedHref)) continue;
-      const meta = resolveMarkdownFileLinkMeta(normalizedHref, cwd);
+      const meta = resolveMarkdownFileLinkMeta(normalizedHref, cwd, baseDir);
       if (meta) {
         metaByHref.set(normalizedHref, meta);
       }
     }
     return metaByHref;
-  }, [cwd, text]);
+  }, [cwd, baseDir, text]);
   const inlineCodeFileLinkMetaByText = useMemo(() => {
     const metaByText = new Map<string, MarkdownFileLinkMeta>();
     for (const span of extractInlineCodeSpans(text)) {
       if (metaByText.has(span)) continue;
-      const meta = resolveInlineCodeFileLinkMeta(span, cwd);
+      const meta = resolveInlineCodeFileLinkMeta(span, cwd, baseDir);
       if (meta) {
         metaByText.set(span, meta);
       }
     }
     return metaByText;
-  }, [cwd, text]);
+  }, [cwd, baseDir, text]);
   const fileLinkParentSuffixByPath = useMemo(() => {
     const filePaths = [
       ...[...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath),
@@ -1616,7 +1619,7 @@ function ChatMarkdown({
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref
           ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
-            resolveMarkdownFileLinkMeta(normalizedHref, cwd))
+            resolveMarkdownFileLinkMeta(normalizedHref, cwd, baseDir))
           : null;
         if (!fileLinkMeta) {
           const faviconHost = resolveExternalWebLinkHost(href);
@@ -1698,7 +1701,7 @@ function ChatMarkdown({
           const codeText = nodeToPlainText(children);
           const fileLinkMeta =
             inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
-            resolveInlineCodeFileLinkMeta(codeText, cwd);
+            resolveInlineCodeFileLinkMeta(codeText, cwd, baseDir);
           if (fileLinkMeta) {
             return fileLinkChip(fileLinkMeta, `\`${codeText}\``);
           }
@@ -1712,7 +1715,7 @@ function ChatMarkdown({
       img({ node: _node, title: _title, src, alt, ...props }) {
         const srcString = typeof src === "string" ? normalizeMarkdownLinkDestination(src) : "";
         const altText = alt ?? "";
-        const imageSource = classifyMarkdownImageSource(srcString, cwd);
+        const imageSource = classifyMarkdownImageSource(srcString, baseDir);
         if (imageSource._tag === "Direct") {
           return (
             <img
@@ -1773,6 +1776,7 @@ function ChatMarkdown({
     };
   }, [
     cwd,
+    baseDir,
     diffThemeName,
     fileLinkParentSuffixByPath,
     inlineCodeFileLinkMetaByText,
