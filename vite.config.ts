@@ -54,6 +54,7 @@ export default defineConfig({
   },
   lint: {
     ignorePatterns: [
+      "apps/desktop/resources/presentation/fd-presentation-studio/editor/neo-ppt/**",
       ".repos",
       ".repos/**",
       "dist",

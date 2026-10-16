@@ -2,7 +2,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { DatabaseSync } from "node:sqlite";
+import * as NodeSqlite from "node:sqlite";
 
 export class DatabaseLeaseUnavailableError extends Schema.TaggedErrorClass<DatabaseLeaseUnavailableError>()(
   "DatabaseLeaseUnavailableError",
@@ -31,7 +31,7 @@ export const acquire = (databasePath: string) => {
   return Effect.acquireRelease(
     Effect.try({
       try: () => {
-        const database = new DatabaseSync(leasePath);
+        const database = new NodeSqlite.DatabaseSync(leasePath);
         try {
           database.exec("PRAGMA busy_timeout = 0; BEGIN EXCLUSIVE;");
           return {
