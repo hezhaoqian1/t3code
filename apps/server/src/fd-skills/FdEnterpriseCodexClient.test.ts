@@ -1,3 +1,5 @@
+import * as Schema from "effect/Schema";
+import { it as effectIt } from "@effect/vitest";
 import { describe, expect, it, vi } from "@effect/vitest";
 
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
@@ -38,22 +40,22 @@ function jsonResponse(data: unknown, status = 200): Response {
 }
 
 describe("FdEnterpriseCodexClient", () => {
-  it("delivers audited rejection guidance and retry policy to the model", async () => {
-    const message =
-      "绑定查询被规则拒绝；请使用 fd_bindings_check_multiple_advisors，不要原样重试。";
-    const client = new FdEnterpriseCodexClient({
-      credentials: async () => credentials,
-      fetch: async () =>
-        jsonResponse({
-          success: false,
-          code: "binding_filter_required",
-          message,
-          audit_id: turnId,
-          retryable: false,
-        }),
-    });
-    const output = await Effect.runPromise(
-      executeFdEnterpriseToolCall(client, {
+  effectIt.live("delivers audited rejection guidance and retry policy to the model", () =>
+    Effect.gen(function* () {
+      const message =
+        "绑定查询被规则拒绝；请使用 fd_bindings_check_multiple_advisors，不要原样重试。";
+      const client = new FdEnterpriseCodexClient({
+        credentials: async () => credentials,
+        fetch: async () =>
+          jsonResponse({
+            success: false,
+            code: "binding_filter_required",
+            message,
+            audit_id: turnId,
+            retryable: false,
+          }),
+      });
+      const output = yield* executeFdEnterpriseToolCall(client, {
         skillVersionId: 9,
         releaseDigest,
         clientThreadId,
@@ -62,18 +64,22 @@ describe("FdEnterpriseCodexClient", () => {
         callId: "call-1",
         tool: "fd_data_query",
         arguments: {},
-      }),
-    );
-    expect(output.success).toBe(false);
-    expect(JSON.parse(output.contentItems[0]!.text)).toEqual({
-      error: {
-        code: "binding_filter_required",
-        message,
-        audit_id: turnId,
-        retryable: false,
-      },
-    });
-  });
+      });
+      expect(output.success).toBe(false);
+      expect(
+        yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(
+          output.contentItems[0]!.text,
+        ),
+      ).toEqual({
+        error: {
+          code: "binding_filter_required",
+          message,
+          audit_id: turnId,
+          retryable: false,
+        },
+      });
+    }),
+  );
 
   it("does not expose unaudited or unknown gateway errors to the model", async () => {
     for (const code of ["binding_filter_required", "private_internal_error"]) {

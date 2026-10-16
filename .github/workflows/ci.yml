@@ -13,7 +13,7 @@ concurrency:
 jobs:
   check:
     name: Check
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -40,7 +40,11 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Check
-        run: vp check
+        run: |
+          status=0
+          vp check > "$RUNNER_TEMP/vp-check.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/vp-check.log"
+          exit "$status"
 
       - name: Check native Harmony client contract
         run: node scripts/check-harmony-native.mjs
@@ -58,11 +62,12 @@ jobs:
         run: |
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
-          grep -n "__clerk_internal_electron_passkeys" apps/desktop/dist-electron/preload.cjs
+          grep -n "FD_ACCOUNT_LOGIN_CHANNEL" apps/desktop/dist-electron/preload.cjs
+          grep -n "OPEN_PATH_CHANNEL" apps/desktop/dist-electron/preload.cjs
 
   test:
     name: Test
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -115,7 +120,7 @@ jobs:
 
   release_smoke:
     name: Release Smoke
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout

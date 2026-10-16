@@ -1,10 +1,10 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
-const root = resolve("test-artifacts/acceptance-020");
+const root = NodePath.resolve("test-artifacts/acceptance-020");
 const textName = "results-V4Flash-V4Pro-QwenMax-QwenFlash-GLM5.2-KimiK3-release-023-text.json";
 const visualName = "results-V4Flash-V4Pro-KimiK3-release-023-visual.json";
-const read = async (name) => JSON.parse(await readFile(`${root}/${name}`, "utf8"));
+const read = async (name) => JSON.parse(await NodeFSP.readFile(`${root}/${name}`, "utf8"));
 const text = await read(textName);
 const visual = await read(visualName);
 const unsupported = await read("results-unsupported-visual.json");
@@ -111,7 +111,7 @@ ${rows}
 
 完整截图与样本位于本报告同目录。
 `;
-await writeFile(`${root}/acceptance-report.md`, report);
+await NodeFSP.writeFile(`${root}/acceptance-report.md`, report);
 console.log(
   JSON.stringify({
     complete,

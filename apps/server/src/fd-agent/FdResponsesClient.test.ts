@@ -8,7 +8,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { it } from "@effect/vitest";
+import { describe, expect, vi } from "vite-plus/test";
 
 import { makeStore } from "../fd/FdRuntimeCredentialStore.ts";
 import { FdResponsesClient, FdToolValidatorCache } from "./FdResponsesClient.ts";
@@ -509,24 +510,24 @@ describe("FdResponsesClient", () => {
     ).resolves.toMatchObject({ error: { kind: "timeout" } });
   });
 
-  it.each(["clear", "replacement"] as const)(
+  it.live.each(["clear", "replacement"] as const)(
     "invalidates an active request after credential %s",
-    async (change) => {
-      const store = await makePopulatedStore();
-      const started = Promise.withResolvers<void>();
-      const client = new FdResponsesClient(store.service, {
-        fetch: abortableFetch(() => started.resolve()),
-      });
-      const pending = collectFailure(
-        client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
-      );
-      await started.promise;
+    (change) =>
+      Effect.gen(function* () {
+        const store = yield* makePopulatedStore();
+        const started = Promise.withResolvers<void>();
+        const client = new FdResponsesClient(store.service, {
+          fetch: abortableFetch(() => started.resolve()),
+        });
+        const pending = collectFailure(
+          client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+        );
+        yield* Effect.promise(() => started.promise);
 
-      if (change === "clear") {
-        await Effect.runPromise(store.clear);
-      } else {
-        await Effect.runPromise(
-          store.apply({
+        if (change === "clear") {
+          yield* store.clear;
+        } else {
+          yield* store.apply({
             version: 1,
             type: "set",
             credentials: {
@@ -534,89 +535,88 @@ describe("FdResponsesClient", () => {
               runtimeApiKey: "replacement-runtime-key",
               generation: 2,
             },
-          }),
-        );
-      }
+          });
+        }
 
-      const result = await pending;
-      expect(result.events.some((event) => event.type === "completed")).toBe(false);
-      expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
-    },
+        const result = yield* Effect.promise(() => pending);
+        expect(result.events.some((event) => event.type === "completed")).toBe(false);
+        expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
+      }),
   );
 
-  it("continues an active request after a generation-only republish", async () => {
-    const store = await makePopulatedStore();
-    const started = Promise.withResolvers<void>();
-    const response = Promise.withResolvers<Response>();
-    const client = new FdResponsesClient(store.service, {
-      fetch: vi.fn(async () => {
-        started.resolve();
-        return response.promise;
-      }),
-    });
-    const pending = collectFailure(
-      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
-    );
-    await started.promise;
+  it.live("continues an active request after a generation-only republish", () =>
+    Effect.gen(function* () {
+      const store = yield* makePopulatedStore();
+      const started = Promise.withResolvers<void>();
+      const response = Promise.withResolvers<Response>();
+      const client = new FdResponsesClient(store.service, {
+        fetch: vi.fn(async () => {
+          started.resolve();
+          return response.promise;
+        }),
+      });
+      const pending = collectFailure(
+        client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+      );
+      yield* Effect.promise(() => started.promise);
 
-    await Effect.runPromise(
-      store.apply({
+      yield* store.apply({
         version: 1,
         type: "set",
         credentials: { ...credentials(), generation: 2 },
-      }),
-    );
-    await Effect.runPromise(Effect.sleep("10 millis"));
-    response.resolve(sseResponse(textEvents("resp-generation-refresh", "done")));
+      });
+      yield* Effect.sleep("10 millis");
+      response.resolve(sseResponse(textEvents("resp-generation-refresh", "done")));
 
-    const result = await pending;
-    expect(result.error).toBeUndefined();
-    expect(result.events.at(-1)).toEqual({ type: "completed", finishReason: "stop" });
-  });
+      const result = yield* Effect.promise(() => pending);
+      expect(result.error).toBeUndefined();
+      expect(result.events.at(-1)).toEqual({ type: "completed", finishReason: "stop" });
+    }),
+  );
 
-  it("invalidates an active request when the authorized model list changes", async () => {
-    const initial: FdServerRuntimeCredentialProjection = {
-      ...credentials(),
-      policy: { ...credentials().policy, models: FD_RUNTIME_MODELS },
-    };
-    const store = await makePopulatedStore(initial);
-    const started = Promise.withResolvers<void>();
-    const onAbort = vi.fn();
-    const client = new FdResponsesClient(store.service, {
-      fetch: abortableFetch(() => started.resolve(), onAbort),
-    });
-    const pending = collectFailure(
-      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
-    );
-    await started.promise;
+  it.live("invalidates an active request when the authorized model list changes", () =>
+    Effect.gen(function* () {
+      const initial: FdServerRuntimeCredentialProjection = {
+        ...credentials(),
+        policy: { ...credentials().policy, models: FD_RUNTIME_MODELS },
+      };
+      const store = yield* makePopulatedStore(initial);
+      const started = Promise.withResolvers<void>();
+      const onAbort = vi.fn();
+      const client = new FdResponsesClient(store.service, {
+        fetch: abortableFetch(() => started.resolve(), onAbort),
+      });
+      const pending = collectFailure(
+        client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+      );
+      yield* Effect.promise(() => started.promise);
 
-    await Effect.runPromise(
-      store.apply({
+      yield* store.apply({
         version: 1,
         type: "set",
         credentials: { ...initial, policy: credentials().policy, generation: 2 },
-      }),
-    );
+      });
 
-    const result = await pending;
-    expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
-    expect(onAbort).toHaveBeenCalledOnce();
-  });
+      const result = yield* Effect.promise(() => pending);
+      expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
+      expect(onAbort).toHaveBeenCalledOnce();
+    }),
+  );
 
-  it("keeps listening after an equivalent refresh and aborts on a later replacement", async () => {
-    const store = await makePopulatedStore();
-    const started = Promise.withResolvers<void>();
-    const onAbort = vi.fn();
-    const client = new FdResponsesClient(store.service, {
-      fetch: abortableFetch(() => started.resolve(), onAbort),
-    });
-    const pending = collectFailure(
-      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
-    );
-    await started.promise;
+  it.live("keeps listening after an equivalent refresh and aborts on a later replacement", () =>
+    Effect.gen(function* () {
+      const store = yield* makePopulatedStore();
+      const started = Promise.withResolvers<void>();
+      const onAbort = vi.fn();
+      const client = new FdResponsesClient(store.service, {
+        fetch: abortableFetch(() => started.resolve(), onAbort),
+      });
+      const pending = collectFailure(
+        client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+      );
+      yield* Effect.promise(() => started.promise);
 
-    await Effect.runPromise(
-      store.apply({
+      yield* store.apply({
         version: 1,
         type: "set",
         credentials: {
@@ -626,13 +626,11 @@ describe("FdResponsesClient", () => {
           policy: { ...credentials().policy, expiresAt: 2_000_000_100 },
           generation: 2,
         },
-      }),
-    );
-    await Effect.runPromise(Effect.sleep("10 millis"));
-    expect(onAbort).not.toHaveBeenCalled();
+      });
+      yield* Effect.sleep("10 millis");
+      expect(onAbort).not.toHaveBeenCalled();
 
-    await Effect.runPromise(
-      store.apply({
+      yield* store.apply({
         version: 1,
         type: "set",
         credentials: {
@@ -640,30 +638,30 @@ describe("FdResponsesClient", () => {
           runtimeApiKey: "replacement-runtime-key",
           generation: 3,
         },
-      }),
-    );
-    const result = await pending;
-    expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
-    expect(onAbort).toHaveBeenCalledOnce();
-  });
+      });
+      const result = yield* Effect.promise(() => pending);
+      expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
+      expect(onAbort).toHaveBeenCalledOnce();
+    }),
+  );
 
-  it("uses a renewed deadline instead of the prior credential expiry", async () => {
-    const startedAt = performance.now();
-    const initial = credentials({ accessExpiresAt: 2, policyExpiresAt: 100 });
-    const store = await makePopulatedStore(initial);
-    const started = Promise.withResolvers<void>();
-    const onAbort = vi.fn();
-    const client = new FdResponsesClient(store.service, {
-      now: () => 1_900 + (performance.now() - startedAt),
-      fetch: abortableFetch(() => started.resolve(), onAbort),
-    });
-    const pending = collectFailure(
-      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
-    );
-    await started.promise;
+  it.live("uses a renewed deadline instead of the prior credential expiry", () =>
+    Effect.gen(function* () {
+      const startedAt = performance.now();
+      const initial = credentials({ accessExpiresAt: 2, policyExpiresAt: 100 });
+      const store = yield* makePopulatedStore(initial);
+      const started = Promise.withResolvers<void>();
+      const onAbort = vi.fn();
+      const client = new FdResponsesClient(store.service, {
+        now: () => 1_900 + (performance.now() - startedAt),
+        fetch: abortableFetch(() => started.resolve(), onAbort),
+      });
+      const pending = collectFailure(
+        client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+      );
+      yield* Effect.promise(() => started.promise);
 
-    await Effect.runPromise(
-      store.apply({
+      yield* store.apply({
         version: 1,
         type: "set",
         credentials: {
@@ -672,31 +670,31 @@ describe("FdResponsesClient", () => {
           accessExpiresAt: 10,
           generation: 2,
         },
-      }),
-    );
-    await Effect.runPromise(Effect.sleep("150 millis"));
-    expect(onAbort).not.toHaveBeenCalled();
+      });
+      yield* Effect.sleep("150 millis");
+      expect(onAbort).not.toHaveBeenCalled();
 
-    await Effect.runPromise(store.clear);
-    const result = await pending;
-    expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
-  });
+      yield* store.clear;
+      const result = yield* Effect.promise(() => pending);
+      expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
+    }),
+  );
 
-  it("expires when an equivalent refresh shortens the deadline into the past", async () => {
-    const initial = credentials({ accessExpiresAt: 100, policyExpiresAt: 100 });
-    const store = await makePopulatedStore(initial);
-    const started = Promise.withResolvers<void>();
-    const client = new FdResponsesClient(store.service, {
-      now: () => 5_000,
-      fetch: abortableFetch(() => started.resolve()),
-    });
-    const pending = collectFailure(
-      client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
-    );
-    await started.promise;
+  it.live("expires when an equivalent refresh shortens the deadline into the past", () =>
+    Effect.gen(function* () {
+      const initial = credentials({ accessExpiresAt: 100, policyExpiresAt: 100 });
+      const store = yield* makePopulatedStore(initial);
+      const started = Promise.withResolvers<void>();
+      const client = new FdResponsesClient(store.service, {
+        now: () => 5_000,
+        fetch: abortableFetch(() => started.resolve()),
+      });
+      const pending = collectFailure(
+        client.stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() }),
+      );
+      yield* Effect.promise(() => started.promise);
 
-    await Effect.runPromise(
-      store.apply({
+      yield* store.apply({
         version: 1,
         type: "set",
         credentials: {
@@ -705,12 +703,12 @@ describe("FdResponsesClient", () => {
           accessExpiresAt: 4,
           generation: 2,
         },
-      }),
-    );
+      });
 
-    const result = await pending;
-    expect(result.error).toMatchObject({ kind: "credentials_expired" });
-  });
+      const result = yield* Effect.promise(() => pending);
+      expect(result.error).toMatchObject({ kind: "credentials_expired" });
+    }),
+  );
 
   it("expires credentials during an active request with a distinct error", async () => {
     const startedAt = performance.now();
@@ -747,26 +745,30 @@ describe("FdResponsesClient", () => {
     expect(activeSubscriptions).toBe(0);
   });
 
-  it("does not emit a terminal success when credentials clear between stream events", async () => {
-    const store = await makePopulatedStore();
-    const client = new FdResponsesClient(store.service, {
-      fetch: vi.fn(async () => sseResponse(textEvents("resp-race", "done"))),
-    });
-    const iterator = client
-      .stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() })
-      [Symbol.asyncIterator]();
-    const first = await iterator.next();
-    expect(first.value).toEqual({
-      type: "response-metadata",
-      responseId: "resp-race",
-      model: FD_RESPONSES_MODEL,
-    });
+  it.live("does not emit a terminal success when credentials clear between stream events", () =>
+    Effect.gen(function* () {
+      const store = yield* makePopulatedStore();
+      const client = new FdResponsesClient(store.service, {
+        fetch: vi.fn(async () => sseResponse(textEvents("resp-race", "done"))),
+      });
+      const iterator = client
+        .stream({ model: FD_RESPONSES_MODEL, round: 1, input: userInput() })
+        [Symbol.asyncIterator]();
+      const first = yield* Effect.promise(() => iterator.next());
+      expect(first.value).toEqual({
+        type: "response-metadata",
+        responseId: "resp-race",
+        model: FD_RESPONSES_MODEL,
+      });
 
-    await Effect.runPromise(store.clear);
-    const result = await collectFailure({ [Symbol.asyncIterator]: () => iterator });
-    expect(result.events.some((event) => event.type === "completed")).toBe(false);
-    expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
-  });
+      yield* store.clear;
+      const result = yield* Effect.promise(() =>
+        collectFailure({ [Symbol.asyncIterator]: () => iterator }),
+      );
+      expect(result.events.some((event) => event.type === "completed")).toBe(false);
+      expect(result.error).toMatchObject({ kind: "credentials_invalidated" });
+    }),
+  );
 
   it("rejects premature close, malformed data, missing metadata, and wrong model identity", async () => {
     await expectKind(
@@ -938,11 +940,11 @@ function largeSchema(padding: string) {
   };
 }
 
-async function makePopulatedStore(value = credentials()) {
-  const store = await Effect.runPromise(makeStore());
-  await Effect.runPromise(store.apply({ version: 1, type: "set", credentials: value }));
+const makePopulatedStore = Effect.fn(function* (value = credentials()) {
+  const store = yield* makeStore();
+  yield* store.apply({ version: 1, type: "set", credentials: value });
   return store;
-}
+});
 
 async function collect(stream: AsyncIterable<FdResponsesEvent>): Promise<FdResponsesEvent[]> {
   const events: FdResponsesEvent[] = [];

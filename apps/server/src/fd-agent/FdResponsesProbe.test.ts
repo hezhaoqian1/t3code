@@ -1,6 +1,6 @@
 import { FdResponsesError, type FdResponsesEvent } from "./FdResponsesProtocol.ts";
 import { readProbeCredentials, runFdResponsesProbe } from "./FdResponsesProbe.ts";
-import { Readable } from "node:stream";
+import * as NodeStream from "node:stream";
 import { describe, expect, it } from "vite-plus/test";
 
 describe("FD Responses real probe", () => {
@@ -12,7 +12,7 @@ describe("FD Responses real probe", () => {
         yield {
           type: "response-metadata",
           responseId: `response-${call}`,
-          model: "deepseek-v4-flash",
+          model: "deepseek-flash",
         };
         if (call === 1) {
           yield { type: "reasoning-delta", text: "private reasoning summary" };
@@ -73,7 +73,7 @@ describe("FD Responses real probe", () => {
 
   it("decodes the private stdin projection without accepting renderer-safe substitutes", async () => {
     const credentials = await readProbeCredentials(
-      Readable.from([
+      NodeStream.Readable.from([
         JSON.stringify({
           userId: 31,
           runtimeTokenId: 41,
@@ -84,7 +84,7 @@ describe("FD Responses real probe", () => {
           policy: {
             version: 1,
             capability: "general_assistant",
-            model: "deepseek-v4-flash",
+            model: "deepseek-flash",
             expiresAt: 2_000_000_000,
           },
           generation: 1,
@@ -93,7 +93,9 @@ describe("FD Responses real probe", () => {
     );
     expect(credentials.newApiOrigin).toBe("http://127.0.0.1:3001");
     await expect(
-      readProbeCredentials(Readable.from([JSON.stringify({ model: "deepseek-v4-flash" })])),
+      readProbeCredentials(
+        NodeStream.Readable.from([JSON.stringify({ model: "deepseek-v4-flash" })]),
+      ),
     ).rejects.toMatchObject({ kind: "invalid_request" });
   });
 });

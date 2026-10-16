@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { isAbsolute } from "node:path";
+import * as NodePath from "node:path";
 
 import { FD_CODEX_API_KEY_ENV } from "./FdManagedCodexHome.ts";
 
@@ -62,7 +62,7 @@ function makeBaseCodexChildEnvironment(input: {
   readonly connectorConfigDir?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
 }): NodeJS.ProcessEnv {
-  if (!isAbsolute(input.codexHome)) {
+  if (!NodePath.isAbsolute(input.codexHome)) {
     throw new Error("Managed CODEX_HOME must be absolute");
   }
   const source = input.inheritedEnvironment ?? process.env;
@@ -74,11 +74,11 @@ function makeBaseCodexChildEnvironment(input: {
   if (input.connectorBinPath) {
     const inheritedPath = environment.PATH ?? "";
     environment.PATH = inheritedPath
-      ? `${input.connectorBinPath}${process.platform === "win32" ? ";" : ":"}${inheritedPath}`
+      ? `${input.connectorBinPath}${NodePath.delimiter}${inheritedPath}`
       : input.connectorBinPath;
   }
   if (input.connectorConfigDir) {
-    if (!isAbsolute(input.connectorConfigDir)) {
+    if (!NodePath.isAbsolute(input.connectorConfigDir)) {
       throw new Error("Connector config directory must be absolute");
     }
     environment.LARKSUITE_CLI_CONFIG_DIR = input.connectorConfigDir;

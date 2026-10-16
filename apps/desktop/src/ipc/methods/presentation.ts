@@ -10,16 +10,16 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as NodeChildProcess from "node:child_process";
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { promisify } from "node:util";
+import * as NodeUtil from "node:util";
 import { BrowserWindow } from "electron";
 
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as IpcChannels from "../channels.ts";
 import * as DesktopIpc from "../DesktopIpc.ts";
 
-const spawn = promisify(NodeChildProcess.execFile);
+const spawn = NodeUtil.promisify(NodeChildProcess.execFile);
 
 export function isPathInside(root: string, candidate: string): boolean {
   const normalizedRoot = NodePath.resolve(root);
@@ -44,9 +44,9 @@ async function resolveTaskProject(
   if (!isPathInside(tasksRoot, resolved) && !isPathInside(officeWorkspaceRoot, resolved))
     throw new Error("presentation-project-outside-task-workspace");
   const [realTasksRoot, realOfficeWorkspaceRoot, realProjectPath] = await Promise.all([
-    NodeFS.realpath(tasksRoot),
-    NodeFS.realpath(officeWorkspaceRoot).catch(() => officeWorkspaceRoot),
-    NodeFS.realpath(resolved),
+    NodeFSP.realpath(tasksRoot),
+    NodeFSP.realpath(officeWorkspaceRoot).catch(() => officeWorkspaceRoot),
+    NodeFSP.realpath(resolved),
   ]);
   if (
     !isPathInside(realTasksRoot, realProjectPath) &&
@@ -66,7 +66,7 @@ export const exportPresentation = DesktopIpc.makeIpcMethod({
     const resolvedProjectPath = yield* Effect.tryPromise(() =>
       resolveTaskProject(environment, projectPath),
     );
-    const stat = yield* Effect.tryPromise(() => NodeFS.stat(resolvedProjectPath));
+    const stat = yield* Effect.tryPromise(() => NodeFSP.stat(resolvedProjectPath));
     if (!stat.isDirectory())
       return yield* Effect.die(new Error("presentation-project-not-directory"));
     const exporter = environment.isPackaged
@@ -86,7 +86,7 @@ export const exportPresentation = DesktopIpc.makeIpcMethod({
       resolvedProjectPath,
       `${NodePath.basename(resolvedProjectPath)}.pptx`,
     );
-    yield* Effect.tryPromise(() => NodeFS.rm(outputPath, { force: true }));
+    yield* Effect.tryPromise(() => NodeFSP.rm(outputPath, { force: true }));
     yield* Effect.tryPromise(async () => {
       await spawn(
         process.execPath,
@@ -116,7 +116,7 @@ export const exportPresentation = DesktopIpc.makeIpcMethod({
       );
     });
     const pagesPath = environment.path.join(resolvedProjectPath, "pages");
-    const entries = yield* Effect.tryPromise(() => NodeFS.readdir(pagesPath));
+    const entries = yield* Effect.tryPromise(() => NodeFSP.readdir(pagesPath));
     const pageCount = entries.filter((name) => name.endsWith(".page")).length;
     if (pageCount < 1) return yield* Effect.die(new Error("presentation-pages-missing"));
     return { projectPath: resolvedProjectPath, pptxPath: outputPath, pageCount };
@@ -132,7 +132,7 @@ export const openPresentation = DesktopIpc.makeIpcMethod({
     const resolvedProjectPath = yield* Effect.tryPromise(() =>
       resolveTaskProject(environment, projectPath),
     );
-    const stat = yield* Effect.tryPromise(() => NodeFS.stat(resolvedProjectPath));
+    const stat = yield* Effect.tryPromise(() => NodeFSP.stat(resolvedProjectPath));
     if (!stat.isDirectory())
       return yield* Effect.die(new Error("presentation-project-not-directory"));
     const editorPath = environment.isPackaged
@@ -181,7 +181,7 @@ export const readPresentationProject = DesktopIpc.makeIpcMethod({
     );
     const files: Array<{ path: string; content: string; dataUrl?: string }> = [];
     const walk = async (directory: string, prefix = ""): Promise<void> => {
-      for (const entry of await NodeFS.readdir(directory, { withFileTypes: true })) {
+      for (const entry of await NodeFSP.readdir(directory, { withFileTypes: true })) {
         if (entry.name === ".DS_Store" || entry.name === ".git") continue;
         const absolute = NodePath.join(directory, entry.name);
         const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -189,7 +189,7 @@ export const readPresentationProject = DesktopIpc.makeIpcMethod({
         else if (entry.isFile()) {
           const ext = NodePath.extname(entry.name).toLowerCase();
           if (![".pptd", ".page", ".png", ".jpg", ".jpeg", ".gif", ".svg"].includes(ext)) continue;
-          const bytes = await NodeFS.readFile(absolute);
+          const bytes = await NodeFSP.readFile(absolute);
           const isImage = [".png", ".jpg", ".jpeg", ".gif", ".svg"].includes(ext);
           files.push({
             path: relative,
@@ -228,18 +228,18 @@ export const writePresentationFile = DesktopIpc.makeIpcMethod({
     if (!isPathInside(resolvedProjectPath, target))
       return yield* Effect.die(new Error("presentation-file-outside-project"));
     const parent = NodePath.dirname(target);
-    const realParent = yield* Effect.tryPromise(() => NodeFS.realpath(parent).catch(() => parent));
+    const realParent = yield* Effect.tryPromise(() => NodeFSP.realpath(parent).catch(() => parent));
     if (!isPathInside(resolvedProjectPath, realParent)) {
       return yield* Effect.die(new Error("presentation-file-outside-project"));
     }
     const existingTarget = yield* Effect.tryPromise(() =>
-      NodeFS.realpath(target).catch(() => target),
+      NodeFSP.realpath(target).catch(() => target),
     );
     if (!isPathInside(resolvedProjectPath, existingTarget)) {
       return yield* Effect.die(new Error("presentation-file-outside-project"));
     }
-    yield* Effect.tryPromise(() => NodeFS.mkdir(NodePath.dirname(target), { recursive: true }));
-    yield* Effect.tryPromise(() => NodeFS.writeFile(target, content, "utf8"));
+    yield* Effect.tryPromise(() => NodeFSP.mkdir(NodePath.dirname(target), { recursive: true }));
+    yield* Effect.tryPromise(() => NodeFSP.writeFile(target, content, "utf8"));
   }),
 });
 
