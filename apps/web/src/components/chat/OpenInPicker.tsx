@@ -34,6 +34,8 @@ import {
 import { cn, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { shellEnvironment } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { ensureLocalApi } from "~/localApi";
+import { toastManager } from "../ui/toast";
 
 type OpenInOption = {
   label: string;
@@ -190,6 +192,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   openInCwd,
   compact = false,
   enableShortcut = true,
+  folderOnly = false,
 }: {
   environmentId: EnvironmentId;
   keybindings: ResolvedKeybindingsConfig;
@@ -197,20 +200,43 @@ export const OpenInPicker = memo(function OpenInPicker({
   openInCwd: string | null;
   compact?: boolean;
   enableShortcut?: boolean;
+  folderOnly?: boolean;
 }) {
   const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, "open in editor");
-  const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
+  const effectiveEditors = useMemo(
+    () =>
+      folderOnly
+        ? ["file-manager" as const]
+        : window.desktopBridge
+          ? Array.from(new Set([...availableEditors, "file-manager" as const]))
+          : availableEditors,
+    [availableEditors, folderOnly],
+  );
+  const [preferredEditor, setPreferredEditor] = usePreferredEditor(effectiveEditors);
   const options = useMemo(
-    () => resolveOptions(navigator.platform, availableEditors),
-    [availableEditors],
+    () => resolveOptions(navigator.platform, effectiveEditors),
+    [effectiveEditors],
   );
   const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;
 
   const openInEditor = useCallback(
-    (editorId: EditorId | null) => {
+    async (editorId: EditorId | null) => {
       if (!openInCwd) return;
       const editor = editorId ?? preferredEditor;
       if (!editor) return;
+      if (editor === "file-manager" && window.desktopBridge) {
+        try {
+          await ensureLocalApi().shell.openPath(openInCwd);
+          if (!folderOnly) setPreferredEditor(editor);
+        } catch {
+          toastManager.add({
+            type: "error",
+            title: "无法打开文件夹",
+            description: `请确认目录仍然存在且有访问权限：${openInCwd}`,
+          });
+        }
+        return;
+      }
       const result = openInEditorMutation({
         environmentId,
         input: {
@@ -221,7 +247,14 @@ export const OpenInPicker = memo(function OpenInPicker({
       setPreferredEditor(editor);
       return result;
     },
-    [environmentId, openInCwd, openInEditorMutation, preferredEditor, setPreferredEditor],
+    [
+      environmentId,
+      openInCwd,
+      openInEditorMutation,
+      preferredEditor,
+      setPreferredEditor,
+      folderOnly,
+    ],
   );
 
   const openFavoriteEditorShortcutLabel = useMemo(
@@ -237,24 +270,27 @@ export const OpenInPicker = memo(function OpenInPicker({
       if (!preferredEditor) return;
 
       e.preventDefault();
-      void openInEditorMutation({
-        environmentId,
-        input: {
-          cwd: openInCwd,
-          editor: preferredEditor,
-        },
-      });
+      void openInEditor(preferredEditor);
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [
-    enableShortcut,
-    environmentId,
-    keybindings,
-    openInCwd,
-    openInEditorMutation,
-    preferredEditor,
-  ]);
+  }, [enableShortcut, keybindings, openInCwd, openInEditor, preferredEditor]);
+
+  if (folderOnly) {
+    return (
+      <Button
+        aria-label="打开文件夹"
+        title="打开任务文件夹"
+        size="xs"
+        variant="outline"
+        disabled={!openInCwd}
+        onClick={() => void openInEditor("file-manager")}
+      >
+        <FolderClosedIcon aria-hidden="true" className="size-3.5" />
+        <span className="hidden @3xl/header-actions:inline">打开文件夹</span>
+      </Button>
+    );
+  }
 
   return (
     <Group aria-label="在编辑器中打开">

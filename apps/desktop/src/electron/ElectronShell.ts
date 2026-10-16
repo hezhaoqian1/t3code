@@ -51,7 +51,10 @@ export const make = ElectronShell.of({
       return Effect.succeed(false);
     }
     return Effect.promise(() =>
-      Electron.shell.openPath(rawPath).then((error) => error.length === 0),
+      Electron.shell.openPath(rawPath).then(
+        (error) => error.length === 0,
+        () => false,
+      ),
     );
   },
   copyText: (text) =>
