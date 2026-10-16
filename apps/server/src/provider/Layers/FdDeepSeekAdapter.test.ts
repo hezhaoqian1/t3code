@@ -16,11 +16,13 @@ import {
   FD_RUNTIME_VISION_MODEL,
 } from "@t3tools/contracts/fd/runtime-credentials";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
 
 import {
@@ -91,6 +93,77 @@ const startInput = {
 
 const waitFor = (predicate: () => boolean) =>
   Effect.promise(() => vi.waitFor(() => expect(predicate()).toBe(true)));
+
+it.effect("explains upstream model removal for ordinary and FD Skill task events", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const upstreamEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+      const ordinary = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([completed])),
+      });
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([])),
+        ordinaryAdapter: {
+          ...ordinary,
+          sendTurn: (input) =>
+            Effect.succeed({ threadId: input.threadId, turnId: TurnId.make("upstream-turn") }),
+          streamEvents: Stream.fromQueue(upstreamEvents),
+        },
+      });
+      yield* adapter.startSession(startInput);
+      for (const fdSkillVersionId of [undefined, 10004]) {
+        // Only the profile selection matters here; model output is supplied below.
+        const turn = yield* adapter.sendTurn({
+          threadId,
+          input: "report",
+          ...(fdSkillVersionId ? { fdSkillVersionId } : {}),
+        });
+        const observed = yield* adapter.streamEvents.pipe(
+          Stream.filter((event) => event.type === "turn.completed"),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Queue.offer(upstreamEvents, {
+          eventId: EventId.make(`model-error-${fdSkillVersionId}`),
+          provider: FD_DEEPSEEK_DRIVER_KIND,
+          threadId,
+          turnId: turn.turnId,
+          createdAt: "2026-10-16T00:00:00.000Z",
+          type: "turn.completed",
+          payload: {
+            state: "failed",
+            errorMessage: '503 {"code":"model_not_found","message":"secret"}',
+          },
+        });
+        const event = yield* Fiber.join(observed);
+        expect(Option.isSome(event) && event.value.payload).toMatchObject({
+          state: "failed",
+          errorMessage: "当前模型已不可用，请切换 Flash 重试。",
+        });
+      }
+      yield* adapter.stopAll();
+      yield* ordinary.stopAll();
+    }),
+  ),
+);
+
+it.effect("rejects a revoked old session instead of silently sending with Flash", () =>
+  Effect.gen(function* () {
+    let available = true;
+    const adapter = yield* makeFdDeepSeekAdapter({
+      kernel: new FdAgentKernel(streamer([])),
+      isSupportedModel: () => available,
+    });
+    yield* adapter.startSession({
+      ...startInput,
+      modelSelection: { ...startInput.modelSelection, model: "qwen3.8-max" },
+    });
+    available = false;
+    const error = yield* adapter.sendTurn({ threadId, input: "continue report" }).pipe(Effect.flip);
+    expect(error.message).toContain("切换 Flash 重试");
+    yield* adapter.stopAll();
+  }),
+);
 
 const authorizedCatalog = {
   skills: [
@@ -216,7 +289,7 @@ describe("FdDeepSeekAdapter", () => {
           })
           .pipe(Effect.flip);
         expect(invalidStart).toMatchObject({
-          issue: "The selected model is not advertised by this provider.",
+          issue: "当前模型已不可用，请切换 Flash 重试。",
         });
         const canonicalStart = yield* adapter.startSession({
           ...startInput,
@@ -1780,15 +1853,17 @@ describe("FdDeepSeekAdapter", () => {
   it.effect("publishes a presentation artifact for an ordinary Codex turn", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() =>
-        fs.mkdtemp(path.join(os.tmpdir(), "fd-presentation-turn-")),
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-presentation-turn-")),
       );
-      const hostProjectRoot = path.join(root, "host-project");
-      const project = path.join(root, "presentations", "market-review");
-      yield* Effect.promise(() => fs.mkdir(hostProjectRoot, { recursive: true }));
-      yield* Effect.promise(() => fs.mkdir(path.join(project, "pages"), { recursive: true }));
+      const hostProjectRoot = NodePath.join(root, "host-project");
+      const project = NodePath.join(root, "presentations", "market-review");
+      yield* Effect.promise(() => NodeFSP.mkdir(hostProjectRoot, { recursive: true }));
       yield* Effect.promise(() =>
-        fs.writeFile(
-          path.join(project, "market-review.pptd"),
+        NodeFSP.mkdir(NodePath.join(project, "pages"), { recursive: true }),
+      );
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          NodePath.join(project, "market-review.pptd"),
           "version: v3\npages:\n  - pages/1.page\n  - pages/2.page\n",
         ),
       );
@@ -1866,7 +1941,7 @@ describe("FdDeepSeekAdapter", () => {
           },
         },
       });
-      yield* Effect.promise(() => fs.rm(root, { recursive: true, force: true }));
+      yield* Effect.promise(() => NodeFSP.rm(root, { recursive: true, force: true }));
     }),
   );
 

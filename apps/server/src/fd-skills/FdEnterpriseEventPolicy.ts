@@ -1,5 +1,9 @@
 import type { ProviderRuntimeEvent } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import {
+  FD_MODEL_UNAVAILABLE_MESSAGE,
+  isFdModelUnavailableError,
+} from "../fd-agent/FdModelPolicy.ts";
 
 const AssistantCompletion = Schema.Struct({
   item: Schema.Struct({
@@ -12,6 +16,9 @@ const isAssistantCompletion = Schema.is(AssistantCompletion);
 
 /** Return only fixed messages: provider errors can contain enterprise data. */
 function enterpriseFailureMessage(message: string): string {
+  if (isFdModelUnavailableError(message)) {
+    return FD_MODEL_UNAVAILABLE_MESSAGE;
+  }
   if (/insufficient_user_quota|用户额度不足|预扣费额度失败/i.test(message)) {
     return "你的 FD 个人可用额度不足以继续此任务。请联系管理员调整 FD 额度后继续。";
   }

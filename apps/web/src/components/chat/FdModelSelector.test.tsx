@@ -32,6 +32,24 @@ const models = [
 ] as const;
 
 describe("FdModelSelector", () => {
+  it("does not disguise a removed model as Flash and allows switching to the only remaining model", () => {
+    const markup = renderToStaticMarkup(
+      <FdModelSelector value="qwen3.8-max" models={[models[0]]} onValueChange={vi.fn()} />,
+    );
+    expect(markup).toContain("请选择模型");
+    expect(markup).not.toContain("qwen3.8-max");
+    expect(markup).not.toContain('data-disabled=""');
+    expect(markup).not.toContain('disabled=""');
+    expect(resolveFdModelOptions([models[0]])).toEqual([FD_RUNTIME_DEFAULT_MODEL]);
+  });
+
+  it("disables selection when the backend has no available models", () => {
+    const markup = renderToStaticMarkup(
+      <FdModelSelector value="qwen3.8-max" models={[]} onValueChange={vi.fn()} />,
+    );
+    expect(markup).toContain('data-disabled=""');
+    expect(markup).not.toContain("qwen3.8-max");
+  });
   it("keeps every advertised model in provider order", () => {
     expect(
       resolveFdModelOptions([...models, { ...models[0], slug: "other-model", name: "Other" }]),

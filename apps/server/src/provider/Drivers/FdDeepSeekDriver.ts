@@ -71,7 +71,7 @@ export type FdDeepSeekDriverEnv =
   | WorkspaceFileSystem.WorkspaceFileSystem;
 
 const FD_IMAGE_MIME_TYPES = new Set(["image/gif", "image/jpeg", "image/png", "image/webp"]);
-const FD_INTERNAL_DEEPSEEK_VARIANT = /^deepseek-v4-(?:flash|pro)-(?:max|none)$/i;
+const FD_INTERNAL_DEEPSEEK_VARIANT = /^deepseek-(?:v4-)?(?:flash|pro)-(?:max|none)$/i;
 
 export function shouldAdvertiseFdModelSlug(slug: string): boolean {
   return !FD_INTERNAL_DEEPSEEK_VARIANT.test(slug.trim());
@@ -79,22 +79,28 @@ export function shouldAdvertiseFdModelSlug(slug: string): boolean {
 
 async function fetchFdUserModelSlugs(
   credentials: FdServerRuntimeCredentialProjection,
-): Promise<ReadonlyArray<string>> {
+): Promise<ReadonlyArray<string> | undefined> {
   try {
     const fetchImpl = (globalThis as typeof globalThis & { fetch: typeof fetch }).fetch;
     const response = await fetchImpl(`${credentials.newApiOrigin}/api/user/models`, {
       headers: { Authorization: `Bearer ${credentials.accessToken}` },
       signal: AbortSignal.timeout(8_000),
     });
-    if (!response.ok) return [];
-    const body = (await response.json()) as { data?: unknown };
-    return Array.isArray(body.data)
-      ? body.data.filter(
-          (value): value is string => typeof value === "string" && value.trim().length > 0,
-        )
-      : [];
+    if (!response.ok) return undefined;
+    const body = (await response.json()) as { success?: boolean; data?: unknown };
+    return body.success !== false && Array.isArray(body.data)
+      ? [
+          ...new Set(
+            body.data
+              .filter(
+                (value): value is string => typeof value === "string" && value.trim().length > 0,
+              )
+              .map((value) => value.trim()),
+          ),
+        ]
+      : undefined;
   } catch {
-    return [];
+    return undefined;
   }
 }
 
@@ -299,11 +305,16 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       }
       const userSkillCatalog = new NativeSkillCatalog();
       yield* Effect.promise(() => userSkillCatalog.refresh());
-      let authorizedDynamicModels = new Set<string>();
+      let authorizedModels = new Set(
+        Option.isSome(initialCredentialState)
+          ? yield* Effect.promise(() => fetchFdUserModelSlugs(initialCredentialState.value))
+          : [],
+      );
+      let modelCatalogOwner = enterpriseOwnerKey(initialCredentialState);
+      let modelCatalogRequest = 0;
       const adapter = yield* makeFdDeepSeekAdapter({
         instanceId,
-        isSupportedModel: (model) =>
-          isFdResponsesModelAdvertised(model) || authorizedDynamicModels.has(model),
+        isSupportedModel: (model) => authorizedModels.has(model),
         kernel,
         ordinaryAdapter,
         ordinarySessionInput: (input) =>
@@ -364,6 +375,7 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
       });
       let previousRuntimeCredential = runtimeCredentialKey(initialCredentialState);
       let previousEnterpriseOwner = enterpriseOwnerKey(initialCredentialState);
+      let previousCredentialState = initialCredentialState;
       const clearEnterpriseState = Effect.gen(function* () {
         if (Option.isSome(enterpriseRuntime)) {
           yield* enterpriseRuntime.value.clearAll();
@@ -373,16 +385,32 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
 
       const buildSnapshot = Effect.fn("buildFdDeepSeekSnapshot")(function* (
         credentialState: Option.Option<FdServerRuntimeCredentialProjection>,
-      ) {
+      ): Effect.fn.Return<ServerProvider> {
         const checkedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const authenticated = Option.isSome(credentialState);
+        const owner = enterpriseOwnerKey(credentialState);
+        if (enterpriseOwnerKey(yield* credentials.current) !== owner) {
+          return yield* buildSnapshot(yield* credentials.current);
+        }
+        const request = ++modelCatalogRequest;
+        if (owner !== modelCatalogOwner) {
+          authorizedModels = new Set();
+          modelCatalogOwner = owner;
+        }
         const dynamicSlugs = authenticated
           ? yield* Effect.promise(() => fetchFdUserModelSlugs(credentialState.value))
           : [];
-        authorizedDynamicModels = new Set(dynamicSlugs);
+        // An empty successful response revokes all models. A failed refresh
+        // preserves only this account's last authoritative catalog.
+        if (enterpriseOwnerKey(yield* credentials.current) !== owner) {
+          return yield* buildSnapshot(yield* credentials.current);
+        }
+        if (request === modelCatalogRequest && dynamicSlugs !== undefined) {
+          authorizedModels = new Set(dynamicSlugs);
+        }
         const modelCatalog = [
-          ...FD_RESPONSES_MODEL_CATALOG,
-          ...dynamicSlugs
+          ...FD_RESPONSES_MODEL_CATALOG.filter((model) => authorizedModels.has(model.slug)),
+          ...[...authorizedModels]
             .filter(
               (slug) => shouldAdvertiseFdModelSlug(slug) && !isFdResponsesModelAdvertised(slug),
             )
@@ -465,11 +493,24 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
             Promise.all([userSkillCatalog.refresh(), refreshFdSkillCatalog(credentialState)]),
           );
         }),
-        streamChanges: credentials.changes.pipe(
+        streamChanges: Stream.unwrap(
+          credentials.subscribe.pipe(
+            Effect.map((subscription) =>
+              Stream.merge(
+                subscription.changes,
+                Stream.tick("30 seconds").pipe(
+                  Stream.drop(1),
+                  Stream.mapEffect(() => credentials.current),
+                ),
+              ),
+            ),
+          ),
+        ).pipe(
           Stream.mapEffect((credentialState) =>
             Effect.gen(function* () {
               const nextRuntimeCredential = runtimeCredentialKey(credentialState);
               const nextEnterpriseOwner = enterpriseOwnerKey(credentialState);
+              const credentialChanged = credentialState !== previousCredentialState;
               if (nextEnterpriseOwner !== previousEnterpriseOwner) {
                 yield* clearEnterpriseState;
               }
@@ -481,8 +522,15 @@ export const FdDeepSeekDriver: ProviderDriver<FdDeepSeekConfig, FdDeepSeekDriver
               }
               previousRuntimeCredential = nextRuntimeCredential;
               previousEnterpriseOwner = nextEnterpriseOwner;
-              yield* Effect.promise(() => refreshFdSkillCatalog(credentialState));
-              if (Option.isSome(credentialState) && Option.isSome(enterpriseRuntime)) {
+              previousCredentialState = credentialState;
+              if (credentialChanged) {
+                yield* Effect.promise(() => refreshFdSkillCatalog(credentialState));
+              }
+              if (
+                Option.isSome(credentialState) &&
+                Option.isSome(enterpriseRuntime) &&
+                credentialChanged
+              ) {
                 yield* enterpriseRuntime.value.reloadAllHistory();
               }
               return yield* buildSnapshot(credentialState);

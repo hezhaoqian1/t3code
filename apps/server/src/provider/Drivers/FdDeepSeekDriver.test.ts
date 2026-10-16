@@ -7,6 +7,8 @@ import {
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -110,6 +112,95 @@ afterEach(() => {
 });
 
 describe("FdDeepSeekDriver", () => {
+  it.effect(
+    "syncs backend removals, empty catalogs and account switches without restoring built-ins",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* makeStore();
+          yield* store.apply({ version: 1, type: "set", credentials });
+          let models = [FD_RESPONSES_MODEL, "qwen3.8-max", "kimi-k3", "future-admin-model"];
+          let unavailable = false;
+          let holdNext = false;
+          const held = Promise.withResolvers<void>();
+          const release = Promise.withResolvers<void>();
+          vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+            if (String(input).endsWith("/api/user/models")) {
+              if (unavailable) throw new Error("offline");
+              if (holdNext) {
+                holdNext = false;
+                const stale = [...models];
+                held.resolve();
+                await release.promise;
+                return Response.json({ data: stale });
+              }
+              return Response.json({ success: true, data: models });
+            }
+            return Response.json({ data: { skills: [] } });
+          });
+          const instance = yield* FdDeepSeekDriver.create({
+            instanceId: FD_DEEPSEEK_INSTANCE_ID,
+            displayName: undefined,
+            environment: [],
+            enabled: true,
+            config: {},
+          }).pipe(
+            Effect.provideService(FdRuntimeCredentialStore, store.service),
+            Effect.provideService(WorkspaceFileSystem.WorkspaceFileSystem, workspaceFileSystem),
+            Effect.provideService(WorkspaceEntries.WorkspaceEntries, workspaceEntries),
+            Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+            Effect.provideService(VcsProcess.VcsProcess, vcsProcess),
+            Effect.provide(attachmentLayer),
+          );
+          const slugs = () =>
+            instance.snapshot.getSnapshot.pipe(
+              Effect.map((snapshot) => snapshot.models.map((model) => model.slug)),
+            );
+          expect(yield* slugs()).toEqual(models);
+          holdNext = true;
+          const staleSnapshot = yield* slugs().pipe(Effect.forkChild);
+          yield* Effect.promise(() => held.promise);
+          models = [FD_RESPONSES_MODEL, "future-admin-model", "deepseek-flash-max"];
+          expect(yield* slugs()).toEqual([FD_RESPONSES_MODEL, "future-admin-model"]);
+          release.resolve();
+          expect(yield* Fiber.join(staleSnapshot)).toEqual([
+            FD_RESPONSES_MODEL,
+            "future-admin-model",
+          ]);
+          models = [FD_RESPONSES_MODEL];
+          const polled = yield* Stream.runHead(instance.snapshot.streamChanges).pipe(
+            Effect.forkChild,
+          );
+          yield* TestClock.adjust("30 seconds");
+          const polledSnapshot = yield* Fiber.join(polled);
+          expect(
+            Option.isSome(polledSnapshot) && polledSnapshot.value.models.map((model) => model.slug),
+          ).toEqual(models);
+          const rejected = yield* instance.adapter
+            .startSession({
+              threadId: ThreadId.make("removed-model"),
+              runtimeMode: "full-access",
+              modelSelection: { instanceId: FD_DEEPSEEK_INSTANCE_ID, model: "qwen3.8-max" },
+            })
+            .pipe(Effect.flip);
+          expect(rejected.message).toContain("切换 Flash 重试");
+          unavailable = true;
+          expect(yield* slugs()).toEqual([FD_RESPONSES_MODEL]);
+          unavailable = false;
+          models = [];
+          expect(yield* slugs()).toEqual([]);
+          models = [FD_RESPONSES_MODEL];
+          expect(yield* slugs()).toEqual(models);
+          unavailable = true;
+          yield* store.apply({
+            version: 1,
+            type: "set",
+            credentials: { ...credentials, userId: 2, generation: 2 },
+          });
+          expect(yield* slugs()).toEqual([]);
+        }),
+      ),
+  );
   it("hides internal DeepSeek permission variants without blocking real dynamic models", () => {
     for (const slug of [
       "deepseek-v4-flash-max",
@@ -177,7 +268,12 @@ describe("FdDeepSeekDriver", () => {
       const officeAlias = `${root}/office-alias`;
       yield* fileSystem.makeDirectory(officeRoot);
       yield* fileSystem.makeDirectory(projectRoot);
-      yield* fileSystem.symlink(officeRoot, officeAlias);
+      if ((yield* HostProcessPlatform) === "win32") {
+        const fs = yield* Effect.promise(() => import("node:fs/promises"));
+        yield* Effect.promise(() => fs.symlink(officeRoot, officeAlias, "junction"));
+      } else {
+        yield* fileSystem.symlink(officeRoot, officeAlias);
+      }
       const canonicalOfficeRoot = yield* fileSystem.realPath(officeRoot);
 
       const contextFor = (input: {
@@ -475,44 +571,7 @@ describe("FdDeepSeekDriver", () => {
         status: "warning",
         auth: { status: "unauthenticated", type: "fd-account" },
       });
-      expect(snapshot.models).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            slug: FD_RESPONSES_MODEL,
-            name: "DeepSeek V4.1 Flash",
-            shortName: "Flash",
-            isDefault: true,
-            isCustom: false,
-          }),
-          expect.objectContaining({
-            slug: "deepseek-v4-pro",
-            name: "DeepSeek V4 Pro",
-            shortName: "V4 Pro",
-            isDefault: false,
-            isCustom: false,
-          }),
-          expect.objectContaining({
-            slug: "qwen3.8-flash",
-            name: "Qwen 3.8 Flash",
-            shortName: "Qwen Flash",
-            isDefault: false,
-            isCustom: false,
-            capabilities: expect.objectContaining({ supportsVision: true }),
-          }),
-          expect.objectContaining({
-            slug: "glm-5.2",
-            name: "GLM 5.2",
-            isDefault: false,
-            isCustom: false,
-          }),
-          expect.objectContaining({
-            slug: "kimi-k3",
-            name: "Kimi K3",
-            isDefault: false,
-            isCustom: false,
-          }),
-        ]),
-      );
+      expect(snapshot.models).toEqual([]);
       expect(snapshot).not.toHaveProperty("installed");
       expect(snapshot).not.toHaveProperty("version");
       expect(snapshot).not.toHaveProperty("updateState");
@@ -718,6 +777,12 @@ describe("FdDeepSeekDriver", () => {
               }),
               { status: 200, headers: { "Content-Type": "application/json" } },
             ),
+        );
+        const catalogFetch = fetch.getMockImplementation()!;
+        fetch.mockImplementation((input, init) =>
+          String(input).endsWith("/api/user/models")
+            ? Promise.resolve(Response.json({ data: [FD_RESPONSES_MODEL] }))
+            : catalogFetch(input, init),
         );
         const instance = yield* FdDeepSeekDriver.create({
           instanceId: FD_DEEPSEEK_INSTANCE_ID,
