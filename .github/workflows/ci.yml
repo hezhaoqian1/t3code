@@ -62,7 +62,8 @@ jobs:
         run: |
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
-          grep -n "__clerk_internal_electron_passkeys" apps/desktop/dist-electron/preload.cjs
+          grep -n "FD_ACCOUNT_LOGIN_CHANNEL" apps/desktop/dist-electron/preload.cjs
+          grep -n "OPEN_PATH_CHANNEL" apps/desktop/dist-electron/preload.cjs
 
   test:
     name: Test
