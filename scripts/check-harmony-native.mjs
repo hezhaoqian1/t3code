@@ -1,11 +1,11 @@
-import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const app = resolve(root, "apps/harmonyos-desktop");
-const read = (relativePath) => readFileSync(resolve(app, relativePath), "utf8");
+const root = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
+const app = NodePath.resolve(root, "apps/harmonyos-desktop");
+const read = (relativePath) => NodeFS.readFileSync(NodePath.resolve(app, relativePath), "utf8");
 const requiredFiles = [
   "AppScope/app.json5",
   "AppScope/resources/base/element/string.json",
@@ -25,7 +25,8 @@ const requiredFiles = [
   "oh-package.json5",
 ];
 
-for (const file of requiredFiles) assert.ok(existsSync(resolve(app, file)), `missing ${file}`);
+for (const file of requiredFiles)
+  NodeAssert.ok(NodeFS.existsSync(NodePath.resolve(app, file)), `missing ${file}`);
 
 const index = read("entry/src/main/ets/pages/Index.ets");
 const client = read("entry/src/main/ets/network/FdRuntimeClient.ets");
@@ -34,53 +35,53 @@ const store = read("entry/src/main/ets/state/FdStore.ets");
 const config = read("entry/src/main/ets/config/HarmonyConfig.ets");
 const moduleJson5 = read("entry/src/main/module.json5");
 
-assert.match(index, /@Entry/);
-assert.match(index, /DocumentViewPicker/);
-assert.match(index, /ForEach\(this\.threads/);
-assert.match(index, /ForEach\(this\.messages/);
-assert.match(index, /buildSkillSheet/);
-assert.match(index, /buildQueueSheet/);
-assert.match(index, /buildPreviewSheet/);
-assert.match(index, /connectThreadStream/);
-assert.match(index, /Web\(\{ src: this\.previewUrl/);
-assert.doesNotMatch(
+NodeAssert.match(index, /@Entry/);
+NodeAssert.match(index, /DocumentViewPicker/);
+NodeAssert.match(index, /ForEach\(this\.threads/);
+NodeAssert.match(index, /ForEach\(this\.messages/);
+NodeAssert.match(index, /buildSkillSheet/);
+NodeAssert.match(index, /buildQueueSheet/);
+NodeAssert.match(index, /buildPreviewSheet/);
+NodeAssert.match(index, /connectThreadStream/);
+NodeAssert.match(index, /Web\(\{ src: this\.previewUrl/);
+NodeAssert.doesNotMatch(
   index,
   /HARMONY_WEB_URL|USE_PACKAGED_WEB_BUNDLE|this\.webUrl|onShowFileSelector/,
 );
 
-assert.match(client, /fd-skills\/self/);
-assert.match(client, /agent\/turns/);
-assert.match(client, /agent\/desktop\/threads/);
-assert.match(client, /client: 'fd_desktop'/);
-assert.match(client, /parseLegacySse/);
-assert.match(client, /requestInStream/);
-assert.match(client, /dataReceive/);
-assert.match(client, /dataEnd/);
-assert.match(client, /attachments_require_mobile_api/);
-assert.match(client, /uploadAttachmentPart/);
-assert.match(client, /completeAttachmentUpload/);
-assert.match(client, /threadId,/);
-assert.match(client, /supportedModels/);
-assert.match(client, /getThreadHistory/);
-assert.match(client, /historyCursor/);
-assert.match(client, /identifierValue/);
-assert.match(client, /afterSequence=/);
-assert.match(client, /Authorization/);
-assert.match(transfer, /fileIo\.openSync/);
-assert.match(transfer, /fileIo\.readSync/);
-assert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
-assert.match(transfer, /wholeDigest\.digest/);
-assert.match(transfer, /uploadPickedAttachment/);
-assert.match(store, /activeTurnId/);
-assert.match(store, /this\.queuedTurns/);
-assert.match(store, /editQueued/);
-assert.match(store, /this\.models/);
-assert.match(store, /this\.applyEvent\(event\)/);
-assert.match(store, /loadOlderHistory/);
-assert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
-assert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
-assert.match(config, /deepseek-flash/);
-assert.match(moduleJson5, /ohos\.permission\.INTERNET/);
-assert.match(moduleJson5, /deviceTypes/);
+NodeAssert.match(client, /fd-skills\/self/);
+NodeAssert.match(client, /agent\/turns/);
+NodeAssert.match(client, /agent\/desktop\/threads/);
+NodeAssert.match(client, /client: 'fd_desktop'/);
+NodeAssert.match(client, /parseLegacySse/);
+NodeAssert.match(client, /requestInStream/);
+NodeAssert.match(client, /dataReceive/);
+NodeAssert.match(client, /dataEnd/);
+NodeAssert.match(client, /attachments_require_mobile_api/);
+NodeAssert.match(client, /uploadAttachmentPart/);
+NodeAssert.match(client, /completeAttachmentUpload/);
+NodeAssert.match(client, /threadId,/);
+NodeAssert.match(client, /supportedModels/);
+NodeAssert.match(client, /getThreadHistory/);
+NodeAssert.match(client, /historyCursor/);
+NodeAssert.match(client, /identifierValue/);
+NodeAssert.match(client, /afterSequence=/);
+NodeAssert.match(client, /Authorization/);
+NodeAssert.match(transfer, /fileIo\.openSync/);
+NodeAssert.match(transfer, /fileIo\.readSync/);
+NodeAssert.match(transfer, /cryptoFramework\.createMd\('SHA256'\)/);
+NodeAssert.match(transfer, /wholeDigest\.digest/);
+NodeAssert.match(transfer, /uploadPickedAttachment/);
+NodeAssert.match(store, /activeTurnId/);
+NodeAssert.match(store, /this\.queuedTurns/);
+NodeAssert.match(store, /editQueued/);
+NodeAssert.match(store, /this\.models/);
+NodeAssert.match(store, /this\.applyEvent\(event\)/);
+NodeAssert.match(store, /loadOlderHistory/);
+NodeAssert.match(read("entry/src/main/ets/data/FdModels.ets"), /createUuid/);
+NodeAssert.match(read("entry/src/main/ets/data/FdModels.ets"), /FdAttachmentPatch/);
+NodeAssert.match(config, /deepseek-flash/);
+NodeAssert.match(moduleJson5, /ohos\.permission\.INTERNET/);
+NodeAssert.match(moduleJson5, /deviceTypes/);
 
 console.log(`Harmony native static checks passed (${requiredFiles.length} files).`);

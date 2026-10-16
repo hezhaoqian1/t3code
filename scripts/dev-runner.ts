@@ -7,7 +7,11 @@ import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import { resolveGitWorktreePath, resolveWorktreeT3Home } from "@t3tools/shared/devHome";
-import { HostProcessEnvironment, HostProcessWorkingDirectory } from "@t3tools/shared/hostProcess";
+import {
+  HostProcessEnvironment,
+  HostProcessPlatform,
+  HostProcessWorkingDirectory,
+} from "@t3tools/shared/hostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
@@ -294,7 +298,7 @@ export function createDevRunnerEnv({
     const runnerNodeDir = path.dirname(process.execPath);
     const inheritedPath = output.PATH ?? output.Path ?? output.path;
     if (runnerNodeDir && inheritedPath) {
-      const pathDelimiter = process.platform === "win32" ? ";" : ":";
+      const pathDelimiter = (yield* HostProcessPlatform) === "win32" ? ";" : ":";
       const pathEntries = inheritedPath.split(pathDelimiter);
       if (!pathEntries.includes(runnerNodeDir)) {
         output.PATH = [runnerNodeDir, ...pathEntries].join(pathDelimiter);
@@ -581,7 +585,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     // to the bundled Node distribution.
     const path = yield* Path.Path;
     const workspaceBinDir = path.join(yield* HostProcessWorkingDirectory, "node_modules", ".bin");
-    const pathDelimiter = process.platform === "win32" ? ";" : ":";
+    const pathDelimiter = (yield* HostProcessPlatform) === "win32" ? ";" : ":";
     const currentPath = env.PATH ?? env.Path ?? env.path ?? "";
     if (!currentPath.split(pathDelimiter).includes(workspaceBinDir)) {
       env.PATH = currentPath ? `${workspaceBinDir}${pathDelimiter}${currentPath}` : workspaceBinDir;

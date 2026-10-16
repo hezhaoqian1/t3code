@@ -1,7 +1,10 @@
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Effect from "effect/Effect";
+import { it as effectIt } from "@effect/vitest";
 // @effect-diagnostics nodeBuiltinImport:off
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -21,7 +24,9 @@ import {
 const temporaryRoots = new Set<string>();
 
 afterEach(async () => {
-  await Promise.all([...temporaryRoots].map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all(
+    [...temporaryRoots].map((root) => NodeFSP.rm(root, { recursive: true, force: true })),
+  );
   temporaryRoots.clear();
 });
 
@@ -35,27 +40,36 @@ describe("FD managed Codex runtime boundary", () => {
     );
   });
 
-  it("writes exact FD model/provider config without credentials", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-codex-home-"));
-    temporaryRoots.add(root);
-    const codexHome = join(root, "managed-home");
-    const configPath = await prepareFdManagedCodexHome({
-      codexHome,
-      newApiOrigin: "http://127.0.0.1:3001",
-    });
+  effectIt.live("writes exact FD model/provider config without credentials", () =>
+    Effect.gen(function* () {
+      const hostPlatform = yield* HostProcessPlatform;
+      const root = yield* Effect.promise(async () =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-codex-home-")),
+      );
+      temporaryRoots.add(root);
+      const codexHome = NodePath.join(root, "managed-home");
+      const configPath = yield* Effect.promise(async () =>
+        prepareFdManagedCodexHome({
+          codexHome,
+          newApiOrigin: "http://127.0.0.1:3001",
+        }),
+      );
 
-    const config = await readFile(configPath, "utf8");
-    expect(config).toContain('model = "deepseek-flash"');
-    expect(config).toContain('model_provider = "fd_new_api"');
-    expect(config).toContain('base_url = "http://127.0.0.1:3001/v1"');
-    expect(config).toContain('env_key = "FD_NEW_API_KEY"');
-    expect(config).toContain("requires_openai_auth = false");
-    expect(config).toContain('wire_api = "responses"');
-    expect(config).not.toContain("runtime-secret-marker");
-    if (process.platform !== "win32") {
-      expect((await stat(configPath)).mode & 0o777).toBe(0o600);
-    }
-  });
+      const config = yield* Effect.promise(async () => NodeFSP.readFile(configPath, "utf8"));
+      expect(config).toContain('model = "deepseek-flash"');
+      expect(config).toContain('model_provider = "fd_new_api"');
+      expect(config).toContain('base_url = "http://127.0.0.1:3001/v1"');
+      expect(config).toContain('env_key = "FD_NEW_API_KEY"');
+      expect(config).toContain("requires_openai_auth = false");
+      expect(config).toContain('wire_api = "responses"');
+      expect(config).not.toContain("runtime-secret-marker");
+      if (hostPlatform !== "win32") {
+        expect((yield* Effect.promise(async () => NodeFSP.stat(configPath))).mode & 0o777).toBe(
+          0o600,
+        );
+      }
+    }),
+  );
 
   it("accepts HTTPS and loopback HTTP origins but rejects unsafe endpoints", () => {
     expect(renderFdManagedCodexConfig("https://api.fd.example/base")).toContain(
@@ -99,7 +113,7 @@ describe("FD managed Codex runtime boundary", () => {
       inheritedEnvironment: { PATH: "/usr/bin" },
     });
 
-    expect(environment.PATH).toBe(`/managed/connectors/feishu/bin${delimiter}/usr/bin`);
+    expect(environment.PATH).toBe(`/managed/connectors/feishu/bin${NodePath.delimiter}/usr/bin`);
     expect(environment.LARKSUITE_CLI_CONFIG_DIR).toBe("/managed/connectors/feishu/config");
   });
 
@@ -113,7 +127,7 @@ describe("FD managed Codex runtime boundary", () => {
   });
 
   it("regenerates each child environment from the current credential projection", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-codex-runtime-"));
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-codex-runtime-"));
     temporaryRoots.add(root);
     const credential = (generation: number, runtimeApiKey: string) => ({
       userId: 7,
@@ -146,13 +160,13 @@ describe("FD managed Codex runtime boundary", () => {
     expect(first.environment.FD_NEW_API_KEY).toBe("runtime-key-one");
     expect(second.environment.FD_NEW_API_KEY).toBe("runtime-key-two");
     expect(second.environment).not.toHaveProperty("FD_ACCESS_TOKEN");
-    expect(await readFile(join(second.homePath, "config.toml"), "utf8")).not.toContain(
-      "runtime-key",
-    );
+    expect(
+      await NodeFSP.readFile(NodePath.join(second.homePath, "config.toml"), "utf8"),
+    ).not.toContain("runtime-key");
   });
 
   it("prepares every selectable model through the managed FD Responses home", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-codex-dashscope-"));
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-codex-dashscope-"));
     temporaryRoots.add(root);
 
     const runtime = await prepareFdCodexRuntime({
@@ -189,18 +203,18 @@ describe("FD managed Codex runtime boundary", () => {
     expect(runtime.homePath).toContain("codex-home");
     expect(runtime.environment.FD_NEW_API_KEY).toBe("runtime-secret-marker");
     expect(runtime.environment).not.toHaveProperty("DASHSCOPE_API_KEY");
-    expect(await readFile(join(runtime.homePath, "config.toml"), "utf8")).toContain(
-      'model_provider = "fd_new_api"',
-    );
-    expect(await readFile(join(runtime.homePath, "config.toml"), "utf8")).toContain(
-      'wire_api = "responses"',
-    );
+    expect(
+      await NodeFSP.readFile(NodePath.join(runtime.homePath, "config.toml"), "utf8"),
+    ).toContain('model_provider = "fd_new_api"');
+    expect(
+      await NodeFSP.readFile(NodePath.join(runtime.homePath, "config.toml"), "utf8"),
+    ).toContain('wire_api = "responses"');
   });
 
   it("enables connector extra Skill roots only when the connector state is enabled", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-codex-connector-"));
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-codex-connector-"));
     temporaryRoots.add(root);
-    const statePath = join(root, "connector-state.json");
+    const statePath = NodePath.join(root, "connector-state.json");
     const credentials = {
       userId: 7,
       runtimeTokenId: 11,
@@ -217,7 +231,10 @@ describe("FD managed Codex runtime boundary", () => {
       generation: 1,
     };
 
-    await writeFile(statePath, JSON.stringify({ version: 1, enabled: false, lastError: null }));
+    await NodeFSP.writeFile(
+      statePath,
+      JSON.stringify({ version: 1, enabled: false, lastError: null }),
+    );
     const disabled = await prepareFdCodexRuntime({
       stateDir: root,
       credentials,
@@ -231,7 +248,10 @@ describe("FD managed Codex runtime boundary", () => {
     expect(disabled.environment.PATH).toBe("/usr/bin");
     expect(disabled.environment.LARKSUITE_CLI_CONFIG_DIR).toBeUndefined();
 
-    await writeFile(statePath, JSON.stringify({ version: 1, enabled: true, lastError: null }));
+    await NodeFSP.writeFile(
+      statePath,
+      JSON.stringify({ version: 1, enabled: true, lastError: null }),
+    );
     const enabled = await prepareFdCodexRuntime({
       stateDir: root,
       credentials,
@@ -242,34 +262,41 @@ describe("FD managed Codex runtime boundary", () => {
       inheritedEnvironment: { PATH: "/usr/bin" },
     });
     expect(enabled.skillExtraRoots).toEqual(["/managed/connectors/skills/connector-feishu"]);
-    expect(enabled.environment.PATH).toBe(`/managed/connectors/feishu/bin${delimiter}/usr/bin`);
+    expect(enabled.environment.PATH).toBe(
+      `/managed/connectors/feishu/bin${NodePath.delimiter}/usr/bin`,
+    );
     expect(enabled.environment.LARKSUITE_CLI_CONFIG_DIR).toBe("/managed/connectors/feishu/config");
   });
 
   it("resolves selected project and personal Skills as structured Codex input", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-codex-skills-"));
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-codex-skills-"));
     temporaryRoots.add(root);
-    const projectRoot = join(root, "project");
-    const userHome = join(root, "user");
-    const projectSkillRoot = join(projectRoot, ".agents", "skills", "weekly-report");
-    const personalSkillRoot = join(userHome, ".codex", "skills", "personal-summary");
-    const managedCollisionRoot = join(projectRoot, ".agents", "skills", "company-data-quality");
+    const projectRoot = NodePath.join(root, "project");
+    const userHome = NodePath.join(root, "user");
+    const projectSkillRoot = NodePath.join(projectRoot, ".agents", "skills", "weekly-report");
+    const personalSkillRoot = NodePath.join(userHome, ".codex", "skills", "personal-summary");
+    const managedCollisionRoot = NodePath.join(
+      projectRoot,
+      ".agents",
+      "skills",
+      "company-data-quality",
+    );
     await Promise.all([
-      mkdir(projectSkillRoot, { recursive: true }),
-      mkdir(personalSkillRoot, { recursive: true }),
-      mkdir(managedCollisionRoot, { recursive: true }),
+      NodeFSP.mkdir(projectSkillRoot, { recursive: true }),
+      NodeFSP.mkdir(personalSkillRoot, { recursive: true }),
+      NodeFSP.mkdir(managedCollisionRoot, { recursive: true }),
     ]);
     await Promise.all([
-      writeFile(
-        join(projectSkillRoot, "SKILL.md"),
+      NodeFSP.writeFile(
+        NodePath.join(projectSkillRoot, "SKILL.md"),
         "---\nname: weekly-report\ndescription: Prepare a weekly report.\n---\nProject instructions\n",
       ),
-      writeFile(
-        join(personalSkillRoot, "SKILL.md"),
+      NodeFSP.writeFile(
+        NodePath.join(personalSkillRoot, "SKILL.md"),
         "---\nname: personal-summary\ndescription: Summarize personal notes.\n---\nPersonal instructions\n",
       ),
-      writeFile(
-        join(managedCollisionRoot, "SKILL.md"),
+      NodeFSP.writeFile(
+        NodePath.join(managedCollisionRoot, "SKILL.md"),
         "---\nname: company-data-quality\ndescription: Must stay enterprise-owned.\n---\nForbidden\n",
       ),
     ]);
@@ -281,8 +308,14 @@ describe("FD managed Codex runtime boundary", () => {
     });
 
     expect(skills).toEqual([
-      { name: "personal-summary", path: await realpath(join(personalSkillRoot, "SKILL.md")) },
-      { name: "weekly-report", path: await realpath(join(projectSkillRoot, "SKILL.md")) },
+      {
+        name: "personal-summary",
+        path: await NodeFSP.realpath(NodePath.join(personalSkillRoot, "SKILL.md")),
+      },
+      {
+        name: "weekly-report",
+        path: await NodeFSP.realpath(NodePath.join(projectSkillRoot, "SKILL.md")),
+      },
     ]);
     expect(skills).not.toContainEqual(expect.objectContaining({ name: "company-data-quality" }));
   });

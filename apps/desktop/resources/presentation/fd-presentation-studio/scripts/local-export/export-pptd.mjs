@@ -22,14 +22,14 @@
  *   KIMI_ORIGIN   default https://www.kimi.com
  */
 
-import fs from "node:fs";
-import path from "node:path";
-import crypto from "node:crypto";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { createRequire } from "node:module";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeCrypto from "node:crypto";
+import * as NodeURL from "node:url";
+import * as NodeModule from "node:module";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const require = createRequire(import.meta.url);
+const __dirname = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url));
+const require = NodeModule.createRequire(import.meta.url);
 
 // ---------- minimal YAML (enough for PPTD) via dynamic import of yaml if present ----------
 async function loadYaml() {
@@ -44,7 +44,9 @@ async function loadYaml() {
       // the YAML parser.
       const bundledModules = process.env.FD_PRESENTATION_NODE_MODULES;
       if (bundledModules) {
-        const bundledRequire = createRequire(path.join(bundledModules, "package.json"));
+        const bundledRequire = NodeModule.createRequire(
+          NodePath.join(bundledModules, "package.json"),
+        );
         const yaml = bundledRequire("yaml");
         return (s) => yaml.parse(s);
       }
@@ -74,10 +76,10 @@ const CANONICAL_WASM_NAME = "pptd_wasm_bg-DPPWdROu.wasm";
 
 function resolveDefaultWasmPath() {
   const candidates = [
-    path.join(__dirname, "pptd_wasm_bg.wasm"), // installed skill copy
-    path.join(__dirname, CANONICAL_WASM_NAME),
+    NodePath.join(__dirname, "pptd_wasm_bg.wasm"), // installed skill copy
+    NodePath.join(__dirname, CANONICAL_WASM_NAME),
     // monorepo / npm package: scripts/local-export → package root
-    path.join(
+    NodePath.join(
       __dirname,
       "..",
       "..",
@@ -90,7 +92,7 @@ function resolveDefaultWasmPath() {
     ),
   ];
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) return candidate;
+    if (NodeFS.existsSync(candidate)) return candidate;
   }
   return candidates[0];
 }
@@ -127,17 +129,17 @@ function parseArgs(argv) {
 
 // ---------- PPTD project load ----------
 function findManifest(input) {
-  const p = path.resolve(input);
-  if (fs.statSync(p).isFile() && p.endsWith(".pptd")) return p;
-  const files = fs.readdirSync(p).filter((f) => f.endsWith(".pptd"));
-  if (files.length === 1) return path.join(p, files[0]);
+  const p = NodePath.resolve(input);
+  if (NodeFS.statSync(p).isFile() && p.endsWith(".pptd")) return p;
+  const files = NodeFS.readdirSync(p).filter((f) => f.endsWith(".pptd"));
+  if (files.length === 1) return NodePath.join(p, files[0]);
   if (files.length === 0) throw new Error(`No .pptd in ${p}`);
   throw new Error(`Multiple .pptd in ${p}: ${files.join(", ")}`);
 }
 
 async function loadProject(manifestPath, parseYaml) {
-  const root = path.dirname(manifestPath);
-  const manifestText = fs.readFileSync(manifestPath, "utf8");
+  const root = NodePath.dirname(manifestPath);
+  const manifestText = NodeFS.readFileSync(manifestPath, "utf8");
   const manifest = parseYaml(manifestText);
   if (!manifest || manifest.version !== "v2") {
     throw new Error("Only PPTD version: v2 is supported");
@@ -148,9 +150,9 @@ async function loadProject(manifestPath, parseYaml) {
 
   const pages = [];
   for (const rel of manifest.pages) {
-    const pagePath = path.join(root, rel);
-    if (!fs.existsSync(pagePath)) throw new Error(`Missing page: ${rel}`);
-    const page = parseYaml(fs.readFileSync(pagePath, "utf8"));
+    const pagePath = NodePath.join(root, rel);
+    if (!NodeFS.existsSync(pagePath)) throw new Error(`Missing page: ${rel}`);
+    const page = parseYaml(NodeFS.readFileSync(pagePath, "utf8"));
     if (!page || !Array.isArray(page.elements)) {
       throw new Error(`Invalid page elements: ${rel}`);
     }
@@ -166,7 +168,7 @@ async function loadProject(manifestPath, parseYaml) {
     ...manifest,
     version: "v2",
     pages,
-    pptdFileName: path.basename(manifestPath),
+    pptdFileName: NodePath.basename(manifestPath),
   };
 }
 
@@ -253,12 +255,15 @@ async function resolveImages(pptd, projectRoot) {
         }
       } else {
         // local relative to project root
-        const local = path.join(projectRoot, src.replace(/^file:\/\/+/, "").replace(/\\/g, "/"));
-        if (!fs.existsSync(local)) {
+        const local = NodePath.join(
+          projectRoot,
+          src.replace(/^file:\/\/+/, "").replace(/\\/g, "/"),
+        );
+        if (!NodeFS.existsSync(local)) {
           console.warn(`[warn] missing local image: ${src}`);
           return;
         }
-        bytes = fs.readFileSync(local);
+        bytes = NodeFS.readFileSync(local);
         ext = extFromSrc(src);
       }
       const key = `wasm-assets/img-${idx}${ext}`;
@@ -304,7 +309,7 @@ function splitCustomPath(shape) {
 
 // ---------- signature (official pptdExportSignature) ----------
 function sha256Hex(text) {
-  return crypto.createHash("sha256").update(text, "utf8").digest("hex");
+  return NodeCrypto.createHash("sha256").update(text, "utf8").digest("hex");
 }
 
 async function requestSignature(dataString, { origin, cookie }) {
@@ -336,7 +341,7 @@ async function requestSignature(dataString, { origin, cookie }) {
 
 // ---------- WASM glue (Node port of kimiDesign / wasm-bindgen) ----------
 async function loadWasmExporter(wasmPath) {
-  const wasmBytes = fs.readFileSync(wasmPath);
+  const wasmBytes = NodeFS.readFileSync(wasmPath);
   let exportsRef;
   let memory;
   let cachedUint8;
@@ -614,9 +619,10 @@ Env: KIMI_COOKIE, KIMI_ORIGIN`);
 
   const parseYaml = await loadYaml();
   const manifestPath = findManifest(args.input);
-  const projectRoot = path.dirname(manifestPath);
+  const projectRoot = NodePath.dirname(manifestPath);
   const output =
-    args.output || path.join(projectRoot, path.basename(manifestPath, ".pptd") + ".offline.pptx");
+    args.output ||
+    NodePath.join(projectRoot, NodePath.basename(manifestPath, ".pptd") + ".offline.pptx");
 
   console.log("[1/5] load PPTD", manifestPath);
   let pptd = await loadProject(manifestPath, parseYaml);
@@ -642,7 +648,7 @@ Env: KIMI_COOKIE, KIMI_ORIGIN`);
   }
 
   console.log("[4/5] load WASM", args.wasmPath);
-  if (!fs.existsSync(args.wasmPath)) {
+  if (!NodeFS.existsSync(args.wasmPath)) {
     throw new Error(
       `patched WASM not found: ${args.wasmPath}\n` +
         `Expected editor/neo-ppt/assets/${CANONICAL_WASM_NAME} (repo/npm) ` +
@@ -656,7 +662,7 @@ Env: KIMI_COOKIE, KIMI_ORIGIN`);
     fonts: [],
     customFonts: [],
     images,
-    fileName: path.basename(output),
+    fileName: NodePath.basename(output),
     slideTransition: {
       effect: args.transition === "none" ? "none" : args.transition,
       speed: "fast",
@@ -679,7 +685,7 @@ Env: KIMI_COOKIE, KIMI_ORIGIN`);
   }
 
   const outBuf = Buffer.from(bytes);
-  fs.writeFileSync(output, outBuf);
+  NodeFS.writeFileSync(output, outBuf);
   console.log("Wrote", output, `(${outBuf.length} bytes)`);
 
   // quick zip sanity

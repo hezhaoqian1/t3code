@@ -1,5 +1,9 @@
+import * as NodeOS from "node:os";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as Effect from "effect/Effect";
+import { it as effectIt } from "@effect/vitest";
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import { afterEach, describe, expect, it } from "@effect/vitest";
 
@@ -13,15 +17,15 @@ import {
 const temporaryDirectories: string[] = [];
 
 async function makeTempDirectory(): Promise<string> {
-  const directory = await NodeFS.mkdtemp(NodePath.join("/tmp", "fd-native-skills-"));
+  const directory = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-native-skills-"));
   temporaryDirectories.push(directory);
   return directory;
 }
 
 async function writeSkill(root: string, name: string, description: string, body = "\nBody\n") {
   const skillRoot = NodePath.join(root, name);
-  await NodeFS.mkdir(skillRoot, { recursive: true });
-  await NodeFS.writeFile(
+  await NodeFSP.mkdir(skillRoot, { recursive: true });
+  await NodeFSP.writeFile(
     NodePath.join(skillRoot, "SKILL.md"),
     `---\nname: ${name}\ndescription: ${description}\n---\n${body}`,
   );
@@ -30,8 +34,8 @@ async function writeSkill(root: string, name: string, description: string, body 
 
 async function copyFixtureSkill(root: string, name: string) {
   const skillRoot = NodePath.join(root, name);
-  await NodeFS.mkdir(skillRoot, { recursive: true });
-  await NodeFS.copyFile(
+  await NodeFSP.mkdir(skillRoot, { recursive: true });
+  await NodeFSP.copyFile(
     NodePath.join(import.meta.dirname, "fixtures", `${name}.SKILL.md`),
     NodePath.join(skillRoot, "SKILL.md"),
   );
@@ -41,7 +45,7 @@ afterEach(async () => {
   await Promise.all(
     temporaryDirectories
       .splice(0)
-      .map((directory) => NodeFS.rm(directory, { recursive: true, force: true })),
+      .map((directory) => NodeFSP.rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -109,33 +113,40 @@ describe("NativeSkillCatalog", () => {
     ]);
   });
 
-  it("rejects an escaped skill directory symlink", async () => {
-    const project = await makeTempDirectory();
-    const outside = await makeTempDirectory();
-    await writeSkill(outside, "escaped", "outside");
-    const root = NodePath.join(project, ".agents", "skills");
-    await NodeFS.mkdir(root, { recursive: true });
-    await NodeFS.symlink(
-      NodePath.join(outside, "escaped"),
-      NodePath.join(root, "escaped"),
-      process.platform === "win32" ? "junction" : "dir",
-    );
+  effectIt.live("rejects an escaped skill directory symlink", () =>
+    Effect.gen(function* () {
+      const hostPlatform = yield* HostProcessPlatform;
+      const project = yield* Effect.promise(async () => makeTempDirectory());
+      const outside = yield* Effect.promise(async () => makeTempDirectory());
+      yield* Effect.promise(async () => writeSkill(outside, "escaped", "outside"));
+      const root = NodePath.join(project, ".agents", "skills");
+      yield* Effect.promise(async () => NodeFSP.mkdir(root, { recursive: true }));
+      yield* Effect.promise(async () =>
+        NodeFSP.symlink(
+          NodePath.join(outside, "escaped"),
+          NodePath.join(root, "escaped"),
+          hostPlatform === "win32" ? "junction" : "dir",
+        ),
+      );
 
-    const snapshot = await new NativeSkillCatalog({
-      projectRoot: project,
-      userHome: await makeTempDirectory(),
-    }).refresh();
-    expect(snapshot.skills).toEqual([]);
-    expect(snapshot.diagnostics[0]).toMatchObject({ code: "outside-root" });
-  });
+      const snapshot = yield* Effect.promise(async () =>
+        new NativeSkillCatalog({
+          projectRoot: project,
+          userHome: await makeTempDirectory(),
+        }).refresh(),
+      );
+      expect(snapshot.skills).toEqual([]);
+      expect(snapshot.diagnostics[0]).toMatchObject({ code: "outside-root" });
+    }),
+  );
 
   it("rejects malformed and oversized Skill files", async () => {
     const project = await makeTempDirectory();
     const root = NodePath.join(project, ".agents", "skills");
     const malformed = await writeSkill(root, "malformed", "valid");
-    await NodeFS.writeFile(NodePath.join(malformed, "SKILL.md"), "name: missing frontmatter\n");
+    await NodeFSP.writeFile(NodePath.join(malformed, "SKILL.md"), "name: missing frontmatter\n");
     const oversized = await writeSkill(root, "oversized", "valid");
-    await NodeFS.writeFile(
+    await NodeFSP.writeFile(
       NodePath.join(oversized, "SKILL.md"),
       "x".repeat(NATIVE_SKILL_LIMITS.maxSkillBytes + 1),
     );
@@ -192,7 +203,7 @@ describe("NativeSkillCatalog", () => {
       }),
     ]);
     expect(snapshot.skills[0]?.root).toBe(
-      await NodeFS.realpath(NodePath.join(connectorRoot, "lark-doc")),
+      await NodeFSP.realpath(NodePath.join(connectorRoot, "lark-doc")),
     );
   });
 });

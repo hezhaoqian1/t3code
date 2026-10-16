@@ -10,7 +10,6 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { it as effectIt } from "@effect/vitest";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
@@ -309,17 +308,12 @@ describe("FdEnterpriseThreadRuntime", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* FdEnterpriseThreadRuntime;
-        const context = yield* Effect.context<never>();
-        const runPromise = Effect.runPromiseWith(context);
-        const loaderReady = yield* Deferred.make<void>();
-        const historyResponse = yield* Deferred.make<FdEnterpriseHistory>();
-        yield* runtime.setHistoryLoader(() =>
-          runPromise(
-            Deferred.succeed(loaderReady, undefined).pipe(
-              Effect.andThen(Deferred.await(historyResponse)),
-            ),
-          ),
-        );
+        const loaderReady = Promise.withResolvers<void>();
+        const historyResponse = Promise.withResolvers<FdEnterpriseHistory>();
+        yield* runtime.setHistoryLoader(() => {
+          loaderReady.resolve();
+          return historyResponse.promise;
+        });
         yield* runtime.stageTurn({
           threadId,
           messageId: MessageId.make("message-before-account-switch"),
@@ -329,10 +323,10 @@ describe("FdEnterpriseThreadRuntime", () => {
         const before = yield* runtime.getSnapshot(threadId);
         const resetFiber = yield* Stream.runHead(runtime.resetStream).pipe(Effect.forkChild);
         const historyFiber = yield* runtime.ensureHistory(threadId).pipe(Effect.forkChild);
-        yield* Deferred.await(loaderReady);
+        yield* Effect.promise(() => loaderReady.promise);
 
         yield* runtime.clearAll();
-        yield* Deferred.succeed(historyResponse, {
+        historyResponse.resolve({
           clientThreadId: threadId,
           conversationId: 9,
           truncated: false,
@@ -367,19 +361,14 @@ describe("FdEnterpriseThreadRuntime", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* FdEnterpriseThreadRuntime;
-        const context = yield* Effect.context<never>();
-        const runPromise = Effect.runPromiseWith(context);
-        const loaderReady = yield* Deferred.make<void>();
-        const historyResponse = yield* Deferred.make<FdEnterpriseHistory>();
-        yield* runtime.setHistoryLoader(() =>
-          runPromise(
-            Deferred.succeed(loaderReady, undefined).pipe(
-              Effect.andThen(Deferred.await(historyResponse)),
-            ),
-          ),
-        );
+        const loaderReady = Promise.withResolvers<void>();
+        const historyResponse = Promise.withResolvers<FdEnterpriseHistory>();
+        yield* runtime.setHistoryLoader(() => {
+          loaderReady.resolve();
+          return historyResponse.promise;
+        });
         const historyFiber = yield* runtime.ensureHistory(threadId).pipe(Effect.forkChild);
-        yield* Deferred.await(loaderReady);
+        yield* Effect.promise(() => loaderReady.promise);
 
         yield* runtime.applyRuntimeEvent({
           ...eventBase,
@@ -398,7 +387,7 @@ describe("FdEnterpriseThreadRuntime", () => {
             data: { finalText: "实时最终回答" },
           },
         });
-        yield* Deferred.succeed(historyResponse, {
+        historyResponse.resolve({
           clientThreadId: threadId,
           conversationId: 11,
           truncated: false,
@@ -426,19 +415,14 @@ describe("FdEnterpriseThreadRuntime", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* FdEnterpriseThreadRuntime;
-        const context = yield* Effect.context<never>();
-        const runPromise = Effect.runPromiseWith(context);
-        const loaderReady = yield* Deferred.make<void>();
-        const historyResponse = yield* Deferred.make<FdEnterpriseHistory>();
-        yield* runtime.setHistoryLoader(() =>
-          runPromise(
-            Deferred.succeed(loaderReady, undefined).pipe(
-              Effect.andThen(Deferred.await(historyResponse)),
-            ),
-          ),
-        );
+        const loaderReady = Promise.withResolvers<void>();
+        const historyResponse = Promise.withResolvers<FdEnterpriseHistory>();
+        yield* runtime.setHistoryLoader(() => {
+          loaderReady.resolve();
+          return historyResponse.promise;
+        });
         const historyFiber = yield* runtime.ensureHistory(threadId).pipe(Effect.forkChild);
-        yield* Deferred.await(loaderReady);
+        yield* Effect.promise(() => loaderReady.promise);
         const completedAt = "2026-08-10T00:00:02.000Z";
         yield* runtime.applyRuntimeEvent({
           ...eventBase,
@@ -455,7 +439,7 @@ describe("FdEnterpriseThreadRuntime", () => {
             },
           },
         });
-        yield* Deferred.succeed(historyResponse, {
+        historyResponse.resolve({
           clientThreadId: threadId,
           conversationId: 12,
           truncated: false,
@@ -482,19 +466,14 @@ describe("FdEnterpriseThreadRuntime", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const runtime = yield* FdEnterpriseThreadRuntime;
-          const context = yield* Effect.context<never>();
-          const runPromise = Effect.runPromiseWith(context);
-          const loaderReady = yield* Deferred.make<void>();
-          const historyResponse = yield* Deferred.make<FdEnterpriseHistory>();
-          yield* runtime.setHistoryLoader(() =>
-            runPromise(
-              Deferred.succeed(loaderReady, undefined).pipe(
-                Effect.andThen(Deferred.await(historyResponse)),
-              ),
-            ),
-          );
+          const loaderReady = Promise.withResolvers<void>();
+          const historyResponse = Promise.withResolvers<FdEnterpriseHistory>();
+          yield* runtime.setHistoryLoader(() => {
+            loaderReady.resolve();
+            return historyResponse.promise;
+          });
           const historyFiber = yield* runtime.ensureHistory(threadId).pipe(Effect.forkChild);
-          yield* Deferred.await(loaderReady);
+          yield* Effect.promise(() => loaderReady.promise);
           const itemId = RuntimeItemId.make("assistant-overlap-race");
           yield* runtime.applyRuntimeEvent({
             ...eventBase,
@@ -502,7 +481,7 @@ describe("FdEnterpriseThreadRuntime", () => {
             type: "content.delta",
             payload: { streamKind: "assistant_text", delta: "部分回答" },
           });
-          yield* Deferred.succeed(historyResponse, {
+          historyResponse.resolve({
             clientThreadId: threadId,
             conversationId: 13,
             truncated: false,
