@@ -1,8 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import { describe, expect, it } from "@effect/vitest";
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
-import { fileURLToPath } from "node:url";
+import * as NodeOS from "node:os";
+import * as NodeURL from "node:url";
 
 import {
   resolvePresentationCapability,
@@ -12,13 +13,15 @@ import {
 describe("PresentationCapability", () => {
   it("accepts the packaged capability and verifies its pinned hash", async () => {
     const packagedRoot = NodePath.resolve(
-      NodePath.dirname(fileURLToPath(import.meta.url)),
+      NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
       "../../../../apps/desktop/resources/presentation",
     );
     const resolved = await resolvePresentationCapability({ packagedRoot });
     expect(resolved.id).toBe("fd-presentation-studio");
     expect(resolved.source).toBe("packaged");
-    expect(resolved.skillPath.endsWith("fd-presentation-studio/SKILL.md")).toBe(true);
+    expect(resolved.skillPath.endsWith(NodePath.join("fd-presentation-studio", "SKILL.md"))).toBe(
+      true,
+    );
   });
 
   it("rejects path traversal and malformed signatures", () => {
@@ -44,16 +47,40 @@ describe("PresentationCapability", () => {
   });
 
   it("falls back to a valid cache package when the packaged root is unavailable", async () => {
-    const cacheRoot = await NodeFS.mkdtemp(NodePath.join("/tmp", "fd-presentation-cache-"));
+    const cacheRoot = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "fd-presentation-cache-"),
+    );
     const packagedRoot = NodePath.join(cacheRoot, "missing");
     const sourceRoot = NodePath.resolve(
-      NodePath.dirname(fileURLToPath(import.meta.url)),
+      NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
       "../../../../apps/desktop/resources/presentation",
     );
     const target = NodePath.join(cacheRoot, "cached");
-    await NodeFS.cp(sourceRoot, target, { recursive: true });
+    await NodeFSP.cp(sourceRoot, target, { recursive: true });
     const resolved = await resolvePresentationCapability({ packagedRoot, cacheRoot: target });
     expect(resolved.source).toBe("cache");
-    await NodeFS.rm(cacheRoot, { recursive: true, force: true });
+    await NodeFSP.rm(cacheRoot, { recursive: true, force: true });
+  });
+
+  it("rejects changed bytes in a cached package", async () => {
+    const cacheRoot = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "fd-presentation-tamper-"),
+    );
+    try {
+      const sourceRoot = NodePath.resolve(
+        NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)),
+        "../../../../apps/desktop/resources/presentation",
+      );
+      await NodeFSP.cp(sourceRoot, cacheRoot, { recursive: true });
+      await NodeFSP.appendFile(
+        NodePath.join(cacheRoot, "fd-presentation-studio", "SKILL.md"),
+        "\nmodified",
+      );
+      await expect(resolvePresentationCapability({ cacheRoot })).rejects.toThrow(
+        "presentation-package-hash-mismatch",
+      );
+    } finally {
+      await NodeFSP.rm(cacheRoot, { recursive: true, force: true });
+    }
   });
 });

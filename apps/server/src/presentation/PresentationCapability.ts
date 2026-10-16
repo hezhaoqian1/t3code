@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off,globalDate:off
 import * as NodeCrypto from "node:crypto";
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { PresentationCapabilityManifest } from "@t3tools/contracts";
@@ -90,10 +90,10 @@ async function hashDirectory(root: string, maxBytes: number): Promise<string> {
   const pending = [root];
   while (pending.length > 0) {
     const current = pending.shift()!;
-    const entries = await NodeFS.readdir(current, { withFileTypes: true, encoding: "utf8" });
-    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const entries = await NodeFSP.readdir(current, { withFileTypes: true, encoding: "utf8" });
+    for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
       const file = safeRoot(root, NodePath.join(current, entry.name));
-      const stat = await NodeFS.stat(file);
+      const stat = await NodeFSP.stat(file);
       if (stat.isDirectory()) {
         pending.push(file);
         continue;
@@ -101,8 +101,9 @@ async function hashDirectory(root: string, maxBytes: number): Promise<string> {
       if (!stat.isFile()) continue;
       total += stat.size;
       if (total > maxBytes) throw new Error("presentation-package-too-large");
-      hash.update(NodePath.relative(root, file));
-      hash.update(await NodeFS.readFile(file));
+      // Package identities must be identical on Windows and macOS/Linux.
+      hash.update(NodePath.relative(root, file).split(NodePath.sep).join("/"));
+      hash.update(await NodeFSP.readFile(file));
     }
   }
   return hash.digest("hex");
@@ -134,7 +135,7 @@ function verifyManifestSignature(manifest: PresentationCapabilityManifest): bool
 
 async function readManifest(root: string, override?: Partial<PresentationCapabilityManifest>) {
   const manifestPath = safeRoot(root, NodePath.join(root, "manifest.json"));
-  const parsed = JSON.parse(await NodeFS.readFile(manifestPath, "utf8")) as unknown;
+  const parsed = JSON.parse(await NodeFSP.readFile(manifestPath, "utf8")) as unknown;
   return validatePresentationManifest({
     ...(parsed as Record<string, unknown>),
     ...(override ?? {}),
@@ -157,7 +158,7 @@ export async function resolvePresentationCapability(
       const manifest = await readManifest(candidate.root, options.manifest);
       const skillRoot = safeRoot(candidate.root, NodePath.join(candidate.root, manifest.skillRoot));
       const skillPath = safeRoot(skillRoot, NodePath.join(skillRoot, "SKILL.md"));
-      const stat = await NodeFS.stat(skillPath);
+      const stat = await NodeFSP.stat(skillPath);
       if (!stat.isFile()) throw new Error("presentation-skill-missing");
       if (manifest.sha256) {
         const actual = await hashDirectory(skillRoot, manifest.maxPackageBytes);
@@ -190,10 +191,10 @@ export async function installPresentationCapability(input: {
   const manifest = await readManifest(input.packageRoot, input.manifest);
   const destination = NodePath.resolve(input.cacheRoot);
   const parent = NodePath.dirname(destination);
-  await NodeFS.mkdir(parent, { recursive: true });
+  await NodeFSP.mkdir(parent, { recursive: true });
   const staging = `${destination}.staging-${process.pid}-${process.hrtime.bigint().toString()}`;
-  await NodeFS.rm(staging, { recursive: true, force: true });
-  await NodeFS.cp(input.packageRoot, staging, { recursive: true, errorOnExist: false });
+  await NodeFSP.rm(staging, { recursive: true, force: true });
+  await NodeFSP.cp(input.packageRoot, staging, { recursive: true, errorOnExist: false });
   try {
     const actual = await hashDirectory(
       NodePath.join(staging, manifest.skillRoot),
@@ -204,25 +205,25 @@ export async function installPresentationCapability(input: {
     if (manifest.signature && !verifyManifestSignature(manifest))
       throw new Error("presentation-manifest-signature-invalid");
     const backup = `${destination}.previous`;
-    await NodeFS.rm(backup, { recursive: true, force: true });
+    await NodeFSP.rm(backup, { recursive: true, force: true });
     try {
-      await NodeFS.rename(destination, backup);
+      await NodeFSP.rename(destination, backup);
     } catch {
       /* first install */
     }
     try {
-      await NodeFS.rename(staging, destination);
+      await NodeFSP.rename(staging, destination);
     } catch (error) {
       try {
-        await NodeFS.rename(backup, destination);
+        await NodeFSP.rename(backup, destination);
       } catch {
         /* preserve original failure */
       }
       throw error;
     }
-    await NodeFS.rm(backup, { recursive: true, force: true });
+    await NodeFSP.rm(backup, { recursive: true, force: true });
   } catch (error) {
-    await NodeFS.rm(staging, { recursive: true, force: true });
+    await NodeFSP.rm(staging, { recursive: true, force: true });
     throw error;
   }
   return resolvePresentationCapability({ cacheRoot: destination });
