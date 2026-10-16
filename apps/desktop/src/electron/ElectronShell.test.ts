@@ -81,4 +81,30 @@ describe("ElectronShell", () => {
       assert.equal(openPathMock.mock.calls.length, 0);
     }).pipe(Effect.provide(ElectronShell.layer)),
   );
+
+  it.effect(
+    "preserves Windows, UNC and macOS folder paths with spaces and Chinese characters",
+    () =>
+      Effect.gen(function* () {
+        openPathMock.mockResolvedValue("");
+        for (const path of [
+          "C:/报告 输出",
+          "C:\\报告 输出",
+          "\\\\server\\共享 目录",
+          "/Users/employee/报告 输出",
+        ]) {
+          assert.equal(yield* ElectronShell.make.openPath(path), true);
+          assert.deepEqual(openPathMock.mock.lastCall, [path]);
+        }
+      }),
+  );
+
+  it.effect("returns false for missing folders and rejected system opens", () =>
+    Effect.gen(function* () {
+      openPathMock.mockResolvedValue("File not found");
+      assert.equal(yield* ElectronShell.make.openPath("C:/missing"), false);
+      openPathMock.mockRejectedValue(new Error("access denied"));
+      assert.equal(yield* ElectronShell.make.openPath("C:/denied"), false);
+    }),
+  );
 });

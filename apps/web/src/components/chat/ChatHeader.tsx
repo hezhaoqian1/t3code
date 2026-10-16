@@ -83,8 +83,9 @@ export function resolveRenameCommit(input: {
 
 export function shouldShowOpenInPicker(input: {
   readonly activeProjectName: string | undefined;
+  readonly openInCwd?: string | null;
 }): boolean {
-  return Boolean(input.activeProjectName);
+  return Boolean(input.activeProjectName || input.openInCwd);
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -116,6 +117,7 @@ export const ChatHeader = memo(function ChatHeader({
   );
   const showOpenInPicker = shouldShowOpenInPicker({
     activeProjectName,
+    openInCwd,
   });
   const activeThreadRef = useMemo(
     () => scopeThreadRef(activeThreadEnvironmentId, activeThreadId),
@@ -330,6 +332,7 @@ export const ChatHeader = memo(function ChatHeader({
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}
+            folderOnly={officeMode}
           />
         )}
         {activeProjectName && (

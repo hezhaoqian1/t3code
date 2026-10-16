@@ -3,6 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { resolveRenameCommit, shouldShowOpenInPicker } from "./ChatHeader";
 
 describe("shouldShowOpenInPicker", () => {
+  it("keeps the task folder available in office mode without a technical project title", () => {
+    expect(
+      shouldShowOpenInPicker({ activeProjectName: undefined, openInCwd: "C:/报告 输出" }),
+    ).toBe(true);
+  });
   it("shows the picker for an active project", () => {
     expect(
       shouldShowOpenInPicker({

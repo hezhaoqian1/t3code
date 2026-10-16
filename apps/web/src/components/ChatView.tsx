@@ -6110,7 +6110,7 @@ function ChatViewContent(props: ChatViewProps) {
             changeRequestState={activeThreadPr?.state ?? null}
             activeProjectName={isOfficeMode ? undefined : activeProject?.title}
             activeProjectCwd={isOfficeMode ? null : (activeProject?.workspaceRoot ?? null)}
-            openInCwd={isOfficeMode ? null : gitCwd}
+            openInCwd={gitCwd}
             activeProjectScripts={isOfficeMode ? undefined : activeProject?.scripts}
             officeMode={isOfficeMode}
             preferredScriptId={
