@@ -88,8 +88,12 @@ function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
         name,
         shortName,
         supportsTools: true,
-        supportsVision: shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash",
-        visionRoute: (shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash") ? ("native" as const) : ("unsupported" as const),
+        supportsVision:
+          shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash",
+        visionRoute:
+          shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash"
+            ? ("native" as const)
+            : ("unsupported" as const),
         supportsReasoning: true,
         supportsStructuredOutput: true,
         supportsForcedToolChoice: false,
