@@ -44,6 +44,10 @@ jobs:
             arch: arm64
             runner: macos-14
             rust_target: aarch64-apple-darwin
+          - platform: mac
+            arch: x64
+            runner: macos-15-intel
+            rust_target: x86_64-apple-darwin
           - platform: win
             arch: x64
             runner: windows-2025
@@ -72,6 +76,10 @@ jobs:
 
       - name: Align release versions
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
+
+      - name: Verify native macOS update installation
+        if: matrix.platform == 'mac'
+        run: pnpm --dir apps/desktop exec vp test run src/updates/MacInternalUpdater.helper.test.ts
 
       - name: Build internal macOS desktop package
         if: matrix.platform == 'mac'
@@ -106,10 +114,22 @@ jobs:
             ! -name 'latest*.yml' -delete
           if [[ "${{ matrix.platform }}" == mac ]]; then
             rm -f release-publish/*.blockmap
+            mv release-publish/latest-mac.yml release-publish/latest-mac-${{ matrix.arch }}.yml
           fi
           if [[ "${{ matrix.platform }}" == win ]]; then
             mv release-publish/latest.yml release-publish/latest-win-x64.yml
           fi
+
+      - name: Verify native macOS archives
+        if: matrix.platform == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd release-publish && shasum -a 256 * > ../SHA256SUMS)
+          mv SHA256SUMS release-publish/SHA256SUMS
+          bash scripts/verify-macos-release-archives.sh release-publish \
+            "${{ needs.preflight.outputs.version }}" "${{ matrix.arch }}"
+          rm release-publish/SHA256SUMS
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -141,7 +161,13 @@ jobs:
 
       - name: Normalize updater manifests
         shell: bash
-        run: mv release-assets/latest-win-x64.yml release-assets/latest.yml
+        run: |
+          set -euo pipefail
+          node scripts/merge-update-manifests.ts --platform mac \
+            release-assets/latest-mac-arm64.yml release-assets/latest-mac-x64.yml \
+            release-assets/latest-mac.yml
+          rm release-assets/latest-mac-arm64.yml release-assets/latest-mac-x64.yml
+          mv release-assets/latest-win-x64.yml release-assets/latest.yml
 
       - name: Finalize updater manifests from release assets
         shell: bash
@@ -151,7 +177,9 @@ jobs:
           set -euo pipefail
           node scripts/finalize-update-manifest.ts release-assets/latest-mac.yml "$VERSION" \
             "FD-Enterprise-AI-$VERSION-mac-arm64.zip" \
-            "FD-Enterprise-AI-$VERSION-mac-arm64.dmg"
+            "FD-Enterprise-AI-$VERSION-mac-arm64.dmg" \
+            "FD-Enterprise-AI-$VERSION-mac-x64.zip" \
+            "FD-Enterprise-AI-$VERSION-mac-x64.dmg"
           node scripts/finalize-update-manifest.ts release-assets/latest.yml "$VERSION" \
             "FD-Enterprise-AI-$VERSION-win-x64.exe" \
             "FD-Enterprise-AI-$VERSION-win-x64.exe.blockmap"

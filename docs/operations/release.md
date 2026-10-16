@@ -4,13 +4,19 @@
 
 `.github/workflows/fd-desktop-release.yml` builds one immutable internal release bundle for:
 
-- macOS arm64: DMG and updater ZIP
+- macOS arm64 and Intel x64: a DMG and updater ZIP for each architecture
 - Windows x64: NSIS installer and blockmap
 
 The workflow runs on native macOS and Windows runners, preserves `latest-mac.yml` and `latest.yml`,
 and writes `SHA256SUMS`. The native runners also install the matching pinned Feishu CLI binary;
 the 27 official `lark-*` Skills are bundled from the repository resources. Employee machines do
 not need Node.js, npm, or WorkBuddy.
+
+Each Mac runner verifies its DMG and ZIP app identifiers, version, native executable architecture,
+and code seal before upload. The bundle combines both Mac architectures in `latest-mac.yml`;
+the updater selects the matching ZIP. The Intel build uses `macos-15-intel` and bundles x64 native
+dependencies, including the Codex runtime. Keep the per-architecture manifests separate until the
+bundle job merges them, so one runner cannot overwrite the other runner's update metadata.
 
 The company-internal channel uses ad-hoc sealing on macOS and remains unsigned on Windows.
 Employees may see Gatekeeper or SmartScreen prompts on first install. Subsequent macOS updates use

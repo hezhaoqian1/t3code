@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 // @effect-diagnostics-next-line nodeBuiltinImport:off - Test fixtures use temporary files directly.
 import * as NodePath from "node:path";
 
-import { assert, it } from "@effect/vitest";
+import { assert, expect, it } from "@effect/vitest";
 
 import {
   expectedDesktopReleaseAssets,
@@ -41,6 +41,34 @@ async function writeFixture(): Promise<string> {
 
 it("accepts an exact release bundle with matching updater metadata", async () => {
   await verifyDesktopReleaseBundle(await writeFixture(), version);
+});
+
+it("rejects a release missing the Intel Mac updater archive", async () => {
+  const root = await writeFixture();
+  await NodeFSP.unlink(NodePath.join(root, `FD-Enterprise-AI-${version}-mac-x64.zip`));
+  await expect(verifyDesktopReleaseBundle(root, version)).rejects.toThrow(
+    /exact production asset set/,
+  );
+});
+
+it("rejects a tampered Intel Mac archive even when its size is unchanged", async () => {
+  const root = await writeFixture();
+  const name = `FD-Enterprise-AI-${version}-mac-x64.zip`;
+  await NodeFSP.writeFile(NodePath.join(root, name), "x".repeat(name.length));
+  await expect(verifyDesktopReleaseBundle(root, version)).rejects.toThrow(/invalid sha512/);
+});
+
+it("rejects a combined macOS manifest missing an Intel entry", async () => {
+  const root = await writeFixture();
+  const path = NodePath.join(root, "latest-mac.yml");
+  const manifest = await NodeFSP.readFile(path, "utf8");
+  await NodeFSP.writeFile(
+    path,
+    manifest.replace(/  - url: .*mac-x64\.zip\n    sha512: .*\n    size: .*\n/, ""),
+  );
+  await expect(verifyDesktopReleaseBundle(root, version)).rejects.toThrow(
+    /exact expected asset set/,
+  );
 });
 
 it("rejects extra files in the release bundle", async () => {
