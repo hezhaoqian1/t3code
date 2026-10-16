@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -19,7 +19,7 @@ import { ElectronSafeStorageAdapter } from "./ElectronSafeStorageAdapter.ts";
 const roots = new Set<string>();
 
 afterEach(async () => {
-  await Promise.all([...roots].map((root) => rm(root, { recursive: true, force: true })));
+  await Promise.all([...roots].map((root) => NodeFSP.rm(root, { recursive: true, force: true })));
   roots.clear();
 });
 
@@ -31,26 +31,28 @@ describe("CredentialVault", () => {
     await vault.save(state);
 
     const persisted = await Promise.all(
-      (await readdir(root)).map((file) => readFile(join(root, file), "utf8")),
+      (await NodeFSP.readdir(root)).map((file) =>
+        NodeFSP.readFile(NodePath.join(root, file), "utf8"),
+      ),
     );
     expect(persisted.join("\n")).not.toContain("access-secret");
     expect(persisted.join("\n")).not.toContain("refresh-secret");
     expect(persisted.join("\n")).not.toContain("sk-runtime-secret");
     expect(await vault.load()).toEqual(state);
-    expect((await stat(join(root, "account.v1.json"))).mode & 0o777).toBe(0o600);
+    expect((await NodeFSP.stat(NodePath.join(root, "account.v1.json"))).mode & 0o777).toBe(0o600);
   });
 
   it("rejects corruption and oversized encrypted files", async () => {
     const root = await temporaryRoot();
     const vault = new CredentialVault(root, new TestProtector());
     await vault.save(vaultState());
-    const path = join(root, "account.v1.json");
-    const envelope = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    const path = NodePath.join(root, "account.v1.json");
+    const envelope = JSON.parse(await NodeFSP.readFile(path, "utf8")) as Record<string, unknown>;
     envelope.authTag = Buffer.alloc(4).toString("base64");
-    await writeFile(path, JSON.stringify(envelope));
+    await NodeFSP.writeFile(path, JSON.stringify(envelope));
     await expect(vault.load()).rejects.toBeInstanceOf(CredentialVaultCorruptError);
 
-    await writeFile(path, Buffer.alloc(MAX_VAULT_ENVELOPE_BYTES + 1));
+    await NodeFSP.writeFile(path, Buffer.alloc(MAX_VAULT_ENVELOPE_BYTES + 1));
     await expect(vault.load()).rejects.toBeInstanceOf(CredentialVaultCorruptError);
   });
 
@@ -74,22 +76,22 @@ describe("CredentialVault", () => {
     await vault.save(state);
 
     expect(await vault.load()).toEqual(state);
-    expect((await stat(join(root, "account.v1.json"))).size).toBeLessThanOrEqual(
+    expect((await NodeFSP.stat(NodePath.join(root, "account.v1.json"))).size).toBeLessThanOrEqual(
       MAX_VAULT_ENVELOPE_BYTES,
     );
   });
 
   it("rejects symlinked credential and device files before reading", async () => {
     const root = await temporaryRoot();
-    await mkdir(root, { recursive: true });
-    const target = join(root, "outside.json");
-    await writeFile(target, "{}", { mode: 0o600 });
-    await symlink(target, join(root, "account.v1.json"));
+    await NodeFSP.mkdir(root, { recursive: true });
+    const target = NodePath.join(root, "outside.json");
+    await NodeFSP.writeFile(target, "{}", { mode: 0o600 });
+    await NodeFSP.symlink(target, NodePath.join(root, "account.v1.json"));
     const vault = new CredentialVault(root, new TestProtector());
     await expect(vault.load()).rejects.toBeInstanceOf(CredentialVaultCorruptError);
 
-    await rm(join(root, "account.v1.json"));
-    await symlink(target, join(root, "device.v1.json"));
+    await NodeFSP.rm(NodePath.join(root, "account.v1.json"));
+    await NodeFSP.symlink(target, NodePath.join(root, "device.v1.json"));
     await expect(vault.load()).rejects.toBeInstanceOf(CredentialVaultCorruptError);
   });
 
@@ -103,14 +105,14 @@ describe("CredentialVault", () => {
   it("roundtrips, protects, and validates the revocation intent tombstone", async () => {
     const root = await temporaryRoot();
     const vault = new CredentialVault(root, new TestProtector());
-    const path = join(root, "revocation-intent.v1");
+    const path = NodePath.join(root, "revocation-intent.v1");
 
     expect(await vault.hasRevocationIntent()).toBe(false);
     await vault.markRevocationIntent();
     expect(await vault.hasRevocationIntent()).toBe(true);
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    expect((await NodeFSP.stat(path)).mode & 0o777).toBe(0o600);
 
-    await writeFile(path, "invalid-revocation-intent\n");
+    await NodeFSP.writeFile(path, "invalid-revocation-intent\n");
     await expect(vault.hasRevocationIntent()).rejects.toBeInstanceOf(CredentialVaultCorruptError);
 
     await vault.clearRevocationIntent();
@@ -177,8 +179,8 @@ function vaultState(): StoredFdVaultState {
 }
 
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "fd-identity-vault-"));
-  await rm(root, { recursive: true, force: true });
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-identity-vault-"));
+  await NodeFSP.rm(root, { recursive: true, force: true });
   roots.add(root);
   return root;
 }

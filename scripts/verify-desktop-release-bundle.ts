@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off - Release verification runs as a standalone Node CLI.
 
-import { createHash } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import { parseUpdateManifest } from "./lib/update-manifest.ts";
 
@@ -19,8 +19,8 @@ export function expectedDesktopReleaseAssets(version: string): ReadonlyArray<str
 }
 
 async function sha512Base64(filePath: string): Promise<string> {
-  return createHash("sha512")
-    .update(await readFile(filePath))
+  return NodeCrypto.createHash("sha512")
+    .update(await NodeFSP.readFile(filePath))
     .digest("base64");
 }
 
@@ -30,9 +30,9 @@ async function verifyManifest(
   version: string,
   expectedNames: ReadonlyArray<string>,
 ): Promise<void> {
-  const manifestPath = join(assetRoot, manifestName);
+  const manifestPath = NodePath.join(assetRoot, manifestName);
   const manifest = parseUpdateManifest(
-    await readFile(manifestPath, "utf8"),
+    await NodeFSP.readFile(manifestPath, "utf8"),
     manifestPath,
     manifestName === "latest-mac.yml" ? "macOS" : "Windows",
   );
@@ -48,11 +48,11 @@ async function verifyManifest(
     throw new Error(`${manifestName} does not reference the exact expected asset set.`);
   }
   for (const name of expectedNames) {
-    if (basename(name) !== name) throw new Error(`Invalid release asset name: ${name}`);
+    if (NodePath.basename(name) !== name) throw new Error(`Invalid release asset name: ${name}`);
     const entry = entries.get(name);
     if (!entry) throw new Error(`${manifestName} is missing ${name}.`);
-    const assetPath = join(assetRoot, name);
-    const assetStat = await stat(assetPath);
+    const assetPath = NodePath.join(assetRoot, name);
+    const assetStat = await NodeFSP.stat(assetPath);
     if (!assetStat.isFile() || entry.size !== assetStat.size) {
       throw new Error(`${manifestName} has an invalid size for ${name}.`);
     }
@@ -64,9 +64,9 @@ async function verifyManifest(
 
 export async function verifyDesktopReleaseBundle(assetRootArg: string, version: string) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Invalid release version: ${version}`);
-  const assetRoot = resolve(assetRootArg);
+  const assetRoot = NodePath.resolve(assetRootArg);
   const expected = expectedDesktopReleaseAssets(version);
-  const actual = (await readdir(assetRoot)).toSorted();
+  const actual = (await NodeFSP.readdir(assetRoot)).toSorted();
   if (JSON.stringify(actual) !== JSON.stringify([...expected].toSorted())) {
     throw new Error("Release directory does not contain the exact production asset set.");
   }

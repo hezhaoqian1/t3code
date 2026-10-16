@@ -26,13 +26,12 @@ export function FdModelSelector(props: {
   onValueChange: (model: string) => void;
 }) {
   const options = resolveFdModelOptions(props.models);
-  if (options.length === 0) return null;
-  const value = options.includes(props.value) ? props.value : (options[0] ?? "");
+  const value = options.includes(props.value) ? props.value : null;
 
   return (
     <Select
       value={value}
-      disabled={props.disabled || options.length < 2}
+      disabled={props.disabled || options.length === 0 || (options.length === 1 && value !== null)}
       onValueChange={(nextValue) => {
         const selected = resolveFdModelChange(nextValue, options);
         if (selected) props.onValueChange(selected);
@@ -45,7 +44,9 @@ export function FdModelSelector(props: {
         className="h-8 w-24 min-w-24 shrink-0 border-border/70 bg-background/60 px-2 text-xs font-medium shadow-none"
       >
         <SelectValue>
-          {fdModelLabel(props.models.find((model) => model.slug === value) ?? value)}
+          {value
+            ? fdModelLabel(props.models.find((model) => model.slug === value) ?? value)
+            : "请选择模型"}
         </SelectValue>
       </SelectTrigger>
       <SelectPopup side="top" align="end" alignItemWithTrigger={false} matchTriggerWidth={false}>

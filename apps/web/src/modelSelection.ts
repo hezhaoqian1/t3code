@@ -15,7 +15,9 @@ export function resolveAppModelSelection(
 ): string {
   const models =
     providers.find((provider) => provider.instanceId === FD_PROVIDER_INSTANCE_ID)?.models ?? [];
-  if (selectedModel && models.some((model) => model.slug === selectedModel)) {
+  // Preserve old-task selections until the user explicitly switches. Silently
+  // falling back would disguise a removed model as a different active model.
+  if (selectedModel) {
     return selectedModel;
   }
   return models.find((model) => model.isDefault)?.slug ?? models[0]?.slug ?? "deepseek-flash";

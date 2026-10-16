@@ -684,7 +684,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase,
     isConnecting,
     isSendBusy,
-    sendDisabledReason,
+    sendDisabledReason: suppliedSendDisabledReason,
     isPreparingWorktree,
     environmentUnavailable,
     activePendingApproval,
@@ -734,7 +734,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
   } = props;
-  const isSendDisabled = sendDisabledReason !== null;
   const navigate = useNavigate();
   const feishuConnectorState = useFeishuConnectorState();
 
@@ -910,6 +909,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     settings,
   });
+  const modelUnavailable =
+    selectedProviderEntry !== undefined &&
+    !selectedProviderEntry.models.some((model) => model.slug === selectedModel);
+  const modelUnavailableMessage = selectedProviderEntry?.models.length
+    ? "当前模型已不可用，请切换 Flash 重试。"
+    : "暂无可用模型，请刷新模型列表或联系管理员。";
+  const sendDisabledReason =
+    suppliedSendDisabledReason ?? (modelUnavailable ? modelUnavailableMessage : null);
+  const isSendDisabled = sendDisabledReason !== null;
   const selectedProviderStatus = useMemo(
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
@@ -3474,6 +3482,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 }
                 disabled={isConnecting || isComposerApprovalState || projectSelectionRequired}
               />
+              {modelUnavailable && (
+                <p role="status" className="px-3 pb-2 text-xs text-destructive sm:px-4">
+                  {modelUnavailableMessage}
+                </p>
+              )}
               {showMobilePendingAnswerActions ? (
                 <div
                   data-chat-composer-mobile-pending-actions="true"

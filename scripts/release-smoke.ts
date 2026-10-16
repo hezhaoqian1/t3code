@@ -1,3 +1,4 @@
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -6,6 +7,8 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
+
+const hostPlatform = Effect.runSync(HostProcessPlatform);
 
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), "..");
 
@@ -198,7 +201,7 @@ try {
 
   // Windows exposes the Vite+ CLI through a .CMD shim. Node's spawn APIs do
   // not resolve extensionless shims the same way a shell does.
-  const vitePlusCommand = process.platform === "win32" ? "vp.CMD" : "vp";
+  const vitePlusCommand = hostPlatform === "win32" ? "vp.CMD" : "vp";
   NodeChildProcess.execFileSync(
     vitePlusCommand,
     ["install", "--lockfile-only", "--ignore-scripts"],
@@ -206,7 +209,7 @@ try {
       cwd: tempRoot,
       stdio: "inherit",
       // .CMD shims must be launched through cmd.exe on Windows.
-      shell: process.platform === "win32",
+      shell: hostPlatform === "win32",
     },
   );
 
@@ -297,7 +300,7 @@ try {
   const mergedPreviewWindowsManifestPath = NodePath.resolve(tempRoot, "release-assets/preview.yml");
   const { arm64Path: winDebugArm64Path, x64Path: winDebugX64Path } =
     writeWindowsBuilderDebugFixtures(tempRoot);
-  if (process.platform === "win32") {
+  if (hostPlatform === "win32") {
     const releaseAssetsDirectory = NodePath.resolve(tempRoot, "release-assets");
     const mergeManifestScript = NodePath.resolve(repoRoot, "scripts/merge-update-manifests.ts");
     const windowsX64Manifests = NodeFS.readdirSync(releaseAssetsDirectory).filter(

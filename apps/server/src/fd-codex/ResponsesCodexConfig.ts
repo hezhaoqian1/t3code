@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { randomUUID } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 /**
  * Model-level policy used by a Responses-backed Codex instance.
@@ -61,12 +61,12 @@ export interface PrepareResponsesCodexHomeInput {
 export async function prepareResponsesCodexHome(
   input: PrepareResponsesCodexHomeInput,
 ): Promise<string> {
-  if (!isAbsolute(input.codexHome)) {
+  if (!NodePath.isAbsolute(input.codexHome)) {
     throw new Error("Managed CODEX_HOME must be absolute");
   }
 
-  const configPath = join(input.codexHome, "config.toml");
-  await mkdir(input.codexHome, { recursive: true, mode: 0o700 });
+  const configPath = NodePath.join(input.codexHome, "config.toml");
+  await NodeFSP.mkdir(input.codexHome, { recursive: true, mode: 0o700 });
   await writeFileAtomically(configPath, renderResponsesCodexConfig(input.provider));
   return configPath;
 }
@@ -127,12 +127,12 @@ function tomlString(value: string): string {
 }
 
 async function writeFileAtomically(filePath: string, contents: string): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
-  await writeFile(temporaryPath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  await NodeFSP.mkdir(NodePath.dirname(filePath), { recursive: true, mode: 0o700 });
+  const temporaryPath = `${filePath}.${NodeCrypto.randomUUID()}.tmp`;
+  await NodeFSP.writeFile(temporaryPath, contents, { encoding: "utf8", mode: 0o600, flag: "wx" });
   try {
-    await rename(temporaryPath, filePath);
+    await NodeFSP.rename(temporaryPath, filePath);
   } finally {
-    await rm(temporaryPath, { force: true });
+    await NodeFSP.rm(temporaryPath, { force: true });
   }
 }

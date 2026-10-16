@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFS from "node:fs/promises";
+import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
@@ -122,14 +122,14 @@ function parseFrontmatter(contents: string): ParsedFrontmatter {
 }
 
 async function readBoundedRegularFile(filePath: string, expectedRoot: string): Promise<string> {
-  const resolved = await NodeFS.realpath(filePath);
+  const resolved = await NodeFSP.realpath(filePath);
   if (!isContained(expectedRoot, resolved)) throw new Error("outside-root");
-  const handle = await NodeFS.open(resolved, "r");
+  const handle = await NodeFSP.open(resolved, "r");
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw new Error("not-regular-file");
     if (stat.size > NATIVE_SKILL_LIMITS.maxSkillBytes) throw new Error("oversized-file");
-    const pathStat = await NodeFS.lstat(resolved);
+    const pathStat = await NodeFSP.lstat(resolved);
     if (stat.dev !== pathStat.dev || stat.ino !== pathStat.ino) {
       throw new Error("changed-during-read");
     }
@@ -148,7 +148,7 @@ async function listContainedResources(
   const directory = NodePath.join(skillRoot, directoryName);
   let resolvedDirectory: string;
   try {
-    resolvedDirectory = await NodeFS.realpath(directory);
+    resolvedDirectory = await NodeFSP.realpath(directory);
   } catch {
     return [];
   }
@@ -160,7 +160,7 @@ async function listContainedResources(
     const current = pending.shift()!;
     let entries: Array<import("node:fs").Dirent<string>>;
     try {
-      entries = await NodeFS.readdir(current, { withFileTypes: true, encoding: "utf8" });
+      entries = await NodeFSP.readdir(current, { withFileTypes: true, encoding: "utf8" });
     } catch {
       continue;
     }
@@ -169,12 +169,12 @@ async function listContainedResources(
       const unresolved = NodePath.join(current, entry.name);
       let resolved: string;
       try {
-        resolved = await NodeFS.realpath(unresolved);
+        resolved = await NodeFSP.realpath(unresolved);
       } catch {
         continue;
       }
       if (!isContained(skillRoot, resolved)) continue;
-      const stat = await NodeFS.stat(resolved).catch(() => undefined);
+      const stat = await NodeFSP.stat(resolved).catch(() => undefined);
       if (stat?.isDirectory()) pending.push(resolved);
       else if (stat?.isFile()) resources.push(NodePath.relative(skillRoot, resolved));
     }
@@ -258,7 +258,7 @@ export class NativeSkillCatalog {
     for (const root of configuredRoots(this.#options)) {
       let resolvedRoot: string;
       try {
-        resolvedRoot = await NodeFS.realpath(root.path);
+        resolvedRoot = await NodeFSP.realpath(root.path);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
           diagnostics.push(
@@ -270,7 +270,7 @@ export class NativeSkillCatalog {
 
       let entries: Array<import("node:fs").Dirent<string>>;
       try {
-        entries = await NodeFS.readdir(resolvedRoot, { withFileTypes: true, encoding: "utf8" });
+        entries = await NodeFSP.readdir(resolvedRoot, { withFileTypes: true, encoding: "utf8" });
       } catch {
         diagnostics.push(
           diagnostic("inaccessible-root", root.path, "Skill root could not be listed."),
@@ -283,7 +283,7 @@ export class NativeSkillCatalog {
         const candidateRoot = NodePath.join(resolvedRoot, entry.name);
         let skillRoot: string;
         try {
-          skillRoot = await NodeFS.realpath(candidateRoot);
+          skillRoot = await NodeFSP.realpath(candidateRoot);
         } catch {
           diagnostics.push(
             diagnostic("read-failed", candidateRoot, "Skill directory is unavailable."),

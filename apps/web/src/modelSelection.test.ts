@@ -45,12 +45,12 @@ describe("modelSelection", () => {
     ).toBe(FD_RUNTIME_PRO_MODEL);
   });
 
-  it("keeps Flash as the default and rejects unadvertised or arbitrary models", () => {
+  it("defaults new tasks to Flash but preserves unavailable task selections for an explicit switch", () => {
     expect(resolveAppModelSelection(fdProvider.driver, settings, [fdProvider], null)).toBe(
       FD_RUNTIME_DEFAULT_MODEL,
     );
     expect(resolveAppModelSelection(fdProvider.driver, settings, [fdProvider], "other-model")).toBe(
-      FD_RUNTIME_DEFAULT_MODEL,
+      "other-model",
     );
     expect(
       resolveAppModelSelection(
@@ -59,7 +59,7 @@ describe("modelSelection", () => {
         [{ ...fdProvider, models: [] }],
         FD_RUNTIME_PRO_MODEL,
       ),
-    ).toBe(FD_RUNTIME_DEFAULT_MODEL);
+    ).toBe(FD_RUNTIME_PRO_MODEL);
   });
 
   it("resolves models only for the fixed FD provider instance", () => {

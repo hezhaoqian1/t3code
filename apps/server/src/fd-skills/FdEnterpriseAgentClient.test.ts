@@ -21,7 +21,7 @@ const credentials: FdServerRuntimeCredentialProjection = {
   policy: {
     version: 1,
     capability: "general_assistant",
-    model: "deepseek-v4-flash",
+    model: "deepseek-flash",
     expiresAt: 4_102_444_800,
   },
   generation: 1,
@@ -40,7 +40,7 @@ function stream(text: string): ReadableStream<Uint8Array> {
 }
 
 const terminalStream = [
-  `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-v4-flash"}\n\n`,
+  `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-flash"}\n\n`,
   `event: assistant.delta\ndata: {"turn_id":"${enterpriseTurnId}","delta":"done"}\n\n`,
   `event: turn.completed\ndata: {"turn_id":"${enterpriseTurnId}","message":{"id":10,"conversation_id":0,"role":"assistant","text":"done","created_at":1786320000},"tool_calls":0,"usage":{"input_tokens":2,"output_tokens":1}}\n\n`,
 ].join("");
@@ -90,7 +90,7 @@ describe("FdEnterpriseAgentClient", () => {
     const body = JSON.parse(String(init.body));
     expect(body).toEqual({
       client_thread_id: "550e8400-e29b-41d4-a716-446655440000",
-      model: "deepseek-v4-flash",
+      model: "deepseek-flash",
       token_id: 45,
       skill_version_ids: [10004],
       message: "hello",
@@ -118,7 +118,7 @@ describe("FdEnterpriseAgentClient", () => {
           },
         ],
         model_capabilities: {
-          "deepseek-v4-flash": {
+          "deepseek-flash": {
             fd_skills: true,
             fd_skill_protocol: "enterprise-agent-v1",
             view_policy: "secret",
@@ -143,7 +143,7 @@ describe("FdEnterpriseAgentClient", () => {
     await catalog.refresh();
     expect(catalog.authorized).toBe(true);
     expect(catalog.supportsModel("deepseek-v4-pro")).toBe(false);
-    expect(catalog.supportsModel("deepseek-v4-flash")).toBe(true);
+    expect(catalog.supportsModel("deepseek-flash")).toBe(true);
     expect(catalog.findVersion(10004)?.name).toBe("company-database-query");
     expect(catalog.findVersion(10004, "deepseek-v4-pro")).toBeUndefined();
   });
@@ -151,7 +151,7 @@ describe("FdEnterpriseAgentClient", () => {
   it("forwards an explicitly selected enterprise model", async () => {
     const fetch = vi.fn(
       async (_url: URL, init?: RequestInit) =>
-        new Response(stream(terminalStream.replaceAll("deepseek-v4-flash", "qwen3.8-max")), {
+        new Response(stream(terminalStream.replaceAll("deepseek-flash", "qwen3.8-max")), {
           status: 200,
           headers: { "Content-Type": "text/event-stream" },
         }),
@@ -411,17 +411,17 @@ describe("FdEnterpriseAgentClient", () => {
     };
     await expect(
       run(
-        'event: turn.started\ndata: {"turn_id":"not-a-uuid","conversation_id":0,"model":"deepseek-v4-flash"}\n\n',
+        'event: turn.started\ndata: {"turn_id":"not-a-uuid","conversation_id":0,"model":"deepseek-flash"}\n\n',
       ),
     ).rejects.toMatchObject({ code: "invalid_event" });
     await expect(
       run(
-        `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-v4-flash"}\n\nevent: tool.started\ndata: {"turn_id":"${enterpriseTurnId}","call_id":"${"x".repeat(129)}","tool":"fd_data_query","tool_class":"data_read","label":"query"}\n\n`,
+        `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-flash"}\n\nevent: tool.started\ndata: {"turn_id":"${enterpriseTurnId}","call_id":"${"x".repeat(129)}","tool":"fd_data_query","tool_class":"data_read","label":"query"}\n\n`,
       ),
     ).rejects.toMatchObject({ code: "invalid_event" });
     await expect(
       run(
-        `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-v4-flash"}\n\nevent: tool.started\ndata: {"turn_id":"${enterpriseTurnId}","call_id":"call-1","tool":"fd_data_query","tool_class":"data_read","label":"query"}\n\nevent: tool.completed\ndata: {"turn_id":"${enterpriseTurnId}","call_id":"call-1","tool":"fd_data_query","tool_class":"data_read","status":"succeeded","audit_id":"${"a".repeat(129)}"}\n\n`,
+        `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-flash"}\n\nevent: tool.started\ndata: {"turn_id":"${enterpriseTurnId}","call_id":"call-1","tool":"fd_data_query","tool_class":"data_read","label":"query"}\n\nevent: tool.completed\ndata: {"turn_id":"${enterpriseTurnId}","call_id":"call-1","tool":"fd_data_query","tool_class":"data_read","status":"succeeded","audit_id":"${"a".repeat(129)}"}\n\n`,
       ),
     ).rejects.toMatchObject({ code: "invalid_event" });
 
@@ -432,7 +432,7 @@ describe("FdEnterpriseAgentClient", () => {
     ).resolves.toMatchObject([{ type: "turn.failed", turnId: "turn_1234567890123456" }]);
     await expect(
       run(
-        `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-v4-flash","replayed":true}\n\nevent: turn.completed\ndata: {"turn_id":"${enterpriseTurnId}","replayed":true,"message":{"id":10,"conversation_id":0,"role":"assistant","text":"done","created_at":1786320000},"tool_calls":1,"usage":{"input_tokens":2,"output_tokens":1}}\n\n`,
+        `event: turn.started\ndata: {"turn_id":"${enterpriseTurnId}","conversation_id":0,"model":"deepseek-flash","replayed":true}\n\nevent: turn.completed\ndata: {"turn_id":"${enterpriseTurnId}","replayed":true,"message":{"id":10,"conversation_id":0,"role":"assistant","text":"done","created_at":1786320000},"tool_calls":1,"usage":{"input_tokens":2,"output_tokens":1}}\n\n`,
       ),
     ).resolves.toEqual([
       expect.objectContaining({ type: "turn.started", replayed: true }),

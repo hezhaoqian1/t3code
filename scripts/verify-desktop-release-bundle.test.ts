@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
+import * as NodeCrypto from "node:crypto";
 // @effect-diagnostics-next-line nodeBuiltinImport:off - Test fixtures use temporary files directly.
-import { mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
 // @effect-diagnostics-next-line nodeBuiltinImport:off - Test fixtures use temporary files directly.
-import { join } from "node:path";
+import * as NodePath from "node:path";
 
 import { assert, it } from "@effect/vitest";
 
@@ -15,22 +15,22 @@ import {
 const version = "1.2.3";
 
 async function writeFixture(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "fd-release-bundle-"));
+  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-release-bundle-"));
   const names = expectedDesktopReleaseAssets(version).filter((name) => !name.endsWith(".yml"));
-  for (const name of names) await writeFile(join(root, name), name);
+  for (const name of names) await NodeFSP.writeFile(NodePath.join(root, name), name);
   const entry = (name: string) => {
     const content = Buffer.from(name);
-    return `  - url: ${name}\n    sha512: ${createHash("sha512").update(content).digest("base64")}\n    size: ${content.length}`;
+    return `  - url: ${name}\n    sha512: ${NodeCrypto.createHash("sha512").update(content).digest("base64")}\n    size: ${content.length}`;
   };
-  await writeFile(
-    join(root, "latest-mac.yml"),
+  await NodeFSP.writeFile(
+    NodePath.join(root, "latest-mac.yml"),
     `version: '${version}'\nfiles:\n${names
       .filter((name) => name.includes("-mac-"))
       .map(entry)
       .join("\n")}\nreleaseDate: '2026-08-12T00:00:00.000Z'\n`,
   );
-  await writeFile(
-    join(root, "latest.yml"),
+  await NodeFSP.writeFile(
+    NodePath.join(root, "latest.yml"),
     `version: '${version}'\nfiles:\n${names
       .filter((name) => name.includes("-win-"))
       .map(entry)
@@ -45,7 +45,7 @@ it("accepts an exact release bundle with matching updater metadata", async () =>
 
 it("rejects extra files in the release bundle", async () => {
   const root = await writeFixture();
-  await writeFile(join(root, "unexpected.txt"), "unexpected");
+  await NodeFSP.writeFile(NodePath.join(root, "unexpected.txt"), "unexpected");
   let error: unknown;
   try {
     await verifyDesktopReleaseBundle(root, version);
@@ -59,7 +59,7 @@ it("rejects extra files in the release bundle", async () => {
 it("rejects updater hashes that do not match the artifact", async () => {
   const root = await writeFixture();
   const name = `FD-Enterprise-AI-${version}-mac-arm64.zip`;
-  await writeFile(join(root, name), "tampered");
+  await NodeFSP.writeFile(NodePath.join(root, name), "tampered");
   let error: unknown;
   try {
     await verifyDesktopReleaseBundle(root, version);

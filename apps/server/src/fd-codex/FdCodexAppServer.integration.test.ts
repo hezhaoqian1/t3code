@@ -1,7 +1,8 @@
+import { it as effectIt } from "@effect/vitest";
 // @effect-diagnostics nodeBuiltinImport:off
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -29,29 +30,33 @@ const shouldRun = process.env.FD_RUN_REAL_APP_SERVER === "1";
 const instanceId = ProviderInstanceId.make("fd-deepseek");
 
 describe.skipIf(!shouldRun)("FD Codex App Server integration", () => {
-  it.skipIf(!process.env.FD_ENTERPRISE_SKILL_VERSION_ID)(
+  effectIt.live.skipIf(!process.env.FD_ENTERPRISE_SKILL_VERSION_ID)(
     "retains a managed Kimi Skill answer across follow-up turns and session restart",
-    async () => {
-      const root = await mkdtemp(join(tmpdir(), "fd-enterprise-context-"));
-      const credentials: FdServerRuntimeCredentialProjection = {
-        userId: Number(process.env.FD_TEST_USER_ID),
-        runtimeTokenId: Number(process.env.FD_TEST_TOKEN_ID),
-        newApiOrigin: process.env.FD_NEW_API_ORIGIN!,
-        runtimeApiKey: requiredEnvironment("FD_NEW_API_KEY"),
-        accessToken: process.env.FD_TEST_ACCESS_TOKEN!,
-        accessExpiresAt: 4_102_444_800,
-        policy: {
-          version: 1,
-          capability: "general_assistant",
-          model: FD_CODEX_MODEL,
-          expiresAt: 4_102_444_800,
-        },
-        generation: 1,
-      };
-      const layer = ServerConfig.layerTest(root, root).pipe(Layer.provideMerge(NodeServices.layer));
-      try {
-        await Effect.runPromise(
-          Effect.scoped(
+    () =>
+      Effect.gen(function* () {
+        const root = yield* Effect.promise(async () =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-enterprise-context-")),
+        );
+        const credentials: FdServerRuntimeCredentialProjection = {
+          userId: Number(process.env.FD_TEST_USER_ID),
+          runtimeTokenId: Number(process.env.FD_TEST_TOKEN_ID),
+          newApiOrigin: process.env.FD_NEW_API_ORIGIN!,
+          runtimeApiKey: requiredEnvironment("FD_NEW_API_KEY"),
+          accessToken: process.env.FD_TEST_ACCESS_TOKEN!,
+          accessExpiresAt: 4_102_444_800,
+          policy: {
+            version: 1,
+            capability: "general_assistant",
+            model: FD_CODEX_MODEL,
+            expiresAt: 4_102_444_800,
+          },
+          generation: 1,
+        };
+        const layer = ServerConfig.layerTest(root, root).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        );
+        try {
+          yield* Effect.scoped(
             Effect.gen(function* () {
               const store = yield* makeStore();
               yield* store.apply({ version: 1, type: "set", credentials });
@@ -143,174 +148,184 @@ describe.skipIf(!shouldRun)("FD Codex App Server integration", () => {
                 ),
               ).toBe(true);
             }),
-          ).pipe(Effect.provide(layer)),
-        );
-      } finally {
-        await rm(root, { recursive: true, force: true });
-      }
-    },
+          ).pipe(Effect.provide(layer));
+        } finally {
+          yield* Effect.promise(async () => NodeFSP.rm(root, { recursive: true, force: true }));
+        }
+      }),
     600_000,
   );
 
-  it("streams DeepSeek, executes a local Skill, compacts, and resumes the conversation", async () => {
-    const binaryPath = requiredEnvironment("FD_CODEX_BINARY");
-    const runtimeApiKey = requiredEnvironment("FD_NEW_API_KEY");
-    if (!isAbsolute(binaryPath)) throw new Error("FD_CODEX_BINARY must be absolute");
+  effectIt.live(
+    "streams DeepSeek, executes a local Skill, compacts, and resumes the conversation",
+    () =>
+      Effect.gen(function* () {
+        const binaryPath = requiredEnvironment("FD_CODEX_BINARY");
+        const runtimeApiKey = requiredEnvironment("FD_NEW_API_KEY");
+        if (!NodePath.isAbsolute(binaryPath)) throw new Error("FD_CODEX_BINARY must be absolute");
 
-    const root = await mkdtemp(join(tmpdir(), "fd-t3-codex-app-server-"));
-    const projectRoot = join(root, "project");
-    const skillRoot = join(projectRoot, ".agents", "skills", "fd-proof");
-    await mkdir(skillRoot, { recursive: true });
-    await writeFile(
-      join(skillRoot, "SKILL.md"),
-      [
-        "---",
-        "name: fd-proof",
-        "description: Prove structured local Skill execution.",
-        "---",
-        "When invoked, reply with exactly FD_LOCAL_SKILL_OK and nothing else.",
-        "",
-      ].join("\n"),
-    );
+        const root = yield* Effect.promise(async () =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-t3-codex-app-server-")),
+        );
+        const projectRoot = NodePath.join(root, "project");
+        const skillRoot = NodePath.join(projectRoot, ".agents", "skills", "fd-proof");
+        yield* Effect.promise(async () => NodeFSP.mkdir(skillRoot, { recursive: true }));
+        yield* Effect.promise(async () =>
+          NodeFSP.writeFile(
+            NodePath.join(skillRoot, "SKILL.md"),
+            [
+              "---",
+              "name: fd-proof",
+              "description: Prove structured local Skill execution.",
+              "---",
+              "When invoked, reply with exactly FD_LOCAL_SKILL_OK and nothing else.",
+              "",
+            ].join("\n"),
+          ),
+        );
 
-    const credentials: FdServerRuntimeCredentialProjection = {
-      userId: 1,
-      runtimeTokenId: 1,
-      newApiOrigin: process.env.FD_NEW_API_ORIGIN ?? "http://127.0.0.1:3001",
-      runtimeApiKey,
-      accessToken: "integration-access-token-must-not-enter-codex",
-      accessExpiresAt: 4_102_444_800,
-      policy: {
-        version: 1,
-        capability: "general_assistant",
-        model: FD_CODEX_MODEL,
-        expiresAt: 4_102_444_800,
-      },
-      generation: 1,
-    };
-    const serverLayer = ServerConfig.layerTest(projectRoot, root).pipe(
-      Layer.provideMerge(NodeServices.layer),
-    );
+        const credentials: FdServerRuntimeCredentialProjection = {
+          userId: 1,
+          runtimeTokenId: 1,
+          newApiOrigin: process.env.FD_NEW_API_ORIGIN ?? "http://127.0.0.1:3001",
+          runtimeApiKey,
+          accessToken: "integration-access-token-must-not-enter-codex",
+          accessExpiresAt: 4_102_444_800,
+          policy: {
+            version: 1,
+            capability: "general_assistant",
+            model: FD_CODEX_MODEL,
+            expiresAt: 4_102_444_800,
+          },
+          generation: 1,
+        };
+        const serverLayer = ServerConfig.layerTest(projectRoot, root).pipe(
+          Layer.provideMerge(NodeServices.layer),
+        );
 
-    try {
-      await Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const store = yield* makeStore();
-            yield* store.apply({ version: 1, type: "set", credentials });
-            const adapter = yield* makeFdCodexAdapter({ instanceId, binaryPath }).pipe(
-              Effect.provideService(FdRuntimeCredentialStore, store.service),
-            );
-            const events: ProviderRuntimeEvent[] = [];
-            const receipts = yield* Queue.unbounded<ProviderRuntimeEvent>();
-            yield* Stream.runForEach(adapter.streamEvents, (event) =>
-              Effect.sync(() => events.push(event)).pipe(
-                Effect.andThen(Queue.offer(receipts, event)),
-              ),
-            ).pipe(Effect.forkScoped);
+        try {
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const store = yield* makeStore();
+              yield* store.apply({ version: 1, type: "set", credentials });
+              const adapter = yield* makeFdCodexAdapter({ instanceId, binaryPath }).pipe(
+                Effect.provideService(FdRuntimeCredentialStore, store.service),
+              );
+              const events: ProviderRuntimeEvent[] = [];
+              const receipts = yield* Queue.unbounded<ProviderRuntimeEvent>();
+              yield* Stream.runForEach(adapter.streamEvents, (event) =>
+                Effect.sync(() => events.push(event)).pipe(
+                  Effect.andThen(Queue.offer(receipts, event)),
+                ),
+              ).pipe(Effect.forkScoped);
 
-            const threadId = ThreadId.make("fd-real-codex-thread");
-            const firstSession = yield* adapter.startSession({
-              threadId,
-              cwd: projectRoot,
-              runtimeMode: "approval-required",
-            });
-            expect(firstSession.model).toBe(FD_CODEX_MODEL);
+              const threadId = ThreadId.make("fd-real-codex-thread");
+              const firstSession = yield* adapter.startSession({
+                threadId,
+                cwd: projectRoot,
+                runtimeMode: "approval-required",
+              });
+              expect(firstSession.model).toBe(FD_CODEX_MODEL);
 
-            const first = yield* adapter.sendTurn({
-              threadId,
-              input: "Remember the codeword FD_RESUME_CONTEXT_7319. Reply exactly FD_STREAM_OK.",
-            });
-            yield* waitForCompletedTurn(receipts, first.turnId).pipe(Effect.timeout("120 seconds"));
-            expect(assistantText(events, first.turnId)).toBe("FD_STREAM_OK");
-            expect(events).toContainEqual(
-              expect.objectContaining({
-                type: "content.delta",
-                turnId: first.turnId,
-                payload: expect.objectContaining({ streamKind: "assistant_text" }),
-              }),
-            );
+              const first = yield* adapter.sendTurn({
+                threadId,
+                input: "Remember the codeword FD_RESUME_CONTEXT_7319. Reply exactly FD_STREAM_OK.",
+              });
+              yield* waitForCompletedTurn(receipts, first.turnId).pipe(
+                Effect.timeout("120 seconds"),
+              );
+              expect(assistantText(events, first.turnId)).toBe("FD_STREAM_OK");
+              expect(events).toContainEqual(
+                expect.objectContaining({
+                  type: "content.delta",
+                  turnId: first.turnId,
+                  payload: expect.objectContaining({ streamKind: "assistant_text" }),
+                }),
+              );
 
-            const skillTurn = yield* adapter.sendTurn({
-              threadId,
-              input: "$fd-proof run the selected Skill",
-            });
-            yield* waitForCompletedTurn(receipts, skillTurn.turnId).pipe(
-              Effect.timeout("120 seconds"),
-            );
-            expect(assistantText(events, skillTurn.turnId)).toBe("FD_LOCAL_SKILL_OK");
+              const skillTurn = yield* adapter.sendTurn({
+                threadId,
+                input: "$fd-proof run the selected Skill",
+              });
+              yield* waitForCompletedTurn(receipts, skillTurn.turnId).pipe(
+                Effect.timeout("120 seconds"),
+              );
+              expect(assistantText(events, skillTurn.turnId)).toBe("FD_LOCAL_SKILL_OK");
 
-            yield* adapter.compaction!.start(threadId);
-            yield* Effect.gen(function* () {
-              while (true) {
-                const event = yield* Queue.take(receipts);
-                if (event.type === "thread.state.changed" && event.payload.state === "compacted")
-                  return;
-                if (event.type === "runtime.error")
-                  return yield* Effect.die(new Error("Real compaction failed"));
+              yield* adapter.compaction!.start(threadId);
+              yield* Effect.gen(function* () {
+                while (true) {
+                  const event = yield* Queue.take(receipts);
+                  if (event.type === "thread.state.changed" && event.payload.state === "compacted")
+                    return;
+                  if (event.type === "runtime.error")
+                    return yield* Effect.die(new Error("Real compaction failed"));
+                }
+              }).pipe(Effect.timeout("180 seconds"));
+
+              expect(skillTurn.resumeCursor).toEqual(
+                expect.objectContaining({ threadId: expect.any(String) }),
+              );
+              const resumeCursor = skillTurn.resumeCursor;
+              if (!resumeCursor) {
+                return yield* Effect.die(
+                  new Error("Real App Server did not return a resume cursor"),
+                );
               }
-            }).pipe(Effect.timeout("180 seconds"));
+              yield* adapter.stopSession(threadId);
+              const resumedSession = yield* adapter.startSession({
+                threadId,
+                cwd: projectRoot,
+                runtimeMode: "approval-required",
+                resumeCursor,
+              });
+              expect(resumedSession.resumeCursor).toEqual(resumeCursor);
 
-            expect(skillTurn.resumeCursor).toEqual(
-              expect.objectContaining({ threadId: expect.any(String) }),
-            );
-            const resumeCursor = skillTurn.resumeCursor;
-            if (!resumeCursor) {
-              return yield* Effect.die(new Error("Real App Server did not return a resume cursor"));
-            }
-            yield* adapter.stopSession(threadId);
-            const resumedSession = yield* adapter.startSession({
-              threadId,
-              cwd: projectRoot,
-              runtimeMode: "approval-required",
-              resumeCursor,
-            });
-            expect(resumedSession.resumeCursor).toEqual(resumeCursor);
+              const resumedTurn = yield* adapter.sendTurn({
+                threadId,
+                input: "What codeword did I ask you to remember? Reply with the codeword only.",
+              });
+              yield* waitForCompletedTurn(receipts, resumedTurn.turnId).pipe(
+                Effect.timeout("120 seconds"),
+              );
+              expect(assistantText(events, resumedTurn.turnId)).toBe("FD_RESUME_CONTEXT_7319");
 
-            const resumedTurn = yield* adapter.sendTurn({
-              threadId,
-              input: "What codeword did I ask you to remember? Reply with the codeword only.",
-            });
-            yield* waitForCompletedTurn(receipts, resumedTurn.turnId).pipe(
-              Effect.timeout("120 seconds"),
-            );
-            expect(assistantText(events, resumedTurn.turnId)).toBe("FD_RESUME_CONTEXT_7319");
+              const switchedTurn = yield* adapter.sendTurn({
+                threadId,
+                modelSelection: { instanceId, model: "kimi-k3" },
+                input: "What codeword did I ask you to remember? Reply with the codeword only.",
+              });
+              yield* waitForCompletedTurn(receipts, switchedTurn.turnId).pipe(
+                Effect.timeout("120 seconds"),
+              );
+              expect(switchedTurn.resumeCursor).toEqual(resumeCursor);
+              expect(assistantText(events, switchedTurn.turnId)).toBe("FD_RESUME_CONTEXT_7319");
 
-            const switchedTurn = yield* adapter.sendTurn({
-              threadId,
-              modelSelection: { instanceId, model: "kimi-k3" },
-              input: "What codeword did I ask you to remember? Reply with the codeword only.",
-            });
-            yield* waitForCompletedTurn(receipts, switchedTurn.turnId).pipe(
-              Effect.timeout("120 seconds"),
-            );
-            expect(switchedTurn.resumeCursor).toEqual(resumeCursor);
-            expect(assistantText(events, switchedTurn.turnId)).toBe("FD_RESUME_CONTEXT_7319");
-
-            yield* adapter.stopSession(threadId);
-            const missingCursor = { threadId: "00000000-0000-7000-8000-000000000001" };
-            const freshSession = yield* adapter.startSession({
-              threadId,
-              cwd: projectRoot,
-              runtimeMode: "approval-required",
-              resumeCursor: missingCursor,
-            });
-            expect(freshSession.resumeCursor).not.toEqual(missingCursor);
-            const freshTurn = yield* adapter.sendTurn({
-              threadId,
-              input: "Reply exactly FD_FRESH_CONTEXT_OK.",
-            });
-            yield* waitForCompletedTurn(receipts, freshTurn.turnId).pipe(
-              Effect.timeout("120 seconds"),
-            );
-            expect(assistantText(events, freshTurn.turnId)).toBe("FD_FRESH_CONTEXT_OK");
-          }),
-        ).pipe(Effect.provide(serverLayer)),
-      );
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, 540_000);
+              yield* adapter.stopSession(threadId);
+              const missingCursor = { threadId: "00000000-0000-7000-8000-000000000001" };
+              const freshSession = yield* adapter.startSession({
+                threadId,
+                cwd: projectRoot,
+                runtimeMode: "approval-required",
+                resumeCursor: missingCursor,
+              });
+              expect(freshSession.resumeCursor).not.toEqual(missingCursor);
+              const freshTurn = yield* adapter.sendTurn({
+                threadId,
+                input: "Reply exactly FD_FRESH_CONTEXT_OK.",
+              });
+              yield* waitForCompletedTurn(receipts, freshTurn.turnId).pipe(
+                Effect.timeout("120 seconds"),
+              );
+              expect(assistantText(events, freshTurn.turnId)).toBe("FD_FRESH_CONTEXT_OK");
+            }),
+          ).pipe(Effect.provide(serverLayer));
+        } finally {
+          yield* Effect.promise(async () => NodeFSP.rm(root, { recursive: true, force: true }));
+        }
+      }),
+    540_000,
+  );
 });
 
 function requiredEnvironment(name: "FD_CODEX_BINARY" | "FD_NEW_API_KEY"): string {

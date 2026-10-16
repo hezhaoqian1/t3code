@@ -1,5 +1,5 @@
 // @effect-diagnostics globalTimers:off nodeBuiltinImport:off
-import { clearTimeout, setTimeout } from "node:timers";
+import * as NodeTimers from "node:timers";
 
 import { createOpenAI } from "@ai-sdk/openai";
 import {
@@ -117,7 +117,7 @@ export class FdResponsesClient {
     const credentialLease = await openCredentialLease(this.#credentials, this.#now);
     const timeoutMs = request.timeoutMs ?? FD_RESPONSES_LIMITS.defaultTimeoutMs;
     const timeoutController = new AbortController();
-    const timeoutTimer = setTimeout(() => timeoutController.abort(), timeoutMs);
+    const timeoutTimer = NodeTimers.setTimeout(() => timeoutController.abort(), timeoutMs);
     const signals = [timeoutController.signal, credentialLease.signal];
     if (request.signal !== undefined) signals.unshift(request.signal);
     const signal = AbortSignal.any(signals);
@@ -308,7 +308,7 @@ export class FdResponsesClient {
     } catch (error) {
       throw normalizeError(error, request.signal, timeoutController.signal, credentialLease);
     } finally {
-      clearTimeout(timeoutTimer);
+      NodeTimers.clearTimeout(timeoutTimer);
       await credentialLease.close();
     }
   }
@@ -340,7 +340,7 @@ async function openCredentialLease(
     const abortController = new AbortController();
     let failure: CredentialLeaseFailure | undefined;
     let closed = false;
-    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    let expiryTimer: ReturnType<typeof NodeTimers.setTimeout> | undefined;
     let currentCredentials = credentials;
     let expiresAtMs = credentialDeadlineMs(credentials);
     const invalidate = (kind: CredentialLeaseFailure) => {
@@ -354,11 +354,11 @@ async function openCredentialLease(
         invalidate("credentials_expired");
         return;
       }
-      expiryTimer = setTimeout(scheduleExpiry, Math.min(remaining, 2_147_483_647));
+      expiryTimer = NodeTimers.setTimeout(scheduleExpiry, Math.min(remaining, 2_147_483_647));
     };
     const updateDeadline = (nextDeadlineMs: number) => {
       if (expiryTimer !== undefined) {
-        clearTimeout(expiryTimer);
+        NodeTimers.clearTimeout(expiryTimer);
         expiryTimer = undefined;
       }
       expiresAtMs = nextDeadlineMs;
@@ -399,7 +399,7 @@ async function openCredentialLease(
       close: async () => {
         if (closed) return;
         closed = true;
-        if (expiryTimer !== undefined) clearTimeout(expiryTimer);
+        if (expiryTimer !== undefined) NodeTimers.clearTimeout(expiryTimer);
         await Effect.runPromise(Fiber.interrupt(changeFiber).pipe(Effect.ignore));
         await Effect.runPromise(Scope.close(scope, Exit.void).pipe(Effect.ignore));
       },

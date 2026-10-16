@@ -28,7 +28,12 @@ import {
   type FdAgentResult,
   type FdAgentTool,
 } from "../../fd-agent/FdAgentKernel.ts";
-import { FD_DEEPSEEK_DRIVER_KIND, FD_DEEPSEEK_INSTANCE_ID } from "../../fd-agent/FdModelPolicy.ts";
+import {
+  FD_DEEPSEEK_DRIVER_KIND,
+  FD_DEEPSEEK_INSTANCE_ID,
+  FD_MODEL_UNAVAILABLE_MESSAGE,
+  isFdModelUnavailableError,
+} from "../../fd-agent/FdModelPolicy.ts";
 import {
   FD_RESPONSES_MODEL,
   isFdSelectableResponsesModel,
@@ -408,9 +413,28 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         ) {
           return;
         }
-        const projected = context?.ordinaryExecutionProfile?.startsWith("enterprise:")
+        let projected = context?.ordinaryExecutionProfile?.startsWith("enterprise:")
           ? projectFdEnterpriseEvent(event, context.ordinaryEnterpriseGeneration)
           : event;
+        if (
+          projected.type === "turn.completed" &&
+          projected.payload.errorMessage &&
+          isFdModelUnavailableError(projected.payload.errorMessage)
+        ) {
+          projected = {
+            ...projected,
+            payload: { ...projected.payload, errorMessage: FD_MODEL_UNAVAILABLE_MESSAGE },
+          };
+        }
+        if (
+          projected.type === "runtime.error" &&
+          isFdModelUnavailableError(projected.payload.message)
+        ) {
+          projected = {
+            ...projected,
+            payload: { ...projected.payload, message: FD_MODEL_UNAVAILABLE_MESSAGE },
+          };
+        }
         yield* Queue.offer(events, {
           ...projected,
           provider: FD_DEEPSEEK_DRIVER_KIND,
@@ -914,7 +938,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       return yield* new ProviderAdapterValidationError({
         provider: FD_DEEPSEEK_DRIVER_KIND,
         operation: "startSession",
-        issue: "The selected model is not advertised by this provider.",
+        issue: FD_MODEL_UNAVAILABLE_MESSAGE,
       });
     }
     const existing = sessions.get(input.threadId);
@@ -1049,10 +1073,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         ? requestedInput
         : { ...requestedInput, fdSkillVersionId: continuationSkillVersionId };
     const selectedModel =
-      input.modelSelection?.model ??
-      (context.session.model && isSupportedResponsesModel(context.session.model)
-        ? context.session.model
-        : FD_RESPONSES_MODEL);
+      input.modelSelection?.model ?? context.session.model ?? FD_RESPONSES_MODEL;
     const inputText = input.input?.trim();
     const attachments = input.attachments ?? [];
     if (!inputText && attachments.length === 0 && !continuation) {
@@ -1069,7 +1090,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       return yield* new ProviderAdapterValidationError({
         provider: FD_DEEPSEEK_DRIVER_KIND,
         operation: "sendTurn",
-        issue: "The selected model is not advertised by this provider.",
+        issue: FD_MODEL_UNAVAILABLE_MESSAGE,
       });
     }
     if (context.activeTurn && !context.activeTurn.settled) {
@@ -1287,7 +1308,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
         return yield* new ProviderAdapterValidationError({
           provider: FD_DEEPSEEK_DRIVER_KIND,
           operation: "sendTurn",
-          issue: "The selected model is not advertised by this provider.",
+          issue: FD_MODEL_UNAVAILABLE_MESSAGE,
         });
       }
       const controller = new AbortController();

@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
@@ -9,14 +9,17 @@ import { loadFdEnterpriseConfig } from "./EnterpriseConfig.ts";
 
 const roots: string[] = [];
 afterEach(async () =>
-  Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))),
+  Promise.all(roots.splice(0).map((root) => NodeFSP.rm(root, { recursive: true, force: true }))),
 );
 
 describe("FD enterprise config", () => {
   it("loads strict packaged public endpoints", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-enterprise-config-"));
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-enterprise-config-"));
     roots.push(root);
-    await writeFile(join(root, "enterprise-config.json"), JSON.stringify(config()));
+    await NodeFSP.writeFile(
+      NodePath.join(root, "enterprise-config.json"),
+      JSON.stringify(config()),
+    );
     await expect(
       loadFdEnterpriseConfig({ isPackaged: true, resourcesPath: root, rootDir: root }),
     ).resolves.toEqual({
@@ -26,11 +29,14 @@ describe("FD enterprise config", () => {
   });
 
   it("allows only loopback HTTP or HTTPS development overrides", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-enterprise-config-dev-"));
+    const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-enterprise-config-dev-"));
     roots.push(root);
-    const resources = join(root, "apps", "desktop", "resources");
-    await mkdir(resources, { recursive: true });
-    await writeFile(join(resources, "enterprise-config.json"), JSON.stringify(config()));
+    const resources = NodePath.join(root, "apps", "desktop", "resources");
+    await NodeFSP.mkdir(resources, { recursive: true });
+    await NodeFSP.writeFile(
+      NodePath.join(resources, "enterprise-config.json"),
+      JSON.stringify(config()),
+    );
     await expect(
       loadFdEnterpriseConfig({
         isPackaged: false,
@@ -58,23 +64,25 @@ describe("FD enterprise config", () => {
   });
 
   it("rejects symlinks, oversized files, and mutable packaged endpoints", async () => {
-    const root = await mkdtemp(join(tmpdir(), "fd-enterprise-config-invalid-"));
+    const root = await NodeFSP.mkdtemp(
+      NodePath.join(NodeOS.tmpdir(), "fd-enterprise-config-invalid-"),
+    );
     roots.push(root);
-    const path = join(root, "enterprise-config.json");
-    const target = join(root, "target.json");
-    await writeFile(target, JSON.stringify(config()));
-    await symlink(target, path);
+    const path = NodePath.join(root, "enterprise-config.json");
+    const target = NodePath.join(root, "target.json");
+    await NodeFSP.writeFile(target, JSON.stringify(config()));
+    await NodeFSP.symlink(target, path);
     await expect(
       loadFdEnterpriseConfig({ isPackaged: true, resourcesPath: root, rootDir: root }),
     ).rejects.toThrow("invalid");
 
-    await rm(path);
-    await writeFile(path, Buffer.alloc(4 * 1_024 + 1));
+    await NodeFSP.rm(path);
+    await NodeFSP.writeFile(path, Buffer.alloc(4 * 1_024 + 1));
     await expect(
       loadFdEnterpriseConfig({ isPackaged: true, resourcesPath: root, rootDir: root }),
     ).rejects.toThrow("invalid");
 
-    await writeFile(
+    await NodeFSP.writeFile(
       path,
       JSON.stringify({
         ...config(),

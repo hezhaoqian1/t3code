@@ -17,6 +17,26 @@ const base = {
 };
 
 it.each([
+  '503 {"code":"model_not_found","message":"secret"}',
+  "当前分组下对于模型 qwen3.8-max 无可用渠道 secret",
+  "No available channel for model secret",
+  "当前模型已不可用，请切换 Flash 重试。",
+])("explains unavailable models without exposing provider details: %s", (errorMessage) => {
+  const event = projectFdEnterpriseEvent(
+    {
+      ...base,
+      type: "turn.completed",
+      payload: { state: "failed", errorMessage },
+    },
+    0,
+  );
+  expect(event.payload).toEqual({
+    state: "failed",
+    errorMessage: "当前模型已不可用，请切换 Flash 重试。",
+  });
+});
+
+it.each([
   ["HTTP 429: Too many requests", "模型服务暂时繁忙（限流）。请稍后在当前任务中继续。"],
   [
     "Allocated quota exceeded, please increase your quota limit",
