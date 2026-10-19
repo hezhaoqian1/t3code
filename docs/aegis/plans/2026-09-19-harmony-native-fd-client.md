@@ -4,8 +4,9 @@ Date: `2026-09-19`
 
 Status: native ArkUI foundation, the FD Runtime mobile read/recovery contract,
 turn SSE, resumable attachment transfer, scoped preview, and text/image model
-input are implemented in dedicated worktrees. PDF/Office server-side parsing
-and a real Harmony SDK build remain pending.
+input are implemented in dedicated worktrees. The mobile contract is now deployed
+on production; PDF/Office end-to-end validation and a real Harmony SDK build remain
+pending on a Harmony-capable host.
 
 ## Decision
 
@@ -313,7 +314,7 @@ and recovery rules. They do not share a DOM UI or assume the same runtime is loc
 
 ## Validation snapshot
 
-The current production gateway was checked from this worktree on `2026-09-19`:
+The current production gateway was checked from this worktree on `2026-09-20`:
 
 - `POST /api/user/login`, `GET /api/user/self`, `GET /api/status`, and
   `GET /api/fd-skills/self` returned `200` for the supplied administrator account.
@@ -322,9 +323,20 @@ The current production gateway was checked from this worktree on `2026-09-19`:
 - A minimal `POST /api/agent/turns` with an existing managed model token and
   `client: fd_desktop` returned progress, `turn.started`, `assistant.delta`, and
   `turn.completed` events.
-- `GET /api/mobile/v1/threads` currently returns `404`, so the native client keeps
-  the compatibility adapter enabled and does not claim the new mobile protocol is
-  deployed yet.
+- `GET /api/mobile/v1/threads`, `GET /api/mobile/v1/skills`, and a thread detail
+  request returned `200` for the administrator account. The catalog exposed seven
+  model capability keys and four Skills.
+- A real `POST /api/mobile/v1/threads/:id/turns` using `deepseek-flash` returned
+  `turn.started`, progress, `assistant.delta`, and `turn.completed`; the marker
+  message was then present in the same mobile thread history after reload.
+- A 26-page PDF completed through the private gateway listener at
+  `172.16.0.39:3020` in 89 seconds with `turn.completed` and history recovery.
+  The public `ai-api.fdsure.com` edge still closes requests at roughly 60 seconds
+  (the backend later finishes and logs a broken pipe), so the public long-PDF
+  path is not yet an end-to-end pass even though the service and parser budget is
+  five minutes.
+- The client keeps its 404/405 compatibility adapter for older gateways, but the
+  production gateway now serves the versioned mobile contract.
 - The repository machine has no DevEco/Harmony SDK or `hvigorw` wrapper. The
   ArkUI build remains pending on a Harmony-capable build host; T3 server, desktop,
   contracts, and native static checks pass in this worktree.
