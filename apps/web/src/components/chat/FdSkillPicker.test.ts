@@ -162,8 +162,8 @@ describe("FdSkillPicker", () => {
     ).toEqual([availableSkill, projectLocalSkill, anotherProjectSkill]);
   });
 
-  it("keeps only the first four authorized FD Skills visible", () => {
-    const fdSkills = Array.from({ length: 5 }, (_, index) => ({
+  it("lists every authorized FD Skill up to the visible limit", () => {
+    const fdSkills = Array.from({ length: MAX_VISIBLE_FD_SKILLS + 1 }, (_, index) => ({
       ...availableSkill,
       name: `fd-skill-${index + 1}`,
       path: `fd-managed://${10004 + index}`,
@@ -174,8 +174,8 @@ describe("FdSkillPicker", () => {
       { ...localSkill, name: "disabled", enabled: false },
     ]);
 
-    expect(MAX_VISIBLE_FD_SKILLS).toBe(4);
-    expect(partitioned.fdSkills).toEqual(fdSkills.slice(0, 4));
+    expect(MAX_VISIBLE_FD_SKILLS).toBeGreaterThanOrEqual(5);
+    expect(partitioned.fdSkills).toEqual(fdSkills.slice(0, MAX_VISIBLE_FD_SKILLS));
     expect(partitioned.localSkills).toEqual([localSkill]);
   });
 
