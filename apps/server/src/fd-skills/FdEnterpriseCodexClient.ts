@@ -5,6 +5,11 @@ const FD_ENTERPRISE_CODEX_PROTOCOL = "fd-codex-runtime-v1" as const;
 const FD_ENTERPRISE_CODEX_MAX_RESPONSE_BYTES = 512 * 1024;
 const FD_ENTERPRISE_CODEX_MAX_ARGUMENT_BYTES = 128 * 1024;
 const FD_ENTERPRISE_CODEX_TIMEOUT_MS = 30_000;
+// Slow tools (report generation) may ask for a longer wait, never beyond this.
+const FD_ENTERPRISE_CODEX_MAX_TOOL_TIMEOUT_MS = 300_000;
+const FD_ENTERPRISE_CODEX_MAX_ARTIFACT_BYTES = 32 * 1024 * 1024;
+const FD_ENTERPRISE_CODEX_ARTIFACT_PATH =
+  /^\/api\/fd-skills\/desktop\/reports\/[A-Za-z0-9-]{1,64}$/;
 
 const ApiEnvelopeSchema = Schema.Struct({
   success: Schema.Boolean,
@@ -20,6 +25,7 @@ const RuntimeToolSchema = Schema.Struct({
   description: Schema.String,
   // JSON Schema for the tool arguments; Codex takes it as a JSON value.
   input_schema: Schema.Record(Schema.String, Schema.Json),
+  timeout_seconds: Schema.optional(Schema.Number),
 });
 
 const RuntimeReferenceSchema = Schema.Struct({
@@ -44,12 +50,22 @@ const RuntimeContextSchema = Schema.Struct({
   tools: Schema.Array(RuntimeToolSchema),
 });
 
+const ToolArtifactSchema = Schema.Struct({
+  id: Schema.String,
+  file_name: Schema.String,
+  mime_type: Schema.String,
+  size_bytes: Schema.Number,
+  download_path: Schema.String,
+});
+
 const ToolCallResultSchema = Schema.Struct({
   tool_name: Schema.String,
   audit_id: Schema.String,
   content: Schema.Unknown,
   row_count: Schema.optional(Schema.Number),
   truncated: Schema.optional(Schema.Boolean),
+  // Files the tool produced (for example a generated report) to save into the task folder.
+  artifacts: Schema.optional(Schema.Array(ToolArtifactSchema)),
 });
 
 const decodeEnvelope = Schema.decodeUnknownSync(ApiEnvelopeSchema);
@@ -58,6 +74,7 @@ const decodeToolCallResult = Schema.decodeUnknownSync(ToolCallResultSchema);
 
 export type FdEnterpriseCodexRuntimeContext = typeof RuntimeContextSchema.Type;
 export type FdEnterpriseCodexToolCallResult = typeof ToolCallResultSchema.Type;
+export type FdEnterpriseCodexToolArtifact = typeof ToolArtifactSchema.Type;
 
 export interface FdEnterpriseCodexToolCallInput {
   readonly skillVersionId: number;
@@ -69,6 +86,8 @@ export interface FdEnterpriseCodexToolCallInput {
   readonly tool: string;
   readonly arguments: unknown;
   readonly signal?: AbortSignal;
+  /** Requested by the gateway per tool; clamped to 30 s–5 min. */
+  readonly timeoutSeconds?: number | undefined;
 }
 
 export class FdEnterpriseCodexError extends Error {
@@ -158,6 +177,7 @@ export class FdEnterpriseCodexClient {
         arguments: input.arguments,
       },
       input.signal,
+      toolTimeoutMs(input.timeoutSeconds),
     );
     const result = decodeToolCallResult(data);
     if (result.tool_name !== input.tool || !result.audit_id) {
@@ -166,7 +186,38 @@ export class FdEnterpriseCodexClient {
     return result;
   }
 
-  async #post(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+  /** Downloads a tool artifact (owner-only on the gateway) with the same credentials. */
+  async downloadArtifact(input: {
+    readonly artifact: FdEnterpriseCodexToolArtifact;
+    readonly signal?: AbortSignal | undefined;
+  }): Promise<Uint8Array> {
+    if (
+      !FD_ENTERPRISE_CODEX_ARTIFACT_PATH.test(input.artifact.download_path) ||
+      input.artifact.size_bytes > FD_ENTERPRISE_CODEX_MAX_ARTIFACT_BYTES
+    ) {
+      throw new FdEnterpriseCodexError("invalid_artifact", 0);
+    }
+    const credentials = await this.#credentials();
+    if (!credentials) throw new FdEnterpriseCodexError("credentials_unavailable", 401);
+    const response = await this.#fetch(
+      new URL(input.artifact.download_path, credentials.newApiOrigin),
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${credentials.accessToken}` },
+        cache: "no-store",
+        signal: timeoutSignal(input.signal),
+      },
+    );
+    if (!response.ok) throw new FdEnterpriseCodexError("artifact_download_failed", response.status);
+    return readBoundedResponse(response, FD_ENTERPRISE_CODEX_MAX_ARTIFACT_BYTES);
+  }
+
+  async #post(
+    path: string,
+    body: unknown,
+    signal?: AbortSignal,
+    timeoutMs = FD_ENTERPRISE_CODEX_TIMEOUT_MS,
+  ): Promise<unknown> {
     const credentials = await this.#credentials();
     if (!credentials) throw new FdEnterpriseCodexError("credentials_unavailable", 401);
     const response = await this.#fetch(new URL(path, credentials.newApiOrigin), {
@@ -178,7 +229,7 @@ export class FdEnterpriseCodexClient {
       },
       body: JSON.stringify(body),
       cache: "no-store",
-      signal: timeoutSignal(signal),
+      signal: timeoutSignal(signal, timeoutMs),
     });
     const bytes = await readBoundedResponse(response);
     let envelope: typeof ApiEnvelopeSchema.Type;
@@ -247,7 +298,10 @@ function assertIdentifier(value: string, maxLength: number): void {
   }
 }
 
-async function readBoundedResponse(response: Response): Promise<Uint8Array> {
+async function readBoundedResponse(
+  response: Response,
+  maxBytes = FD_ENTERPRISE_CODEX_MAX_RESPONSE_BYTES,
+): Promise<Uint8Array> {
   if (!response.body) throw new FdEnterpriseCodexError("empty_response", response.status);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -257,7 +311,7 @@ async function readBoundedResponse(response: Response): Promise<Uint8Array> {
       const next = await reader.read();
       if (next.done) break;
       size += next.value.byteLength;
-      if (size > FD_ENTERPRISE_CODEX_MAX_RESPONSE_BYTES) {
+      if (size > maxBytes) {
         throw new FdEnterpriseCodexError("response_too_large", response.status);
       }
       chunks.push(next.value);
@@ -274,8 +328,21 @@ async function readBoundedResponse(response: Response): Promise<Uint8Array> {
   return output;
 }
 
-function timeoutSignal(signal?: AbortSignal): AbortSignal {
+function toolTimeoutMs(timeoutSeconds: number | undefined): number {
+  if (timeoutSeconds === undefined || !Number.isFinite(timeoutSeconds)) {
+    return FD_ENTERPRISE_CODEX_TIMEOUT_MS;
+  }
+  return Math.min(
+    FD_ENTERPRISE_CODEX_MAX_TOOL_TIMEOUT_MS,
+    Math.max(FD_ENTERPRISE_CODEX_TIMEOUT_MS, Math.round(timeoutSeconds * 1000)),
+  );
+}
+
+function timeoutSignal(
+  signal?: AbortSignal,
+  timeoutMs = FD_ENTERPRISE_CODEX_TIMEOUT_MS,
+): AbortSignal {
   return signal
-    ? AbortSignal.any([signal, AbortSignal.timeout(FD_ENTERPRISE_CODEX_TIMEOUT_MS)])
-    : AbortSignal.timeout(FD_ENTERPRISE_CODEX_TIMEOUT_MS);
+    ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+    : AbortSignal.timeout(timeoutMs);
 }

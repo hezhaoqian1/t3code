@@ -25,7 +25,7 @@ import { cn } from "~/lib/utils";
 
 export type BusinessCapabilityCatalogState = "loading" | "ready" | "error";
 
-export const MAX_VISIBLE_FD_SKILLS = 4;
+export const MAX_VISIBLE_FD_SKILLS = 12;
 
 export function resolveProviderSkillCatalogState(
   provider: Pick<ServerProvider, "skillCatalogState" | "status"> | null,
@@ -325,41 +325,43 @@ export function FdSkillPicker(props: {
                   当前账号没有已授权的 FD Skills。
                 </p>
               ) : (
-                fdSkills.map((skill) => {
-                  const versionId = versionIdFromPath(skill.path)!;
-                  const selected = versionId === selectedVersionId;
-                  return (
-                    <button
-                      key={`${skill.name}:${versionId}`}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      onClick={() => selectFdSkill(versionId)}
-                      className={cn(
-                        "flex min-h-12 w-full items-start gap-2.5 rounded-md border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border/70 hover:bg-muted/70",
-                        selected && "border-primary/25 bg-primary/8",
-                      )}
-                    >
-                      <Building2Icon
-                        className="mt-0.5 size-4 shrink-0 text-primary"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm">
-                          {formatProviderSkillDisplayName(skill)}
-                        </span>
-                        {skill.shortDescription || skill.description ? (
-                          <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">
-                            {skill.shortDescription ?? skill.description}
+                <div className="max-h-[min(26rem,calc(100vh-10rem))] overflow-y-auto">
+                  {fdSkills.map((skill) => {
+                    const versionId = versionIdFromPath(skill.path)!;
+                    const selected = versionId === selectedVersionId;
+                    return (
+                      <button
+                        key={`${skill.name}:${versionId}`}
+                        type="button"
+                        role="option"
+                        aria-selected={selected}
+                        onClick={() => selectFdSkill(versionId)}
+                        className={cn(
+                          "flex min-h-12 w-full items-start gap-2.5 rounded-md border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border/70 hover:bg-muted/70",
+                          selected && "border-primary/25 bg-primary/8",
+                        )}
+                      >
+                        <Building2Icon
+                          className="mt-0.5 size-4 shrink-0 text-primary"
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm">
+                            {formatProviderSkillDisplayName(skill)}
                           </span>
+                          {skill.shortDescription || skill.description ? (
+                            <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">
+                              {skill.shortDescription ?? skill.description}
+                            </span>
+                          ) : null}
+                        </span>
+                        {selected ? (
+                          <CheckIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
                         ) : null}
-                      </span>
-                      {selected ? (
-                        <CheckIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                      ) : null}
-                    </button>
-                  );
-                })
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>,
             document.body,

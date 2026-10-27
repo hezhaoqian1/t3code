@@ -14,6 +14,7 @@ import { FD_DEEPSEEK_DRIVER_KIND } from "../provider/Layers/FdDeepSeekAdapter.ts
 import {
   FdEnterpriseCodexClient,
   FdEnterpriseCodexError,
+  type FdEnterpriseCodexToolArtifact,
   type FdEnterpriseCodexToolCallInput,
 } from "../fd-skills/FdEnterpriseCodexClient.ts";
 import { NativeSkillCatalog, selectedNativeSkillNames } from "../fd-skills/NativeSkillCatalog.ts";
@@ -264,16 +265,23 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
               input.documentTools?.handles(request.tool) &&
               !runtimeContext.tools.some((skillTool) => skillTool.name === request.tool)
                 ? documents.dynamicToolExecutor(request)
-                : executeFdEnterpriseToolCall(enterpriseClient, {
-                    skillVersionId,
-                    releaseDigest: runtimeContext.release_digest,
-                    clientThreadId: session.threadId,
-                    providerThreadId: request.threadId,
-                    turnId: request.turnId,
-                    callId: request.callId,
-                    tool: request.tool,
-                    arguments: request.arguments,
-                  }),
+                : executeFdEnterpriseToolCall(
+                    enterpriseClient,
+                    {
+                      skillVersionId,
+                      releaseDigest: runtimeContext.release_digest,
+                      clientThreadId: session.threadId,
+                      providerThreadId: request.threadId,
+                      turnId: request.turnId,
+                      callId: request.callId,
+                      tool: request.tool,
+                      arguments: request.arguments,
+                      timeoutSeconds: runtimeContext.tools.find(
+                        (tool) => tool.name === request.tool,
+                      )?.timeout_seconds,
+                    },
+                    { taskFolder: session.cwd },
+                  ),
           })),
         );
       },
@@ -284,9 +292,17 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
 export function executeFdEnterpriseToolCall(
   client: FdEnterpriseCodexClient,
   input: FdEnterpriseCodexToolCallInput,
+  options: { readonly taskFolder?: string | undefined } = {},
 ) {
   return Effect.tryPromise({
-    try: (signal) => client.executeToolCall({ ...input, signal }),
+    try: async (signal) => {
+      const result = await client.executeToolCall({ ...input, signal });
+      const savedFiles =
+        result.artifacts && result.artifacts.length > 0
+          ? await saveFdToolArtifacts(client, result.artifacts, options.taskFolder, signal)
+          : undefined;
+      return { ...result, savedFiles };
+    },
     catch: (cause) =>
       new ProviderAdapterRequestError({
         provider: FD_DEEPSEEK_DRIVER_KIND,
@@ -312,12 +328,79 @@ export function executeFdEnterpriseToolCall(
               content: result.content,
               row_count: result.row_count ?? 0,
               truncated: result.truncated ?? false,
+              ...(result.savedFiles ? { saved_files: result.savedFiles } : {}),
             }),
           },
         ],
       }),
     }),
   );
+}
+
+interface FdSavedToolFile {
+  readonly file_name: string;
+  /** Path relative to the task folder, for linking in the reply. */
+  readonly path?: string;
+  readonly error?: string;
+}
+
+/**
+ * Saves files a gateway tool produced into `<task folder>/outputs/`, never
+ * overwriting an existing file. Failures are reported per file to the model.
+ */
+export async function saveFdToolArtifacts(
+  client: FdEnterpriseCodexClient,
+  artifacts: ReadonlyArray<FdEnterpriseCodexToolArtifact>,
+  taskFolder: string | undefined,
+  signal?: AbortSignal,
+): Promise<ReadonlyArray<FdSavedToolFile>> {
+  const saved: FdSavedToolFile[] = [];
+  for (const artifact of artifacts) {
+    const fileName = safeArtifactFileName(artifact);
+    if (!taskFolder) {
+      saved.push({ file_name: fileName, error: "当前会话没有任务文件夹，报告未保存。" });
+      continue;
+    }
+    try {
+      const bytes = await client.downloadArtifact({ artifact, signal });
+      const directory = NodePath.join(taskFolder, "outputs");
+      await NodeFSP.mkdir(directory, { recursive: true });
+      const target = await availableFilePath(directory, fileName);
+      await NodeFSP.writeFile(target, bytes, { flag: "wx" });
+      saved.push({
+        file_name: NodePath.basename(target),
+        path: NodePath.relative(taskFolder, target).split(NodePath.sep).join("/"),
+      });
+    } catch {
+      saved.push({ file_name: fileName, error: "报告已生成，但保存到任务文件夹失败，请重试。" });
+    }
+  }
+  return saved;
+}
+
+function safeArtifactFileName(artifact: FdEnterpriseCodexToolArtifact): string {
+  const base = Array.from(NodePath.basename(artifact.file_name.replaceAll("\\", "/")))
+    .filter((character) => character >= " " && !'<>:"/\\|?*'.includes(character))
+    .join("")
+    .trim();
+  return base && base !== "." && base !== ".." ? base.slice(0, 180) : `${artifact.id}.html`;
+}
+
+async function availableFilePath(directory: string, fileName: string): Promise<string> {
+  const extension = NodePath.extname(fileName);
+  const stem = fileName.slice(0, fileName.length - extension.length);
+  for (let attempt = 1; attempt < 100; attempt += 1) {
+    const candidate = NodePath.join(
+      directory,
+      attempt === 1 ? fileName : `${stem} (${attempt})${extension}`,
+    );
+    try {
+      await NodeFSP.access(candidate);
+    } catch {
+      return candidate;
+    }
+  }
+  throw new Error("no free file name");
 }
 
 export function fdEnterpriseToolFailureMessage(cause: unknown): string {
