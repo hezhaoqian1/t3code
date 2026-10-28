@@ -1,3 +1,9 @@
+import {
+  conversationRewindAnchor,
+  isMessageRemovedByRewind,
+  isTurnEntryRemovedByRewind,
+  type ConversationRewindAnchor,
+} from "@t3tools/shared/conversationRewind";
 import { pipe } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as O from "effect/Order";
@@ -511,6 +517,17 @@ export function applyThreadDetailEvent(
 
     // ── Revert ──────────────────────────────────────────────────────
     case "thread.reverted": {
+      const anchor = conversationRewindAnchor(event.payload);
+      if (anchor !== null) {
+        return {
+          kind: "updated",
+          thread: {
+            ...thread,
+            ...applyConversationRewind(thread, anchor, event.payload.turnCount),
+            updatedAt: event.occurredAt,
+          },
+        };
+      }
       const checkpoints = pipe(
         thread.checkpoints,
         Arr.filter(
@@ -649,6 +666,87 @@ function rebindCheckpointAssistantMessage(
   return Arr.map(checkpoints, (entry) =>
     entry.turnId === turnId ? { ...entry, assistantMessageId: messageId } : entry,
   );
+}
+
+/**
+ * A rewind to before a user message removes that message and the turns that
+ * started after it, whether or not they captured checkpoints. Mirrors the
+ * server projector so live clients and reloaded snapshots agree.
+ */
+function applyConversationRewind(
+  thread: OrchestrationThread,
+  anchor: ConversationRewindAnchor,
+  turnCount: number,
+): Pick<
+  OrchestrationThread,
+  "checkpoints" | "messages" | "proposedPlans" | "activities" | "latestTurn"
+> {
+  const checkpoints = pipe(
+    thread.checkpoints,
+    Arr.filter(
+      (entry) => entry.checkpointTurnCount <= turnCount && !anchor.removedTurnIds.has(entry.turnId),
+    ),
+    Arr.sort(checkpointOrder),
+  );
+  const messages = Arr.filter(
+    thread.messages,
+    (message) => !isMessageRemovedByRewind(message, anchor),
+  );
+  const proposedPlans = Arr.filter(
+    thread.proposedPlans,
+    (plan) => !isTurnEntryRemovedByRewind(plan, anchor),
+  );
+  const activities = Arr.filter(
+    thread.activities,
+    (activity) => !isTurnEntryRemovedByRewind(activity, anchor),
+  );
+  return {
+    checkpoints,
+    messages,
+    proposedPlans,
+    activities,
+    latestTurn: latestTurnAfterRewind(thread.latestTurn, anchor, checkpoints, messages),
+  };
+}
+
+function latestTurnAfterRewind(
+  latestTurn: OrchestrationThread["latestTurn"],
+  anchor: ConversationRewindAnchor,
+  checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
+  messages: ReadonlyArray<OrchestrationMessage>,
+): OrchestrationThread["latestTurn"] {
+  if (latestTurn !== null && !anchor.removedTurnIds.has(latestTurn.turnId)) {
+    return latestTurn;
+  }
+  // The newest kept turn is the one its newest message belongs to; threads
+  // without checkpoints have nothing else to go by.
+  const lastTurnMessage = messages.findLast((message) => message.turnId !== null);
+  const lastTurnId = lastTurnMessage?.turnId ?? null;
+  const checkpoint =
+    lastTurnId === null
+      ? checkpoints.at(-1)
+      : checkpoints.find((entry) => entry.turnId === lastTurnId);
+  if (checkpoint) {
+    return {
+      turnId: checkpoint.turnId,
+      state: checkpointStatusToTurnState(checkpoint.status as "ready" | "missing" | "error"),
+      requestedAt: checkpoint.completedAt,
+      startedAt: checkpoint.completedAt,
+      completedAt: checkpoint.completedAt,
+      assistantMessageId: checkpoint.assistantMessageId ?? null,
+    };
+  }
+  if (lastTurnMessage === undefined || lastTurnId === null) {
+    return null;
+  }
+  return {
+    turnId: lastTurnId,
+    state: "completed",
+    requestedAt: lastTurnMessage.createdAt,
+    startedAt: lastTurnMessage.createdAt,
+    completedAt: lastTurnMessage.updatedAt,
+    assistantMessageId: lastTurnMessage.role === "assistant" ? lastTurnMessage.id : null,
+  };
 }
 
 function retainMessagesAfterRevert(

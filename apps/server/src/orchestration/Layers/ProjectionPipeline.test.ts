@@ -2537,6 +2537,193 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("rewinds to before a user message in a thread without checkpoints", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-rewind");
+      let sequence = 0;
+      const append = (
+        type: "thread.message-sent" | "thread.session-set" | "thread.activity-appended",
+        occurredAt: string,
+        payload: Record<string, unknown>,
+      ) => {
+        sequence += 1;
+        return eventStore
+          .append({
+            type,
+            eventId: EventId.make(`evt-rewind-${sequence}`),
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt,
+            commandId: CommandId.make(`cmd-rewind-${sequence}`),
+            causationEventId: null,
+            correlationId: CorrelationId.make(`cmd-rewind-${sequence}`),
+            metadata: {},
+            payload: { threadId, ...payload },
+          } as Parameters<typeof eventStore.append>[0])
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      };
+      const message = (
+        messageId: string,
+        role: "user" | "assistant",
+        turnId: string | null,
+        at: string,
+      ) =>
+        append("thread.message-sent", at, {
+          messageId,
+          role,
+          text: messageId,
+          turnId,
+          streaming: false,
+          createdAt: at,
+          updatedAt: at,
+        });
+      const session = (status: "running" | "ready", activeTurnId: string | null, at: string) =>
+        append("thread.session-set", at, {
+          session: {
+            threadId,
+            status,
+            providerName: "fdDeepSeek",
+            runtimeMode: "full-access",
+            activeTurnId,
+            lastError: null,
+            updatedAt: at,
+          },
+        });
+      const turn = (index: number) =>
+        Effect.gen(function* () {
+          const at = (second: number) => `2026-10-01T0${index}:00:0${second}.000Z`;
+          yield* message(`user-${index}`, "user", null, at(0));
+          yield* session("running", `turn-${index}`, at(1));
+          yield* append("thread.activity-appended", at(2), {
+            activity: {
+              id: `tool-${index}`,
+              tone: "tool",
+              kind: "tool.completed",
+              summary: `tool ${index}`,
+              payload: {},
+              turnId: `turn-${index}`,
+              createdAt: at(2),
+            },
+          });
+          yield* message(`assistant-${index}`, "assistant", `turn-${index}`, at(3));
+          yield* session("ready", null, at(4));
+        });
+
+      yield* eventStore
+        .append({
+          type: "project.created",
+          eventId: EventId.make("evt-rewind-project"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make("project-rewind"),
+          occurredAt: "2026-10-01T00:00:00.000Z",
+          commandId: CommandId.make("cmd-rewind-project"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-rewind-project"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make("project-rewind"),
+            title: "Tasks",
+            workspaceRoot: "/tmp/tasks",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: "2026-10-01T00:00:00.000Z",
+            updatedAt: "2026-10-01T00:00:00.000Z",
+          },
+        })
+        .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      yield* eventStore
+        .append({
+          type: "thread.created",
+          eventId: EventId.make("evt-rewind-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-10-01T00:00:01.000Z",
+          commandId: CommandId.make("cmd-rewind-thread"),
+          causationEventId: null,
+          correlationId: CorrelationId.make("cmd-rewind-thread"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId: ProjectId.make("project-rewind"),
+            title: "Task",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("fd-deepseek"),
+              model: "deepseek-v4-flash",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: "/tmp/tasks/20261001-000000",
+            createdAt: "2026-10-01T00:00:01.000Z",
+            updatedAt: "2026-10-01T00:00:01.000Z",
+          },
+        })
+        .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      yield* turn(1);
+      yield* turn(2);
+      yield* turn(3);
+
+      sequence += 1;
+      yield* eventStore
+        .append({
+          type: "thread.reverted",
+          eventId: EventId.make(`evt-rewind-${sequence}`),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-10-01T05:00:00.000Z",
+          commandId: CommandId.make(`cmd-rewind-${sequence}`),
+          causationEventId: null,
+          correlationId: CorrelationId.make(`cmd-rewind-${sequence}`),
+          metadata: {},
+          payload: {
+            threadId,
+            turnCount: 0,
+            messageId: MessageId.make("user-2"),
+            messageCreatedAt: "2026-10-01T02:00:00.000Z",
+            removedTurnIds: [TurnId.make("turn-2"), TurnId.make("turn-3")],
+          },
+        })
+        .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      const messageRows = yield* sql<{ readonly messageId: string }>`
+        SELECT message_id AS "messageId"
+        FROM projection_thread_messages
+        WHERE thread_id = 'thread-rewind'
+        ORDER BY created_at ASC, message_id ASC
+      `;
+      assert.deepEqual(
+        messageRows.map((row) => row.messageId),
+        ["user-1", "assistant-1"],
+      );
+      const activityRows = yield* sql<{ readonly activityId: string }>`
+        SELECT activity_id AS "activityId"
+        FROM projection_thread_activities
+        WHERE thread_id = 'thread-rewind'
+      `;
+      assert.deepEqual(
+        activityRows.map((row) => row.activityId),
+        ["tool-1"],
+      );
+      const turnRows = yield* sql<{ readonly turnId: string | null }>`
+        SELECT turn_id AS "turnId"
+        FROM projection_turns
+        WHERE thread_id = 'thread-rewind'
+      `;
+      assert.deepEqual(
+        turnRows.map((row) => row.turnId),
+        ["turn-1"],
+      );
+      const threadRows = yield* sql<{ readonly latestTurnId: string | null }>`
+        SELECT latest_turn_id AS "latestTurnId"
+        FROM projection_threads
+        WHERE thread_id = 'thread-rewind'
+      `;
+      assert.deepEqual(threadRows, [{ latestTurnId: "turn-1" }]);
+    }),
+  );
+
   it.effect("does not fallback-retain messages whose turnId is removed by revert", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;

@@ -880,6 +880,87 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.latestTurn?.turnId).toBe("turn-1");
       }
     });
+
+    it("rewinds to before a user message when the thread has no checkpoints", () => {
+      const at = (hour: number, second = 0) => `2026-04-01T0${hour}:00:0${second}.000Z`;
+      const message = (
+        id: string,
+        role: "user" | "assistant",
+        turnId: string | null,
+        createdAt: string,
+      ) => ({
+        id: MessageId.make(id),
+        role,
+        text: id,
+        turnId: turnId === null ? null : TurnId.make(turnId),
+        streaming: false,
+        createdAt,
+        updatedAt: createdAt,
+      });
+      const threadWithData: OrchestrationThread = {
+        ...baseThread,
+        messages: [
+          message("user-1", "user", null, at(1)),
+          message("assistant-1", "assistant", "turn-1", at(1, 2)),
+          message("user-2", "user", null, at(2)),
+          message("assistant-2", "assistant", "turn-2", at(2, 2)),
+        ],
+        activities: [
+          {
+            id: EventId.make("tool-1"),
+            tone: "tool",
+            kind: "tool.completed",
+            summary: "tool 1",
+            payload: {},
+            turnId: TurnId.make("turn-1"),
+            createdAt: at(1, 1),
+          },
+          {
+            id: EventId.make("tool-2"),
+            tone: "tool",
+            kind: "tool.completed",
+            summary: "tool 2",
+            payload: {},
+            turnId: TurnId.make("turn-2"),
+            createdAt: at(2, 1),
+          },
+        ],
+        checkpoints: [],
+        latestTurn: {
+          turnId: TurnId.make("turn-2"),
+          state: "completed",
+          requestedAt: at(2),
+          startedAt: at(2),
+          completedAt: at(2, 3),
+          assistantMessageId: MessageId.make("assistant-2"),
+        },
+      };
+
+      const result = applyThreadDetailEvent(threadWithData, {
+        ...baseEventFields,
+        sequence: 14,
+        occurredAt: at(3),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.reverted",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          turnCount: 0,
+          messageId: MessageId.make("user-2"),
+          messageCreatedAt: at(2),
+          removedTurnIds: [TurnId.make("turn-2")],
+        },
+      });
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        // The anchor message itself leaves too, unlike a checkpoint-only revert.
+        expect(result.thread.messages.map((entry) => entry.id)).toEqual(["user-1", "assistant-1"]);
+        expect(result.thread.activities.map((entry) => entry.id)).toEqual(["tool-1"]);
+        expect(result.thread.latestTurn?.turnId).toBe("turn-1");
+        expect(result.thread.latestTurn?.assistantMessageId).toBe("assistant-1");
+      }
+    });
   });
 
   describe("no-op events", () => {

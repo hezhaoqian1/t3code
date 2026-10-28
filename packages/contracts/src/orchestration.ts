@@ -892,7 +892,17 @@ const ThreadCheckpointRevertCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  // The user message the thread rewinds to before. It and everything after it
+  // leave the conversation; without it the rewind is measured in checkpoints.
+  messageId: Schema.optional(MessageId),
   createdAt: IsoDateTime,
+});
+
+// A separate command makes older servers reject history-only rewinds rather than
+// ignoring an unfamiliar option and restoring files.
+const ThreadConversationRevertCommand = Schema.Struct({
+  ...ThreadCheckpointRevertCommand.fields,
+  type: Schema.Literal("thread.conversation.revert"),
 });
 
 const ThreadSessionStopCommand = Schema.Struct({
@@ -931,6 +941,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
+  ThreadConversationRevertCommand,
   ThreadSessionStopCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
@@ -959,6 +970,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
+  ThreadConversationRevertCommand,
   ThreadSessionStopCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
@@ -1058,6 +1070,9 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  messageId: Schema.optional(MessageId),
+  messageCreatedAt: Schema.optional(IsoDateTime),
+  removedTurnIds: Schema.optional(Schema.Array(TurnId)),
   createdAt: IsoDateTime,
 });
 
@@ -1316,12 +1331,23 @@ const ThreadUserInputResponseRequestedPayload = Schema.Struct({
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
+  // false keeps workspace files as they are and rewinds only the conversation.
+  restoreFiles: Schema.optional(Schema.Boolean),
+  messageId: Schema.optional(MessageId),
   createdAt: IsoDateTime,
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
   threadId: ThreadId,
+  // Checkpoints numbered above this count are discarded.
   turnCount: NonNegativeInt,
+  // A rewind to before a user message: that message, the turns in
+  // removedTurnIds, and turn-less entries created after messageCreatedAt
+  // leave the thread. Without these fields the revert is measured in
+  // checkpoints only.
+  messageId: Schema.optional(MessageId),
+  messageCreatedAt: Schema.optional(IsoDateTime),
+  removedTurnIds: Schema.optional(Schema.Array(TurnId)),
 });
 
 export const ThreadSessionStopRequestedPayload = Schema.Struct({

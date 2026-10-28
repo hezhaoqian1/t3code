@@ -704,6 +704,121 @@ describe("orchestration projector", () => {
     expect(thread?.latestTurn?.turnId).toBe("turn-1");
   });
 
+  effectIt.effect("rewinds to before a user message in a thread without checkpoints", () =>
+    Effect.gen(function* () {
+      const createdAt = "2026-10-01T00:00:00.000Z";
+      const created = yield* projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: createdAt,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "task",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("fd-deepseek"),
+              model: "deepseek-v4-flash",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      );
+      const message = (
+        sequence: number,
+        messageId: string,
+        role: "user" | "assistant",
+        turnId: string | null,
+        at: string,
+      ) =>
+        makeEvent({
+          sequence,
+          type: "thread.message-sent",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: at,
+          commandId: `cmd-${messageId}`,
+          payload: {
+            threadId: "thread-1",
+            messageId,
+            role,
+            text: messageId,
+            turnId,
+            streaming: false,
+            createdAt: at,
+            updatedAt: at,
+          },
+        });
+      const activity = (sequence: number, id: string, turnId: string | null, at: string) =>
+        makeEvent({
+          sequence,
+          type: "thread.activity-appended",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: at,
+          commandId: `cmd-${id}`,
+          payload: {
+            threadId: "thread-1",
+            activity: {
+              id,
+              tone: "tool",
+              kind: "tool.completed",
+              summary: id,
+              payload: {},
+              turnId,
+              createdAt: at,
+            },
+          },
+        });
+      const events: ReadonlyArray<OrchestrationEvent> = [
+        message(2, "user-1", "user", null, "2026-10-01T01:00:00.000Z"),
+        activity(3, "tool-1", "turn-1", "2026-10-01T01:00:01.000Z"),
+        message(4, "assistant-1", "assistant", "turn-1", "2026-10-01T01:00:02.000Z"),
+        message(5, "user-2", "user", null, "2026-10-01T02:00:00.000Z"),
+        activity(6, "tool-2", "turn-2", "2026-10-01T02:00:01.000Z"),
+        message(7, "assistant-2", "assistant", "turn-2", "2026-10-01T02:00:02.000Z"),
+        activity(8, "late-error", null, "2026-10-01T02:00:03.000Z"),
+        makeEvent({
+          sequence: 9,
+          type: "thread.reverted",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: "2026-10-01T03:00:00.000Z",
+          commandId: "cmd-rewind",
+          payload: {
+            threadId: "thread-1",
+            turnCount: 0,
+            messageId: "user-2",
+            messageCreatedAt: "2026-10-01T02:00:00.000Z",
+            removedTurnIds: ["turn-2"],
+          },
+        }),
+      ];
+      let rewound = created;
+      for (const event of events) {
+        rewound = yield* projectEvent(rewound, event);
+      }
+
+      const thread = rewound.threads[0];
+      expect(thread?.messages.map((entry) => entry.id)).toEqual(["user-1", "assistant-1"]);
+      expect(thread?.activities.map((entry) => entry.id)).toEqual(["tool-1"]);
+      expect(thread?.checkpoints).toEqual([]);
+      expect(thread?.latestTurn).toMatchObject({
+        turnId: "turn-1",
+        state: "completed",
+        assistantMessageId: "assistant-1",
+      });
+    }),
+  );
+
   it("does not fallback-retain messages tied to removed turn IDs", async () => {
     const createdAt = "2026-02-26T12:00:00.000Z";
     const model = createEmptyReadModel(createdAt);

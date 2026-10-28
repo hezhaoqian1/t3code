@@ -121,6 +121,10 @@ baseline capture, completed-turn capture, diff projection, and reverting both th
 provider conversation. The storage contract is `VcsCheckpointOps` in
 [`VcsDriver.ts`](../../apps/server/src/vcs/VcsDriver.ts), implemented for Git in the same directory.
 
+Folders that are not Git repositories (such as app-created task folders) have no checkpoints. They
+can still rewind the conversation to a user message: see _Conversation rewind_ in
+[glossary.md](./glossary.md#conversation-rewind).
+
 ## Startup
 
 [`serverRuntimeStartup.ts`][startup] runs a fixed lifecycle: start keybindings, settings, and

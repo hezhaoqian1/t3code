@@ -135,6 +135,10 @@
       "types": "./src/composerInlineTokens.ts",
       "import": "./src/composerInlineTokens.ts"
     },
+    "./conversationRewind": {
+      "types": "./src/conversationRewind.ts",
+      "import": "./src/conversationRewind.ts"
+    },
     "./terminalLabels": {
       "types": "./src/terminalLabels.ts",
       "import": "./src/terminalLabels.ts"

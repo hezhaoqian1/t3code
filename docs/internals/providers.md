@@ -45,8 +45,9 @@ Clients never call a provider directly. They dispatch orchestration commands ove
 `orchestration.dispatchCommand`, defined with the rest of the orchestration surface in
 [`orchestration.ts`][contracts]. The client-dispatchable provider-facing commands are
 `thread.turn.start`, `thread.turn.interrupt`, `thread.approval.respond`,
-`thread.user-input.respond`, `thread.checkpoint.revert`, and `thread.session.stop`, plus the mode
-setters `thread.runtime-mode.set` and `thread.interaction-mode.set`.
+`thread.user-input.respond`, `thread.checkpoint.revert`, `thread.conversation.revert`, and
+`thread.session.stop`, plus the mode setters `thread.runtime-mode.set` and
+`thread.interaction-mode.set`.
 
 The engine persists an event for the command, and a server-side reactor performs the provider call.
 Provider output comes back as internal commands such as `thread.message.assistant.delta` and
