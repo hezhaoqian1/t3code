@@ -1115,6 +1115,28 @@ describe("restoreRewoundMessageToDraft", () => {
     ]);
   });
 
+  it("never puts an answer or thinking text into the composer", () => {
+    useComposerDraftStore.getState().setPrompt(threadRef, "草稿");
+    const restored = restoreRewoundMessageToDraft({
+      store: useComposerDraftStore.getState(),
+      target: threadRef,
+      message: {
+        id: MessageId.make("thinking"),
+        role: "reasoning",
+        text: "先分析用户的需求……",
+        turnId: TurnId.make("turn-1"),
+        createdAt: now,
+        updatedAt: now,
+        streaming: false,
+      },
+      files: [],
+      createId: () => "unused",
+      createPreviewUrl: () => "blob:unused",
+    });
+    expect(restored.prompt).toBe("草稿");
+    expect(useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt).toBe("草稿");
+  });
+
   it("fills an empty composer with just the rewound prompt", () => {
     const restored = restoreRewoundMessageToDraft({
       store: useComposerDraftStore.getState(),

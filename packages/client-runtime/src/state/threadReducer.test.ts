@@ -885,7 +885,7 @@ describe("applyThreadDetailEvent", () => {
       const at = (hour: number, second = 0) => `2026-04-01T0${hour}:00:0${second}.000Z`;
       const message = (
         id: string,
-        role: "user" | "assistant",
+        role: "user" | "assistant" | "reasoning",
         turnId: string | null,
         createdAt: string,
       ) => ({
@@ -903,6 +903,7 @@ describe("applyThreadDetailEvent", () => {
           message("user-1", "user", null, at(1)),
           message("assistant-1", "assistant", "turn-1", at(1, 2)),
           message("user-2", "user", null, at(2)),
+          message("reasoning-2", "reasoning", "turn-2", at(2, 1)),
           message("assistant-2", "assistant", "turn-2", at(2, 2)),
         ],
         activities: [

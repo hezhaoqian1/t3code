@@ -509,6 +509,7 @@ describe("CheckpointReactor", () => {
       readonly turnId: string;
       readonly messageId?: string;
       readonly assistantMessageId?: string;
+      readonly withThinking?: boolean;
     },
   ) {
     const minute = String(input.index).padStart(2, "0");
@@ -560,6 +561,17 @@ describe("CheckpointReactor", () => {
       },
       createdAt: at(2),
     });
+    if (input.withThinking) {
+      await harness.dispatch({
+        type: "thread.message.reasoning.delta",
+        commandId: CommandId.make(`cmd-reasoning-${input.index}`),
+        threadId,
+        messageId: MessageId.make(`reasoning-${input.index}`),
+        delta: `thinking ${input.index}`,
+        turnId: asTurnId(input.turnId),
+        createdAt: at(2),
+      });
+    }
     await harness.dispatch({
       type: "thread.message.assistant.complete",
       commandId: CommandId.make(`cmd-assistant-${input.index}`),
@@ -1278,21 +1290,24 @@ describe("CheckpointReactor", () => {
 
   it("rewinds a task folder without any checkpoint and keeps every file", async () => {
     const harness = await createHarness({ initializeGit: false, hasSession: false });
-    await runConversationTurn(harness, { index: 1, turnId: "turn-1" });
+    await runConversationTurn(harness, { index: 1, turnId: "turn-1", withThinking: true });
     NodeFS.writeFileSync(NodePath.join(harness.cwd, "outline.md"), "from turn 1\n");
-    await runConversationTurn(harness, { index: 2, turnId: "turn-2" });
+    await runConversationTurn(harness, { index: 2, turnId: "turn-2", withThinking: true });
     NodeFS.writeFileSync(NodePath.join(harness.cwd, "README.md"), "edited by turn 2\n");
-    await runConversationTurn(harness, { index: 3, turnId: "turn-3" });
+    await runConversationTurn(harness, { index: 3, turnId: "turn-3", withThinking: true });
     NodeFS.mkdirSync(NodePath.join(harness.cwd, "outputs"));
     NodeFS.writeFileSync(NodePath.join(harness.cwd, "outputs", "report.html"), "<p>3</p>\n");
     const before = await harness.threadDetail();
     expect(before.checkpoints).toHaveLength(0);
     expect(before.messages.map((message) => message.id)).toEqual([
       "user-1",
+      "reasoning-1",
       "assistant-1",
       "user-2",
+      "reasoning-2",
       "assistant-2",
       "user-3",
+      "reasoning-3",
       "assistant-3",
     ]);
 
@@ -1322,7 +1337,12 @@ describe("CheckpointReactor", () => {
     });
 
     const after = await harness.threadDetail();
-    expect(after.messages.map((message) => message.id)).toEqual(["user-1", "assistant-1"]);
+    // Thinking traces of the removed turns go with them.
+    expect(after.messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "reasoning-1",
+      "assistant-1",
+    ]);
     expect(after.activities.map((activity) => activity.id)).toEqual(["activity-1"]);
     expect(after.latestTurn?.turnId).toBe("turn-1");
     expect(after.activities.some((activity) => activity.kind === "checkpoint.revert.failed")).toBe(
@@ -1346,6 +1366,7 @@ describe("CheckpointReactor", () => {
     const continued = await harness.threadDetail();
     expect(continued.messages.map((message) => message.id)).toEqual([
       "user-1",
+      "reasoning-1",
       "assistant-1",
       "user-4",
       "assistant-11",

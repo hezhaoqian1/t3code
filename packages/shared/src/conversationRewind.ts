@@ -65,7 +65,12 @@ export function isTurnEntryRemovedByRewind(
   return compareIsoTimestamps(entry.createdAt, anchor.messageCreatedAt) > 0;
 }
 
-/** Whether a message leaves the thread. System messages always stay. */
+/**
+ * Whether a message leaves the thread. Thinking traces (`reasoning`) go with
+ * their turn like answers do. Thread-level system messages stay; a system
+ * message bound to a removed turn goes, which covers thinking traces sent to
+ * clients that predate the reasoning role.
+ */
 export function isMessageRemovedByRewind(
   message: {
     readonly id: string;
@@ -75,11 +80,11 @@ export function isMessageRemovedByRewind(
   },
   anchor: ConversationRewindAnchor,
 ): boolean {
-  if (message.role === "system") {
-    return false;
-  }
   if (message.id === anchor.messageId) {
     return true;
+  }
+  if (message.role === "system") {
+    return message.turnId !== null && anchor.removedTurnIds.has(message.turnId);
   }
   return isTurnEntryRemovedByRewind(message, anchor);
 }

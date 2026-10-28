@@ -196,7 +196,9 @@ export function restoreRewoundMessageToDraft(input: {
   readonly createPreviewUrl: (file: File) => string;
 }): { readonly prompt: string; readonly documents: ComposerDocumentAttachment[] } {
   const currentPrompt = input.store.getComposerDraft(input.target)?.prompt ?? "";
-  const restoredPrompt = recallableComposerPrompt(input.message.text);
+  // Only what the employee typed comes back: never an answer or thinking text.
+  const restoredPrompt =
+    input.message.role === "user" ? recallableComposerPrompt(input.message.text) : "";
   const prompt =
     restoredPrompt.length === 0
       ? currentPrompt

@@ -57,6 +57,28 @@ describe("conversation rewind rules", () => {
     ).toBe(false);
   });
 
+  it("removes thinking traces of removed turns, also when sent as system messages", () => {
+    const at = "2026-10-01T02:00:01.000Z";
+    expect(
+      isMessageRemovedByRewind(
+        { id: "reasoning-2", role: "reasoning", turnId: "turn-2", createdAt: at },
+        anchor,
+      ),
+    ).toBe(true);
+    expect(
+      isMessageRemovedByRewind(
+        { id: "reasoning-2", role: "system", turnId: "turn-2", createdAt: at },
+        anchor,
+      ),
+    ).toBe(true);
+    expect(
+      isMessageRemovedByRewind(
+        { id: "reasoning-1", role: "reasoning", turnId: "turn-1", createdAt: at },
+        anchor,
+      ),
+    ).toBe(false);
+  });
+
   it("treats turn-less entries by time and turn entries by turn", () => {
     expect(
       isTurnEntryRemovedByRewind({ turnId: null, createdAt: "2026-10-01T02:00:01Z" }, anchor),

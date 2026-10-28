@@ -2567,7 +2567,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       };
       const message = (
         messageId: string,
-        role: "user" | "assistant",
+        role: "user" | "assistant" | "reasoning",
         turnId: string | null,
         at: string,
       ) =>
@@ -2608,6 +2608,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
               createdAt: at(2),
             },
           });
+          yield* message(`reasoning-${index}`, "reasoning", `turn-${index}`, at(2));
           yield* message(`assistant-${index}`, "assistant", `turn-${index}`, at(3));
           yield* session("ready", null, at(4));
         });
@@ -2695,7 +2696,7 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       `;
       assert.deepEqual(
         messageRows.map((row) => row.messageId),
-        ["user-1", "assistant-1"],
+        ["user-1", "reasoning-1", "assistant-1"],
       );
       const activityRows = yield* sql<{ readonly activityId: string }>`
         SELECT activity_id AS "activityId"
