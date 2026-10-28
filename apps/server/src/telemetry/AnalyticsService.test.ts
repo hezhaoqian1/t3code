@@ -119,4 +119,46 @@ it.layer(NodeServices.layer)("AnalyticsService test", (it) => {
       );
     }),
   );
+
+  it.effect("sends nothing unless telemetry is enabled and a project key is configured", () =>
+    Effect.gen(function* () {
+      const serverConfigLayer = ServerConfig.ServerConfig.layerTest(process.cwd(), {
+        prefix: "t3-telemetry-off-",
+      });
+      // Both configs point at the local test server, so a regression cannot reach PostHog.
+      const configs = [
+        [
+          "not enabled",
+          { T3CODE_POSTHOG_KEY: "phc_test_key", T3CODE_POSTHOG_HOST: "http://localhost" },
+        ],
+        [
+          "no project key",
+          { T3CODE_TELEMETRY_ENABLED: true, T3CODE_POSTHOG_HOST: "http://localhost" },
+        ],
+      ] as const;
+      for (const [label, config] of configs) {
+        let requests = 0;
+        const batchServerLayer = HttpServer.serve(
+          Effect.sync(() => {
+            requests += 1;
+            return HttpServerResponse.jsonUnsafe({});
+          }),
+        );
+        const runtimeLayer = AnalyticsService.layer.pipe(
+          Layer.provideMerge(serverConfigLayer),
+          Layer.provide(ConfigProvider.layer(ConfigProvider.fromUnknown(config))),
+          Layer.provideMerge(NodeHttpServer.layerTest),
+        );
+
+        yield* Effect.gen(function* () {
+          yield* Layer.launch(batchServerLayer).pipe(Effect.forkScoped);
+          const analytics = yield* AnalyticsService.AnalyticsService;
+          yield* analytics.record("provider.turn.sent", { model: "test-model" });
+          yield* analytics.flush;
+        }).pipe(Effect.provide(runtimeLayer));
+
+        assert.equal(requests, 0, label);
+      }
+    }),
+  );
 });
