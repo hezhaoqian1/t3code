@@ -468,7 +468,7 @@ describe("DesktopBackendManager", () => {
       const exit = yield* DesktopBackendManager.runBackendProcess({
         ...baseConfig,
         desktopTelemetryStream: Stream.empty,
-      }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerSpawner, layerHealthyHttpClient)));
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerSpawner, healthyHttpClientLayer)));
 
       assert.deepEqual(exit, { code: Option.none(), reason: "killed by SIGKILL" });
     }),
