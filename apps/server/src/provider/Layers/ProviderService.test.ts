@@ -1146,6 +1146,19 @@ routing.layer("ProviderServiceLive routing", (it) => {
         numTurns: 0,
       });
 
+      // A rewind persists the provider's resume state, so a restart resumes
+      // the rewound history.
+      const rewindCursor = { threadId: "rewound-provider-thread" };
+      routing.codex.updateSession(session.threadId, (current) => ({
+        ...current,
+        resumeCursor: rewindCursor,
+      }));
+      yield* provider.rollbackConversation({ threadId: session.threadId, numTurns: 1 });
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
+      const rewoundBinding = yield* directory.getBinding(session.threadId);
+      assert(Option.isSome(rewoundBinding));
+      assert.deepEqual(rewoundBinding.value.resumeCursor, rewindCursor);
+
       yield* provider.stopSession({ threadId: session.threadId });
       routing.codex.startSession.mockClear();
       routing.codex.sendTurn.mockClear();
@@ -1168,10 +1181,59 @@ routing.layer("ProviderServiceLive routing", (it) => {
         };
         assert.equal(startPayload.provider, "codex");
         assert.equal(startPayload.cwd, "/tmp/project");
-        assert.deepEqual(startPayload.resumeCursor, session.resumeCursor);
+        assert.deepEqual(startPayload.resumeCursor, rewindCursor);
         assert.equal(startPayload.threadId, session.threadId);
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("cuts provider history at the first removed conversation turn it holds", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-rewind-turn-ids");
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        cwd: "/tmp/project",
+        runtimeMode: "full-access",
+      });
+      // The provider history holds a compaction turn the conversation never
+      // showed, and misses "failed-early", which never reached it.
+      routing.codex.readThread.mockImplementation((requestedThreadId) =>
+        Effect.succeed({
+          threadId: requestedThreadId,
+          turns: ["turn-1", "turn-2", "compaction", "turn-3"].map((id) => ({
+            id: asTurnId(id),
+            items: [] as const,
+          })),
+        }),
+      );
+      routing.codex.rollbackThread.mockClear();
+
+      yield* provider.rollbackConversation({
+        threadId,
+        numTurns: 3,
+        turnIds: [asTurnId("failed-early"), asTurnId("turn-2"), asTurnId("turn-3")],
+      });
+      assert.deepEqual(routing.codex.rollbackThread.mock.calls, [[threadId, 3]]);
+
+      // Nothing the provider holds was removed: its history stays as it is.
+      routing.codex.rollbackThread.mockClear();
+      yield* provider.rollbackConversation({
+        threadId,
+        numTurns: 1,
+        turnIds: [asTurnId("failed-early")],
+      });
+      assert.equal(routing.codex.rollbackThread.mock.calls.length, 0);
+      routing.codex.readThread.mockReset();
+      routing.codex.readThread.mockImplementation((requestedThreadId) =>
+        Effect.succeed({
+          threadId: requestedThreadId,
+          turns: [{ id: asTurnId("turn-1"), items: [] as const }],
+        }),
+      );
     }),
   );
 

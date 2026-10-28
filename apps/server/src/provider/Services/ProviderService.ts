@@ -24,6 +24,7 @@ import type {
   ThreadId,
   ProviderTurnStartResult,
   MessageId,
+  TurnId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -108,6 +109,12 @@ export interface ProviderServiceShape {
   readonly rollbackConversation: (input: {
     readonly threadId: ThreadId;
     readonly numTurns: number;
+    /**
+     * The conversation turns being removed, oldest first. When present the
+     * provider's history is cut at the first of these turns it holds, and
+     * `numTurns` is ignored.
+     */
+    readonly turnIds?: ReadonlyArray<TurnId>;
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**

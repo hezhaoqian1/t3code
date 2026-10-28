@@ -1437,26 +1437,27 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       pending.resolve(decision);
     });
 
+  // Conversation history reads and rewinds address the employee's own
+  // conversation, which runs in the local profile's Codex thread. A restored
+  // session has not started that thread yet, and after an FD Skill turn the
+  // active Codex thread is the Skill's own. FD Skill history lives on the
+  // enterprise side, so rewinds never remove FD Skill turns (the
+  // orchestration refuses them before reaching the provider).
+  const ensureConversationHistorySession = (context: FdSessionContext, threadId: ThreadId) =>
+    ensureOrdinarySession(context, { threadId });
+
   const readThread: ProviderAdapterShape<FdAdapterError>["readThread"] = (threadId) =>
-    requireSession(threadId).pipe(
-      Effect.flatMap((context) =>
-        context.ordinarySessionStarted && options.ordinaryAdapter
-          ? options.ordinaryAdapter.readThread(threadId).pipe(
-              Effect.map((snapshot) =>
-                context.ordinaryExecutionProfile?.startsWith("enterprise:")
-                  ? {
-                      ...snapshot,
-                      turns: snapshot.turns.map((turn) => ({ id: turn.id, items: [] })),
-                    }
-                  : snapshot,
-              ),
-            )
-          : Effect.succeed<ProviderThreadSnapshot>({
-              threadId,
-              turns: context.turns.map((turn) => ({ id: turn.id, items: [] })),
-            }),
-      ),
-    );
+    Effect.gen(function* () {
+      const context = yield* requireSession(threadId);
+      if (options.ordinaryAdapter) {
+        yield* ensureConversationHistorySession(context, threadId);
+        return yield* options.ordinaryAdapter.readThread(threadId);
+      }
+      return {
+        threadId,
+        turns: context.turns.map((turn) => ({ id: turn.id, items: [] })),
+      } satisfies ProviderThreadSnapshot;
+    });
 
   const rollbackThread: ProviderAdapterShape<FdAdapterError>["rollbackThread"] = (
     threadId,
@@ -1464,11 +1465,9 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
   ) =>
     Effect.gen(function* () {
       const context = yield* requireSession(threadId);
-      if (context.ordinarySessionStarted && options.ordinaryAdapter) {
-        const snapshot = yield* options.ordinaryAdapter.rollbackThread(threadId, numTurns);
-        return context.ordinaryExecutionProfile?.startsWith("enterprise:")
-          ? { ...snapshot, turns: snapshot.turns.map((turn) => ({ id: turn.id, items: [] })) }
-          : snapshot;
+      if (options.ordinaryAdapter) {
+        yield* ensureConversationHistorySession(context, threadId);
+        return yield* options.ordinaryAdapter.rollbackThread(threadId, numTurns);
       }
       if (!Number.isInteger(numTurns) || numTurns < 1 || numTurns > context.turns.length) {
         return yield* new ProviderAdapterValidationError({
