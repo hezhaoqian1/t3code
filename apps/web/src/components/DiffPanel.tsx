@@ -38,6 +38,7 @@ import {
   resolveFileDiffPath,
   DIFF_SURFACE_THEME_UNSAFE_CSS,
 } from "../lib/diffRendering";
+import { PREFERRED_HIGHLIGHTER } from "../lib/syntaxHighlighting";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { useProject, useThread } from "../state/entities";
@@ -1159,6 +1160,7 @@ export default function DiffPanel({
                     lineDiffType: "none",
                     overflow: wordWrap ? "wrap" : "scroll",
                     theme: resolveDiffThemeName(resolvedTheme),
+                    preferredHighlighter: PREFERRED_HIGHLIGHTER,
                     themeType: resolvedTheme as DiffThemeType,
                     unsafeCSS: DIFF_PANEL_UNSAFE_CSS,
                     stickyHeaders: true,

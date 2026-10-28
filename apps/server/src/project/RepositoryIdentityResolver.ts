@@ -1,4 +1,5 @@
 import type { RepositoryIdentity } from "@t3tools/contracts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import {
   detectSourceControlProviderFromGitRemoteUrl,
   normalizeGitRemoteUrl,
@@ -8,8 +9,11 @@ import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 
+import * as ServerConfig from "../config.ts";
 import * as ProcessRunner from "../processRunner.ts";
 
 const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512;
@@ -20,6 +24,30 @@ export interface RepositoryIdentityResolverOptions {
   readonly cacheCapacity?: number;
   readonly positiveCacheTtl?: Duration.Input;
   readonly negativeCacheTtl?: Duration.Input;
+  /**
+   * Folders the app creates itself and never turns into repositories (the
+   * managed task workspace root). Lookups inside them skip Git entirely: on
+   * Windows each Git spawn costs hundreds of milliseconds on every turn, and a
+   * home-directory repository above them would be the wrong identity anyway.
+   */
+  readonly nonRepositoryRoots?: ReadonlyArray<string>;
+}
+
+function comparablePath(value: string, platform: NodeJS.Platform): string {
+  const normalized = value.replaceAll("\\", "/").replace(/\/+$/, "");
+  return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function isInsideAnyRoot(
+  cwd: string,
+  roots: ReadonlyArray<string>,
+  platform: NodeJS.Platform,
+): boolean {
+  const candidate = comparablePath(cwd, platform);
+  return roots.some((root) => {
+    const prefix = comparablePath(root, platform);
+    return prefix.length > 0 && (candidate === prefix || candidate.startsWith(`${prefix}/`));
+  });
 }
 
 export class RepositoryIdentityResolver extends Context.Service<
@@ -90,7 +118,6 @@ function buildRepositoryIdentity(input: {
 const resolveRepositoryIdentityCacheKey = Effect.fn("RepositoryIdentityResolver.resolveCacheKey")(
   function* (cwd: string) {
     const processRunner = yield* ProcessRunner.ProcessRunner;
-    let cacheKey = cwd;
 
     // git is a real executable on every platform — no cmd.exe shell mode, which
     // would split paths containing spaces during cmd's re-tokenization.
@@ -102,15 +129,11 @@ const resolveRepositoryIdentityCacheKey = Effect.fn("RepositoryIdentityResolver.
       })
       .pipe(Effect.option);
     if (topLevelResult._tag === "None" || topLevelResult.value.code !== 0) {
-      return cacheKey;
+      return null;
     }
 
     const candidate = topLevelResult.value.stdout.trim();
-    if (candidate.length > 0) {
-      cacheKey = candidate;
-    }
-
-    return cacheKey;
+    return candidate.length > 0 ? candidate : null;
   },
 );
 
@@ -139,6 +162,24 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   options: RepositoryIdentityResolverOptions = {},
 ) {
   const processRunner = yield* ProcessRunner.ProcessRunner;
+  const cacheCapacity = options.cacheCapacity ?? DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY;
+  const nonRepositoryRoots = options.nonRepositoryRoots ?? [];
+  const platform = yield* HostProcessPlatform;
+
+  const repositoryRootCache = yield* Cache.makeWith<string, string | null>(
+    (cwd) =>
+      resolveRepositoryIdentityCacheKey(cwd).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+      ),
+    {
+      capacity: cacheCapacity,
+      timeToLive: Exit.match({
+        onSuccess: (value) =>
+          value === null ? Duration.zero : (options.positiveCacheTtl ?? DEFAULT_POSITIVE_CACHE_TTL),
+        onFailure: () => Duration.zero,
+      }),
+    },
+  );
 
   const repositoryIdentityCache = yield* Cache.makeWith<string, RepositoryIdentity | null>(
     (cacheKey) =>
@@ -146,7 +187,7 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
         Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
       ),
     {
-      capacity: options.cacheCapacity ?? DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY,
+      capacity: cacheCapacity,
       timeToLive: Exit.match({
         onSuccess: (value) =>
           value === null
@@ -160,15 +201,29 @@ export const make = Effect.fn("RepositoryIdentityResolver.make")(function* (
   const resolve: RepositoryIdentityResolver["Service"]["resolve"] = Effect.fn(
     "RepositoryIdentityResolver.resolve",
   )(function* (cwd) {
-    const cacheKey = yield* resolveRepositoryIdentityCacheKey(cwd).pipe(
-      Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
-    );
+    if (isInsideAnyRoot(cwd, nonRepositoryRoots, platform)) return null;
+    const cacheKey = yield* Cache.get(repositoryRootCache, cwd);
+    if (cacheKey === null) return null;
     return yield* Cache.get(repositoryIdentityCache, cacheKey);
   });
 
   return RepositoryIdentityResolver.of({ resolve });
 });
 
-export const layer = Layer.effect(RepositoryIdentityResolver, make()).pipe(
-  Layer.provide(ProcessRunner.layer),
-);
+export const layer = Layer.effect(
+  RepositoryIdentityResolver,
+  Effect.gen(function* () {
+    const config = yield* Effect.serviceOption(ServerConfig.ServerConfig);
+    const taskWorkspaceRoot = Option.getOrUndefined(config)?.taskWorkspaceRoot?.trim();
+    if (!taskWorkspaceRoot) return yield* make();
+    // Task folders are created under the root's real path, which can differ
+    // from the configured spelling (junctions, short names).
+    const fileSystem = yield* Effect.serviceOption(FileSystem.FileSystem);
+    const realRoot = Option.isSome(fileSystem)
+      ? yield* fileSystem.value
+          .realPath(taskWorkspaceRoot)
+          .pipe(Effect.orElseSucceed(() => taskWorkspaceRoot))
+      : taskWorkspaceRoot;
+    return yield* make({ nonRepositoryRoots: [taskWorkspaceRoot, realRoot] });
+  }),
+).pipe(Layer.provide(ProcessRunner.layer));

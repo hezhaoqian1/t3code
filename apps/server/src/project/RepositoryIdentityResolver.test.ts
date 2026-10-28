@@ -5,7 +5,10 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { TestClock } from "effect/testing";
+
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import * as ProcessRunner from "../processRunner.ts";
 import * as RepositoryIdentityResolver from "./RepositoryIdentityResolver.ts";
@@ -34,7 +37,139 @@ const makeRepositoryIdentityResolverTestLayer = (options: {
     }),
   ).pipe(Layer.provide(ProcessRunner.layer));
 
+const recordingProcessRunner = (
+  calls: Array<ReadonlyArray<string>>,
+  respond: (args: ReadonlyArray<string>) => { readonly stdout: string; readonly code: number },
+) =>
+  Layer.succeed(ProcessRunner.ProcessRunner, {
+    run: (input) =>
+      Effect.sync(() => {
+        calls.push(input.args);
+        const { stdout, code } = respond(input.args);
+        return {
+          stdout,
+          stderr: code === 0 ? "" : "git failed",
+          code: ChildProcessSpawner.ExitCode(code),
+          timedOut: false,
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      }),
+  });
+
+const ORIGIN_REMOTE = "origin\tgit@github.com:T3Tools/t3code.git (fetch)\n";
+
 it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
+  it.effect("reuses the cached Git root for repeated workspace lookups", () => {
+    const calls: Array<ReadonlyArray<string>> = [];
+    const resolverLayer = Layer.effect(
+      RepositoryIdentityResolver.RepositoryIdentityResolver,
+      RepositoryIdentityResolver.make(),
+    ).pipe(
+      Layer.provide(
+        recordingProcessRunner(calls, (args) => ({
+          stdout: args.includes("rev-parse") ? "/repo\n" : ORIGIN_REMOTE,
+          code: 0,
+        })),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      const first = yield* resolver.resolve("/repo/packages/web");
+      const second = yield* resolver.resolve("/repo/packages/web");
+
+      expect(first?.canonicalKey).toBe("github.com/t3tools/t3code");
+      expect(second).toEqual(first);
+      expect(calls).toEqual([
+        ["-C", "/repo/packages/web", "rev-parse", "--show-toplevel"],
+        ["-C", "/repo", "remote", "-v"],
+      ]);
+    }).pipe(Effect.provide(resolverLayer));
+  });
+
+  it.effect("retries Git root discovery after a failed lookup", () => {
+    const calls: Array<ReadonlyArray<string>> = [];
+    let rootAttempts = 0;
+    const resolverLayer = Layer.effect(
+      RepositoryIdentityResolver.RepositoryIdentityResolver,
+      RepositoryIdentityResolver.make(),
+    ).pipe(
+      Layer.provide(
+        recordingProcessRunner(calls, (args) => {
+          const rootLookup = args.includes("rev-parse");
+          const failed = rootLookup && rootAttempts++ === 0;
+          return {
+            stdout: rootLookup ? (failed ? "" : "/repo\n") : ORIGIN_REMOTE,
+            code: failed ? 1 : 0,
+          };
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      expect(yield* resolver.resolve("/repo/packages/web")).toBeNull();
+
+      const recovered = yield* resolver.resolve("/repo/packages/web");
+      expect(recovered?.rootPath).toBe("/repo");
+      expect(calls).toEqual([
+        ["-C", "/repo/packages/web", "rev-parse", "--show-toplevel"],
+        ["-C", "/repo/packages/web", "rev-parse", "--show-toplevel"],
+        ["-C", "/repo", "remote", "-v"],
+      ]);
+    }).pipe(Effect.provide(resolverLayer));
+  });
+
+  it.effect("never runs Git for folders inside the managed task workspace", () => {
+    const calls: Array<ReadonlyArray<string>> = [];
+    const resolverLayer = Layer.effect(
+      RepositoryIdentityResolver.RepositoryIdentityResolver,
+      RepositoryIdentityResolver.make({ nonRepositoryRoots: ["/home/me/Tasks/"] }),
+    ).pipe(
+      Layer.provide(
+        recordingProcessRunner(calls, (args) => ({
+          // A repository above the task root must not become the task's identity.
+          stdout: args.includes("rev-parse") ? "/home/me\n" : ORIGIN_REMOTE,
+          code: 0,
+        })),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+      expect(yield* resolver.resolve("/home/me/Tasks/2026-10-29-09-00-00")).toBeNull();
+      expect(yield* resolver.resolve("/home/me/Tasks")).toBeNull();
+      expect(calls).toEqual([]);
+
+      // A sibling whose name only starts with the root is a normal folder.
+      expect((yield* resolver.resolve("/home/me/Tasks-archive"))?.rootPath).toBe("/home/me");
+      expect(calls).toHaveLength(2);
+    }).pipe(Effect.provide(resolverLayer));
+  });
+
+  it.effect(
+    "matches the task workspace root case-insensitively with either slash on Windows",
+    () => {
+      const calls: Array<ReadonlyArray<string>> = [];
+      const resolverLayer = Layer.effect(
+        RepositoryIdentityResolver.RepositoryIdentityResolver,
+        RepositoryIdentityResolver.make({ nonRepositoryRoots: ["C:\\Users\\Me\\FangdeAI\\Tasks"] }),
+      ).pipe(
+        Layer.provide(recordingProcessRunner(calls, () => ({ stdout: "", code: 128 }))),
+        Layer.provide(Layer.succeed(HostProcessPlatform, "win32")),
+      );
+
+      return Effect.gen(function* () {
+        const resolver = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+        expect(
+          yield* resolver.resolve("c:/users/me/fangdeai/tasks/2026-10-29-09-00-00"),
+        ).toBeNull();
+        expect(calls).toEqual([]);
+      }).pipe(Effect.provide(resolverLayer));
+    },
+  );
+
   it.effect("normalizes equivalent GitHub remotes into a stable repository identity", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

@@ -4,6 +4,7 @@ import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../Compos
 import { terminalThemeFromApp } from "../ThreadTerminalDrawer";
 import { useTheme } from "../../hooks/useTheme";
 import { resolveDiffThemeName, type DiffThemeName } from "../../lib/diffRendering";
+import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import { GhosttyTerminalSurface } from "~/terminal/ghostty/surface";
 
 // The font previews are the real surfaces, not lookalikes: the composer's
@@ -78,7 +79,7 @@ function loadDiffPreviewHtml(theme: DiffThemeName): Promise<readonly string[]> {
   if (promise === undefined) {
     promise = preloadPatchFile({
       patch: DIFF_PREVIEW_PATCH,
-      options: { diffStyle: "unified", theme },
+      options: { diffStyle: "unified", theme, preferredHighlighter: PREFERRED_HIGHLIGHTER },
     }).then((results) => results.map((result) => result.prerenderedHTML));
     diffPreviewHtmlByTheme.set(theme, promise);
   }
