@@ -55,6 +55,7 @@ import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
+  BrainIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -124,6 +125,7 @@ import {
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
 import { useClientSettings } from "~/hooks/useSettings";
+import { latestThoughtLine } from "@t3tools/client-runtime/work-log/presentation";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
@@ -324,6 +326,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
   // Re-measure the minimap gutter when the chat column changes width without a viewport resize.
   const chatWidth = useClientSettings((settings) => settings.chatWidth);
+  const showReasoning = useClientSettings((settings) => settings.showReasoningTraces);
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
@@ -473,6 +476,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
+        showReasoning,
       },
       previous?.threadKey === routeThreadKey && previous.workspaceRoot === workspaceRoot
         ? previous.projection
@@ -494,6 +498,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     activeTurnStartedAt,
     turnDiffSummaryByAssistantMessageId,
     revertTurnCountByUserMessageId,
+    showReasoning,
   ]);
   const rows = useStableRows(rawRows);
   const feedbackUserInputByAssistantMessageId = useMemo(() => {
@@ -1043,6 +1048,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         (row.kind === "message" && row.message.role === "assistant" && !row.showAssistantMeta) ||
           row.kind === "work" ||
           row.kind === "work-toggle" ||
+          row.kind === "reasoning" ||
           row.kind === "turn-plan"
           ? "pb-2"
           : "pb-4",
@@ -1056,6 +1062,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
       {row.kind === "work" ? <WorkGroupSection groupedEntries={row.groupedEntries} /> : null}
       {row.kind === "work-toggle" ? <WorkGroupToggleTimelineRow row={row} /> : null}
       {row.kind === "turn-fold" ? <TurnFoldTimelineRow row={row} /> : null}
+      {row.kind === "reasoning" ? <ReasoningTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "user" ? <UserTimelineRow row={row} /> : null}
       {row.kind === "message" && row.message.role === "assistant" ? (
         <AssistantTimelineRow row={row} />
@@ -1244,9 +1251,15 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
 
 function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-fold" }> }) {
   const ctx = use(TimelineRowCtx);
-  const { workingStepLabel } = use(TimelineRowActivityCtx);
+  const { workingStepLabel, isWorking } = use(TimelineRowActivityCtx);
   const Icon = row.expanded ? ChevronDownIcon : ChevronRightIcon;
   const progressLabel = row.active && !row.expanded ? "Agent 正在运行" : row.label;
+  // A collapsed running turn hides its 「思考过程」 row, so the header carries
+  // the latest thought instead.
+  const thoughtLine =
+    row.active && !row.expanded && isWorking && row.latestThought
+      ? latestThoughtLine(row.latestThought.text)
+      : "";
 
   return (
     <div className={cn(row.active ? "pb-1 pt-0.5" : "border-b border-border/60 pb-2 pt-1")}>
@@ -1283,9 +1296,120 @@ function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "turn-
         ) : null}
         <Icon className="size-3.5" />
       </button>
+      {thoughtLine ? <LiveThoughtLine text={thoughtLine} className="ms-1 mt-0.5" /> : null}
     </div>
   );
 }
+
+/** The newest line of the model's thinking, shown while a turn runs. */
+function LiveThoughtLine({
+  text,
+  className,
+  icon = true,
+}: {
+  text: string;
+  className?: string;
+  /** Off under a thinking row, whose own icon already sits above the line. */
+  icon?: boolean;
+}) {
+  return (
+    <p
+      className={cn(
+        "flex min-w-0 items-start gap-1.5 text-[12px] leading-5 text-muted-foreground",
+        className,
+      )}
+      data-live-thought
+    >
+      {icon ? (
+        <BrainIcon className="mt-[3px] size-3.5 shrink-0 stroke-[1.8] opacity-60" aria-hidden />
+      ) : null}
+      <span className="line-clamp-2 min-w-0 break-words">{text}</span>
+    </p>
+  );
+}
+
+/**
+ * The model's thinking traces for one run of work, folded under 「思考过程」
+ * by default. While the turn runs, its latest thinking row also shows the
+ * newest line of thought, so a finding never hides behind the next tool call.
+ * Thinking text is display-only: no copy action, and it never feeds titles,
+ * search or any export.
+ */
+const ReasoningTimelineRow = memo(function ReasoningTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: "reasoning" }>;
+}) {
+  const ctx = use(TimelineRowCtx);
+  const { isWorking } = use(TimelineRowActivityCtx);
+  // A block left open by a crashed provider never gets its completion. Only
+  // the running turn may claim to still be thinking.
+  const live = row.live && isWorking;
+  const thinking = row.thinking && live;
+  const thoughts = row.messages.filter((message) => message.text.trim().length > 0);
+  const latest = thoughts.at(-1);
+  const thoughtLine = live && !row.expanded && latest ? latestThoughtLine(latest.text) : "";
+  const label = thinking ? "正在思考" : "思考过程";
+  const { onToggleWorkGroup } = ctx;
+  const toggle = useCallback(() => onToggleWorkGroup(row.id, row.id), [onToggleWorkGroup, row.id]);
+
+  return (
+    <div className="flex min-w-0 flex-col">
+      <button
+        type="button"
+        aria-expanded={row.expanded}
+        aria-label={row.expanded ? `收起${label}` : `展开${label}`}
+        data-scroll-anchor-ignore
+        onClick={toggle}
+        className="flex w-full cursor-pointer select-none items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left text-[12px] leading-5 transition-colors duration-150 hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+      >
+        <span className="flex size-5 shrink-0 items-center justify-center text-icon-muted">
+          <BrainIcon className="block size-3.5 shrink-0 stroke-[1.8] opacity-80" aria-hidden />
+        </span>
+        <span className={cn("font-medium", thinking ? "text-foreground" : "text-secondary-label")}>
+          {label}
+        </span>
+        {thinking ? (
+          <span className="inline-flex shrink-0 items-center gap-[3px]" aria-hidden>
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse" />
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse [animation-delay:200ms]" />
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse [animation-delay:400ms]" />
+          </span>
+        ) : null}
+        {thoughts.length > 1 ? (
+          <span className="shrink-0 text-muted-foreground/70 tabular-nums">
+            · {thoughts.length} 段
+          </span>
+        ) : null}
+        <ChevronDownIcon
+          className={cn(
+            "size-3 shrink-0 text-icon-muted opacity-70 transition-transform duration-200",
+            row.expanded && "rotate-180",
+          )}
+          aria-hidden
+        />
+      </button>
+      {thoughtLine ? (
+        <LiveThoughtLine text={thoughtLine} icon={false} className="ps-[26px]" />
+      ) : null}
+      {row.expanded && thoughts.length > 0 ? (
+        <div className="mt-1 ms-7 flex max-h-96 cursor-text flex-col gap-3 overflow-auto rounded-md border-s border-border/45 bg-muted/40 px-3 py-2 text-secondary-label text-[13px] select-text">
+          {thoughts.map((message) => (
+            <ChatMarkdown
+              key={message.id}
+              text={message.text}
+              cwd={ctx.markdownCwd}
+              threadRef={ctx.threadRef ?? undefined}
+              isStreaming={thinking && message.streaming}
+              skills={ctx.skills}
+              lineBreaks
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+});
 
 function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);

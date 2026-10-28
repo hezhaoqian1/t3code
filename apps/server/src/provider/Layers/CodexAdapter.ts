@@ -309,7 +309,28 @@ function itemTitle(itemType: CanonicalItemType, item?: CodexLifecycleItem): stri
   }
 }
 
+/**
+ * The whole text of a completed reasoning item. The summary wins when the
+ * model wrote one; otherwise the raw trace, which is all the FD DeepSeek models
+ * send (Responses `reasoning_text` content with an empty summary). Parts are
+ * separated by a blank line, as the streamed deltas are.
+ */
+function reasoningItemText(item: CodexLifecycleItem): string | undefined {
+  if (item.type !== "reasoning") return undefined;
+  const join = (parts: ReadonlyArray<string> | undefined) =>
+    trimText(
+      (parts ?? [])
+        .map((part) => part.trim())
+        .filter((part) => part.length > 0)
+        .join("\n\n"),
+    );
+  return join(item.summary) ?? join(item.content);
+}
+
 function itemDetail(itemType: CanonicalItemType, item: CodexLifecycleItem): string | undefined {
+  if (itemType === "reasoning") {
+    return reasoningItemText(item);
+  }
   const itemRecord = item as Record<string, unknown>;
   const action = itemRecord.action as Record<string, unknown> | undefined;
   const actionQueries = Array.isArray(action?.queries) ? action.queries : [];

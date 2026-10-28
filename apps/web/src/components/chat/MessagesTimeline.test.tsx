@@ -580,6 +580,84 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('aria-label="回答需要改进"');
   });
 
+  it("folds a finished thought under a collapsed 思考过程 row", () => {
+    const turnId = TurnId.make("turn-thought");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "reasoning:raw:item-1",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message: {
+              id: MessageId.make("reasoning:raw:item-1"),
+              role: "reasoning",
+              text: "Hidden working note about the drawdown.",
+              turnId,
+              createdAt: MESSAGE_CREATED_AT,
+              updatedAt: MESSAGE_CREATED_AT,
+              streaming: false,
+            },
+          },
+          {
+            ...buildAssistantTimelineEntry("A useful answer", false),
+            message: {
+              ...buildAssistantTimelineEntry("A useful answer", false).message,
+              turnId,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("思考过程");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-label="展开思考过程"');
+    expect(markup).not.toContain("Hidden working note");
+    expect(markup).not.toContain("正在思考");
+  });
+
+  it("shows the newest line of a running thought on the live row", () => {
+    const turnId = TurnId.make("turn-live-thought");
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        activeTurnInProgress
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        latestTurn={{
+          turnId,
+          state: "running",
+          startedAt: MESSAGE_CREATED_AT,
+          completedAt: null,
+        }}
+        runningTurnId={turnId}
+        timelineEntries={[
+          {
+            id: "reasoning:raw:item-live",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message: {
+              id: MessageId.make("reasoning:raw:item-live"),
+              role: "reasoning",
+              text: "The user wants a review. Start broad.\n\n先看回撤，再看行业暴露。然后对比基准。\n\n",
+              turnId,
+              createdAt: MESSAGE_CREATED_AT,
+              updatedAt: MESSAGE_CREATED_AT,
+              streaming: true,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("正在思考");
+    expect(markup).toContain("data-live-thought");
+    expect(markup).toContain("先看回撤，再看行业暴露。");
+    expect(markup).not.toContain("然后对比基准");
+  });
+
   it("renders context compaction entries in the normal work log", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline

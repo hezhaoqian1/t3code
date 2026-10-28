@@ -611,6 +611,9 @@ export function useSettingsRestore(onRestored?: () => void) {
         ? ["时间格式"]
         : []),
       ...(settings.chatWidth !== DEFAULT_UNIFIED_SETTINGS.chatWidth ? ["聊天区宽度"] : []),
+      ...(settings.showReasoningTraces !== DEFAULT_UNIFIED_SETTINGS.showReasoningTraces
+        ? ["显示模型思考过程"]
+        : []),
       ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
         ? ["运行中发送消息"]
         : []),
@@ -692,6 +695,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.chatWidth,
+      settings.showReasoningTraces,
       settings.followUpBehavior,
       settings.continueThreadsAfterServerUpdate,
       settings.notificationMode,
@@ -764,6 +768,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
+      showReasoningTraces: DEFAULT_UNIFIED_SETTINGS.showReasoningTraces,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
@@ -1692,7 +1697,7 @@ function LegacyFeaturesSection() {
             />
             <SettingsRow
               {...searchableSetting("legacy-token-streaming")}
-              description="逐 Token 显示回答，而不是分段显示。不建议启用：速度明显更慢，长回答也更难阅读；仅为兼容旧行为保留。"
+              description="逐 Token 显示回答，而不是分段显示。不建议启用：速度明显更慢，长回答也更难阅读；仅为兼容旧行为保留。思考过程仍按段落显示。"
               control={
                 <Switch
                   checked={settings.enableLegacyTokenStreaming}
@@ -1977,6 +1982,32 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("show-reasoning")}
+          description="显示 AI 回答前的思考：处理中显示最新一句，完成后收进「思考过程」，默认折叠，点开可查看。思考内容不会用于任务标题、搜索或复制。"
+          resetAction={
+            settings.showReasoningTraces !== DEFAULT_UNIFIED_SETTINGS.showReasoningTraces ? (
+              <SettingResetButton
+                label="显示模型思考过程"
+                onClick={() =>
+                  updateSettings({
+                    showReasoningTraces: DEFAULT_UNIFIED_SETTINGS.showReasoningTraces,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.showReasoningTraces}
+              onCheckedChange={(checked) =>
+                updateSettings({ showReasoningTraces: Boolean(checked) })
+              }
+              aria-label="显示模型思考过程"
+            />
           }
         />
 

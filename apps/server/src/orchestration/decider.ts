@@ -1204,7 +1204,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       return [unsettledEvent, sessionSetEvent];
     }
 
-    case "thread.message.assistant.delta": {
+    case "thread.message.assistant.delta":
+    case "thread.message.reasoning.delta": {
       yield* requireThread({
         readModel,
         command,
@@ -1221,7 +1222,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.messageId,
-          role: "assistant",
+          role: command.type === "thread.message.reasoning.delta" ? "reasoning" : "assistant",
           text: command.delta,
           turnId: command.turnId ?? null,
           streaming: true,
@@ -1231,7 +1232,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
-    case "thread.message.assistant.complete": {
+    case "thread.message.assistant.complete":
+    case "thread.message.reasoning.complete": {
       yield* requireThread({
         readModel,
         command,
@@ -1248,8 +1250,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.messageId,
-          role: "assistant",
-          text: command.text ?? "",
+          role: command.type === "thread.message.reasoning.complete" ? "reasoning" : "assistant",
+          text: command.type === "thread.message.reasoning.complete" ? "" : (command.text ?? ""),
           turnId: command.turnId ?? null,
           streaming: false,
           createdAt: command.createdAt,

@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { OrchestrationThreadActivity } from "@t3tools/contracts";
-import { projectActivityPayload } from "./ActivityPayloadProjection.ts";
+import {
+  EventId,
+  MessageId,
+  type OrchestrationEvent,
+  type OrchestrationThreadActivity,
+  ThreadId,
+} from "@t3tools/contracts";
+import {
+  projectActivityEvent,
+  projectActivityPayload,
+  projectReasoningMessageEvent,
+  projectReasoningOverlay,
+  projectThreadDetailSnapshot,
+} from "./ActivityPayloadProjection.ts";
 
 function activity(payload: Record<string, unknown>): OrchestrationThreadActivity {
   return {
@@ -113,5 +125,87 @@ describe("projectActivityPayload agent-field survival", () => {
     });
     const projected = projectActivityPayload(source);
     expect(projected.payload).toEqual(source.payload);
+  });
+});
+
+describe("reasoning wire compatibility", () => {
+  const reasoning = {
+    id: MessageId.make("reasoning:raw:item-1"),
+    role: "reasoning" as const,
+    text: "Checking the available evidence.",
+    turnId: null,
+    streaming: false,
+    createdAt: "2026-08-01T10:00:01.000Z",
+    updatedAt: "2026-08-01T10:00:01.000Z",
+  };
+  const answer = {
+    ...reasoning,
+    id: MessageId.make("assistant:item-2"),
+    role: "assistant" as const,
+    text: "Here is the answer.",
+  };
+  const event = {
+    sequence: 2,
+    eventId: EventId.make("thinking-event"),
+    aggregateKind: "thread" as const,
+    aggregateId: ThreadId.make("thread-1"),
+    occurredAt: reasoning.createdAt,
+    commandId: null,
+    causationEventId: null,
+    correlationId: null,
+    metadata: {},
+    type: "thread.message-sent" as const,
+    payload: {
+      threadId: ThreadId.make("thread-1"),
+      messageId: reasoning.id,
+      role: reasoning.role,
+      text: reasoning.text,
+      turnId: null,
+      streaming: false,
+      createdAt: reasoning.createdAt,
+      updatedAt: reasoning.updatedAt,
+    },
+  } satisfies OrchestrationEvent;
+
+  it("keeps reasoning for clients that opted in", () => {
+    expect(projectActivityEvent(event, true)).toBe(event);
+    expect(projectReasoningMessageEvent(event, true)).toBe(event);
+  });
+
+  it("downgrades reasoning to a system message for older clients instead of dropping it", () => {
+    // Keeping the event preserves the client's sequence watermark.
+    expect(projectActivityEvent(event, false)).toEqual({
+      ...event,
+      payload: { ...event.payload, role: "system" },
+    });
+    const assistantEvent = {
+      ...event,
+      payload: { ...event.payload, messageId: answer.id, role: "assistant" as const },
+    };
+    expect(projectReasoningMessageEvent(assistantEvent, false)).toBe(assistantEvent);
+  });
+
+  it("projects snapshots and volatile overlays the same way", () => {
+    const thread = { messages: [reasoning, answer], activities: [] };
+    const snapshot = { snapshotSequence: 2, thread } as unknown as Parameters<
+      typeof projectThreadDetailSnapshot
+    >[0];
+    expect(
+      projectThreadDetailSnapshot(snapshot, false).thread.messages.map((entry) => entry.role),
+    ).toEqual(["system", "assistant"]);
+    expect(
+      projectThreadDetailSnapshot(snapshot, true).thread.messages.map((entry) => entry.role),
+    ).toEqual(["reasoning", "assistant"]);
+    const overlay = {
+      threadId: ThreadId.make("thread-1"),
+      revision: 3,
+      messages: [reasoning, answer],
+      activities: [],
+    };
+    expect(projectReasoningOverlay(overlay, true)).toBe(overlay);
+    expect(projectReasoningOverlay(overlay, false).messages.map((entry) => entry.role)).toEqual([
+      "system",
+      "assistant",
+    ]);
   });
 });

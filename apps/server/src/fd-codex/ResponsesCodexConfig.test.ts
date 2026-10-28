@@ -16,6 +16,14 @@ describe("Responses-backed Codex configuration", () => {
     expect(config).not.toContain("sk-");
   });
 
+  it("leaves Codex reasoning events on so thinking traces reach the conversation", () => {
+    const config = renderResponsesCodexConfig(FD_RESPONSES_PROVIDER);
+
+    // Raw reasoning deltas arrive without any setting; hiding agent reasoning
+    // would drop the trace the timeline shows under its thinking group.
+    expect(config).not.toContain("hide_agent_reasoning");
+  });
+
   it("rejects credentials in the endpoint and unknown defaults", () => {
     expect(() =>
       renderResponsesCodexConfig({

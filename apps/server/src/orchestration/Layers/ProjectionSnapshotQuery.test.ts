@@ -1892,6 +1892,16 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '2026-05-01T00:00:15.000Z'
           ),
           (
+            'message-reasoning',
+            'thread-active',
+            'turn-active',
+            'reasoning',
+            'Thinking needle must not be searchable.',
+            0,
+            '2026-05-01T00:00:12.500Z',
+            '2026-05-01T00:00:12.500Z'
+          ),
+          (
             'message-hidden',
             'thread-hidden',
             NULL,
@@ -1953,6 +1963,11 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       );
       assert.deepStrictEqual(
         (yield* snapshotQuery.searchThreads({ query: "system needle" })).matches,
+        [],
+      );
+      // A thinking trace is working notes, never a search hit.
+      assert.deepStrictEqual(
+        (yield* snapshotQuery.searchThreads({ query: "thinking needle" })).matches,
         [],
       );
       assert.deepStrictEqual(

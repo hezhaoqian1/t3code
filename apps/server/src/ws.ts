@@ -63,6 +63,8 @@ import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import {
   projectActivityEvent,
+  projectReasoningMessageEvent,
+  projectReasoningOverlay,
   projectThreadDetailSnapshot,
 } from "./orchestration/ActivityPayloadProjection.ts";
 import { makeLiveStreamBudget, type RetainedLiveItem } from "./orchestration/LiveStreamBudget.ts";
@@ -1061,6 +1063,7 @@ const makeWsRpcLayer = (
           shellResumeCompletionMarker: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
+          reasoningMessages: true,
         };
       });
 
@@ -1484,18 +1487,21 @@ const makeWsRpcLayer = (
                   return withoutDurableEnterpriseHistory(overlay, persistedMessages);
                 });
 
+              // Clients that predate the reasoning role get thinking traces as
+              // system messages; the coalescer projects activity payloads.
+              const reasoningMessages = input.reasoningMessages === true;
               const liveStream = orchestrationEngine.streamDomainEvents.pipe(
                 Stream.filter(isThisThreadDetailEvent),
                 Stream.map((event) => ({
                   kind: "event" as const,
-                  event,
+                  event: projectReasoningMessageEvent(event, reasoningMessages),
                 })),
               );
               const volatileEventStream = Option.isSome(enterpriseThreadRuntime)
                 ? enterpriseThreadRuntime.value.stream(input.threadId).pipe(
                     Stream.map((event) => ({
                       kind: "volatile-event" as const,
-                      event,
+                      event: projectReasoningMessageEvent(event, reasoningMessages),
                     })),
                   )
                 : Stream.empty;
@@ -1503,7 +1509,10 @@ const makeWsRpcLayer = (
                 ? enterpriseThreadRuntime.value.resetStream.pipe(
                     Stream.filter((overlay) => overlay.threadId === input.threadId),
                     Stream.mapEffect(reconcileEnterpriseOverlay),
-                    Stream.map((overlay) => ({ kind: "volatile-snapshot" as const, overlay })),
+                    Stream.map((overlay) => ({
+                      kind: "volatile-snapshot" as const,
+                      overlay: projectReasoningOverlay(overlay, reasoningMessages),
+                    })),
                   )
                 : Stream.empty;
               const volatileStream = Stream.merge(volatileEventStream, volatileResetStream);
@@ -1537,7 +1546,7 @@ const makeWsRpcLayer = (
                   Effect.flatMap((overlay) =>
                     liveBuffer.offer({
                       kind: "volatile-snapshot" as const,
-                      overlay,
+                      overlay: projectReasoningOverlay(overlay, reasoningMessages),
                     }),
                   ),
                   Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
@@ -1599,7 +1608,7 @@ const makeWsRpcLayer = (
                       Stream.filter(isThisThreadDetailEvent),
                       Stream.map((event) => ({
                         kind: "event" as const,
-                        event: projectActivityEvent(event),
+                        event: projectActivityEvent(event, reasoningMessages),
                       })),
                       Stream.mapError(
                         (cause) =>
@@ -1670,7 +1679,7 @@ const makeWsRpcLayer = (
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
-                  snapshot: projectThreadDetailSnapshot(snapshot.value),
+                  snapshot: projectThreadDetailSnapshot(snapshot.value, reasoningMessages),
                 }),
                 afterSnapshot,
               );

@@ -2,6 +2,7 @@ import type {
   OrchestrationEvent,
   OrchestrationThreadActivity,
   OrchestrationThreadDetailSnapshot,
+  OrchestrationVolatileThreadOverlay,
 } from "@t3tools/contracts";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -463,13 +464,25 @@ function dropSupersededToolUpdatedActivities(
   });
 }
 
+/**
+ * Thread reads default to the pre-reasoning wire shape: a client whose role
+ * decoder predates `reasoning` would reject the whole snapshot. Such clients
+ * get the thinking trace as a `system` message, which every client already
+ * keeps out of its timeline, instead of losing the thread.
+ */
 export function projectThreadDetailSnapshot(
   snapshot: OrchestrationThreadDetailSnapshot,
+  reasoningMessages = true,
 ): OrchestrationThreadDetailSnapshot {
   return {
     ...snapshot,
     thread: {
       ...snapshot.thread,
+      messages: reasoningMessages
+        ? snapshot.thread.messages
+        : snapshot.thread.messages.map((message) =>
+            message.role === "reasoning" ? { ...message, role: "system" as const } : message,
+          ),
       activities: dropSupersededToolUpdatedActivities(
         dropStaleContextWindowActivities(snapshot.thread.activities),
       ).map(projectActivityPayload),
@@ -477,15 +490,55 @@ export function projectThreadDetailSnapshot(
   };
 }
 
-export function projectActivityEvent(event: OrchestrationEvent): OrchestrationEvent {
-  if (event.type !== "thread.activity-appended") {
-    return event;
+/**
+ * Rewrites a reasoning message event as a system message for a client that did
+ * not opt in to reasoning roles. The event is kept rather than filtered so
+ * sequence watermarks and message identities stay intact: dropping it would
+ * strand the client's history pages.
+ */
+export function projectReasoningMessageEvent<E extends OrchestrationEvent>(
+  event: E,
+  reasoningMessages: boolean,
+): E {
+  if (
+    !reasoningMessages &&
+    event.type === "thread.message-sent" &&
+    event.payload.role === "reasoning"
+  ) {
+    return { ...event, payload: { ...event.payload, role: "system" } };
+  }
+  return event;
+}
+
+/** Same rewrite for a volatile overlay's messages (FD enterprise threads). */
+export function projectReasoningOverlay(
+  overlay: OrchestrationVolatileThreadOverlay,
+  reasoningMessages: boolean,
+): OrchestrationVolatileThreadOverlay {
+  if (reasoningMessages || !overlay.messages.some((message) => message.role === "reasoning")) {
+    return overlay;
   }
   return {
-    ...event,
+    ...overlay,
+    messages: overlay.messages.map((message) =>
+      message.role === "reasoning" ? { ...message, role: "system" as const } : message,
+    ),
+  };
+}
+
+export function projectActivityEvent(
+  event: OrchestrationEvent,
+  reasoningMessages = true,
+): OrchestrationEvent {
+  const projected = projectReasoningMessageEvent(event, reasoningMessages);
+  if (projected.type !== "thread.activity-appended") {
+    return projected;
+  }
+  return {
+    ...projected,
     payload: {
-      ...event.payload,
-      activity: projectActivityPayload(event.payload.activity),
+      ...projected.payload,
+      activity: projectActivityPayload(projected.payload.activity),
     },
   };
 }

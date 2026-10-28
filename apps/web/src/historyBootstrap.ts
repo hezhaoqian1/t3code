@@ -58,10 +58,13 @@ function finalizeWithPrompt(
 }
 
 export function buildBootstrapInput(
-  previousMessages: ChatMessage[],
+  allPreviousMessages: ChatMessage[],
   latestPrompt: string,
   maxChars: number,
 ): BootstrapInputResult {
+  // Thinking traces are the model's working notes, never conversation: they
+  // are not replayed to a model, and would crowd the answers out of the budget.
+  const previousMessages = allPreviousMessages.filter((message) => message.role !== "reasoning");
   const budget = Number.isFinite(maxChars) ? Math.max(1, Math.floor(maxChars)) : 1;
   const promptOnly = latestPrompt.length <= budget ? latestPrompt : latestPrompt.slice(0, budget);
 
