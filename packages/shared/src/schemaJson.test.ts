@@ -53,6 +53,17 @@ Done.`),
     });
   });
 
+  it("reads block comments that contain URLs", () => {
+    expect(
+      decodeLenientJson(`{
+        "enabled": /* See "https://example.com/config" // still in the block */ true,
+      }`),
+    ).toEqual({ enabled: true });
+    // A removed comment must not glue the tokens around it together.
+    expect(() => decodeLenientJson("[1/* https://example.com */2]")).toThrow();
+    expect(decodeLenientJson('"1/* https://example.com */2"')).toBe("1/* https://example.com */2");
+  });
+
   it("rejects malformed JSON after lenient preprocessing", () => {
     expect(() => decodeLenientJson('{ "enabled": true,, }')).toThrow();
   });
