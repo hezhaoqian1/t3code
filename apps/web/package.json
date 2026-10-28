@@ -30,6 +30,8 @@
     "@tanstack/react-router": "^1.160.2",
     "class-variance-authority": "^0.7.1",
     "effect": "catalog:",
+    "hast-util-to-html": "^9.0.5",
+    "hast-util-to-jsx-runtime": "^2.3.6",
     "heic-to": "^1.5.2",
     "lexical": "^0.41.0",
     "lucide-react": "^0.564.0",
@@ -51,6 +53,7 @@
     "@tanstack/router-plugin": "^1.161.0",
     "@types/babel__core": "^7.20.5",
     "@types/compression": "^1.8.1",
+    "@types/mdast": "^4.0.4",
     "@types/react": "~19.2.14",
     "@types/react-dom": "~19.2.3",
     "@types/react-test-renderer": "19.1.0",
@@ -61,6 +64,7 @@
     "msw": "2.12.11",
     "react-test-renderer": "19.2.6",
     "tailwindcss": "^4.0.0",
+    "unified": "^11.0.5",
     "vite": "catalog:",
     "vite-plus": "catalog:"
   }
