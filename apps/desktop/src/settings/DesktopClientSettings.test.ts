@@ -43,6 +43,7 @@ const clientSettings: ClientSettings = {
   inAppNotificationsEnabled: true,
   followUpBehavior: "queue",
   wordWrap: true,
+  showReasoningTraces: false,
 };
 
 const decodeClientSettingsJson = Schema.decodeEffect(Schema.fromJsonString(ClientSettingsSchema));
