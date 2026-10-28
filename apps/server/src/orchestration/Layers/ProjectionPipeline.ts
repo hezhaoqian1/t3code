@@ -130,6 +130,31 @@ function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
   );
 }
 
+// A refresh reads each persisted summary source, so skip events that cannot
+// change the result: assistant text (including every streamed chunk) and
+// routine tool activity.
+function shouldRefreshThreadShellSummary(event: OrchestrationEvent): boolean {
+  if (event.type === "thread.message-sent") {
+    return event.payload.role === "user";
+  }
+
+  if (event.type !== "thread.activity-appended") {
+    return true;
+  }
+
+  switch (event.payload.activity.kind) {
+    case "approval.requested":
+    case "approval.resolved":
+    case "provider.approval.respond.failed":
+    case "user-input.requested":
+    case "user-input.resolved":
+    case "provider.user-input.respond.failed":
+      return true;
+    default:
+      return false;
+  }
+}
+
 function derivePendingUserInputCountFromActivities(
   activities: ReadonlyArray<ProjectionThreadActivity>,
 ): number {
@@ -558,26 +583,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         return;
       }
 
-      const [messages, proposedPlans, activities, pendingApprovals] = yield* Effect.all([
-        projectionThreadMessageRepository.listByThreadId({ threadId }),
-        projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
-        projectionThreadActivityRepository.listByThreadId({ threadId }),
-        projectionPendingApprovalRepository.listByThreadId({ threadId }),
-      ]);
+      // Read only the summary sources: message bodies, tool output payloads and
+      // resolved approval history stay in SQLite.
+      const [latestUserMessageAt, proposedPlans, activities, pendingApprovalCount] =
+        yield* Effect.all([
+          projectionThreadMessageRepository.getLatestUserMessageAt({ threadId }),
+          projectionThreadProposedPlanRepository.listByThreadId({ threadId }),
+          projectionThreadActivityRepository.listUserInputLifecycleByThreadId({ threadId }),
+          projectionPendingApprovalRepository.countPendingByThreadId({ threadId }),
+        ]);
 
-      let latestUserMessageAt: string | null = null;
-      for (const message of messages) {
-        if (
-          message.role === "user" &&
-          (latestUserMessageAt === null || message.createdAt > latestUserMessageAt)
-        ) {
-          latestUserMessageAt = message.createdAt;
-        }
-      }
-
-      const pendingApprovalCount = pendingApprovals.filter(
-        (approval) => approval.status === "pending",
-      ).length;
       const pendingUserInputCount = derivePendingUserInputCountFromActivities(activities);
       const hasActionableProposedPlan = deriveHasActionableProposedPlan({
         latestTurnId: existingRow.value.latestTurnId,
@@ -861,7 +876,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             updatedAt: event.occurredAt,
           });
-          yield* refreshThreadShellSummary(event.payload.threadId);
+          if (shouldRefreshThreadShellSummary(event)) {
+            yield* refreshThreadShellSummary(event.payload.threadId);
+          }
           return;
         }
 
