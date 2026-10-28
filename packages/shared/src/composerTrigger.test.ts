@@ -33,6 +33,36 @@ describe("detectComposerTrigger", () => {
       });
     },
   );
+
+  it.each([
+    "It costs $5",
+    "budget $9.99",
+    "only $.99",
+    "about €20",
+    "raise $10k",
+    "$1,000",
+    "£2e6",
+    "raise $10k.",
+    "is it $5?",
+    "(about $9.99)",
+    "预算 ¥500万",
+    "认购￥1.5亿元",
+    "每份 ¥20元，",
+    "加仓 ¥300w",
+  ])("does not open the skill menu for the amount in %j", (text) =>
+    expect(detectComposerTrigger(text, text.length)).toBeNull(),
+  );
+
+  it.each(["$", "$1password", "$2fa", "¥"])("still detects the skill prefix %j", (text) => {
+    expect(detectComposerTrigger(text, text.length)).toMatchObject({ kind: "skill" });
+  });
+
+  it.each([
+    ["/tmp/build.sh", "/tmp/build.sh".length],
+    ["/tmp/build.sh", 4],
+  ])("treats the path %j as text, not a slash command (caret %i)", (text, cursor) => {
+    expect(detectComposerTrigger(text, cursor)).toBeNull();
+  });
 });
 
 describe("serializeComposerFileLink", () => {
