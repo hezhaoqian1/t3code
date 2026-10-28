@@ -416,7 +416,7 @@ const make = Effect.gen(function* () {
     readonly detail: string;
     readonly createdAt: string;
   }) {
-    const thread = yield* resolveThread(input.threadId);
+    const thread = yield* resolveThreadShell(input.threadId);
     if (!thread) {
       return;
     }
@@ -445,7 +445,15 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map(Option.getOrUndefined));
   });
 
-  const resolveThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+  // Session, model and metadata commands only need the thread row. Reading the
+  // detail would load and decode every message and activity of the thread.
+  const resolveThreadShell = Effect.fnUntraced(function* (threadId: ThreadId) {
+    return yield* projectionSnapshotQuery
+      .getThreadShellById(threadId)
+      .pipe(Effect.map(Option.getOrUndefined));
+  });
+
+  const resolveThreadDetail = Effect.fnUntraced(function* (threadId: ThreadId) {
     return yield* projectionSnapshotQuery
       .getThreadDetailById(threadId)
       .pipe(Effect.map(Option.getOrUndefined));
@@ -491,7 +499,7 @@ const make = Effect.gen(function* () {
       readonly pendingTurnStart?: boolean;
     },
   ) {
-    const thread = yield* resolveThread(threadId);
+    const thread = yield* resolveThreadShell(threadId);
     if (!thread) {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
@@ -741,7 +749,7 @@ const make = Effect.gen(function* () {
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
   }) {
-    const thread = yield* resolveThread(input.threadId);
+    const thread = yield* resolveThreadShell(input.threadId);
     if (!thread) {
       return yield* Effect.die(
         new Error(`Thread '${input.threadId}' was not found in read model.`),
@@ -870,7 +878,7 @@ const make = Effect.gen(function* () {
         });
         if (!generated) return;
 
-        const thread = yield* resolveThread(input.threadId);
+        const thread = yield* resolveThreadShell(input.threadId);
         if (!thread) return;
         if (!canReplaceThreadTitle(thread.title, input.titleSeed)) {
           return;
@@ -902,7 +910,7 @@ const make = Effect.gen(function* () {
       return { _tag: "Superseded" } as const;
     }
 
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadDetail(event.payload.threadId);
     if (!thread || thread.titleRegeneration?.requestId !== requestId) {
       return { _tag: "Superseded" } as const;
     }
@@ -933,7 +941,7 @@ const make = Effect.gen(function* () {
       return { _tag: "Completed", title: undefined } as const;
     }
 
-    const latestThread = yield* resolveThread(event.payload.threadId);
+    const latestThread = yield* resolveThreadShell(event.payload.threadId);
     if (
       !latestThread ||
       latestThread.titleRegeneration?.requestId !== requestId ||
@@ -1070,18 +1078,30 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
 
+    // Read only the requested message. Long threads made every turn start
+    // load and decode their whole history just to find it.
+    const isFdSkillTurn =
+      event.payload.fdSkillVersionId !== undefined && Option.isSome(enterpriseRuntime);
+    const turnStart = isFdSkillTurn
+      ? undefined
+      : Option.getOrUndefined(
+          yield* projectionSnapshotQuery.getTurnStartMessage({
+            threadId: thread.id,
+            messageId: event.payload.messageId,
+          }),
+        );
     const message =
-      event.payload.fdSkillVersionId !== undefined && Option.isSome(enterpriseRuntime)
+      isFdSkillTurn && Option.isSome(enterpriseRuntime)
         ? yield* enterpriseRuntime.value.getStagedTurn(
             event.payload.threadId,
             event.payload.messageId,
           )
-        : thread.messages.find((entry) => entry.id === event.payload.messageId);
+        : turnStart?.message;
     if (!message || message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1097,7 +1117,7 @@ const make = Effect.gen(function* () {
     const isFirstUserMessageTurn =
       message.text.trim().toLowerCase() !== "/compact" &&
       event.payload.fdSkillVersionId === undefined &&
-      thread.messages.filter((entry) => entry.role === "user").length === 1;
+      turnStart?.hasOtherUserMessages === false;
     if (isFirstUserMessageTurn) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
@@ -1218,7 +1238,7 @@ const make = Effect.gen(function* () {
           },
           event.payload.messageId,
         );
-        const current = yield* resolveThread(thread.id);
+        const current = yield* resolveThreadShell(thread.id);
         if (
           current?.session &&
           current.session.status !== "stopped" &&
@@ -1240,7 +1260,7 @@ const make = Effect.gen(function* () {
       }).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
-            const current = yield* resolveThread(thread.id);
+            const current = yield* resolveThreadShell(thread.id);
             if (!stoppingThreadIds.has(thread.id) && current?.session?.status !== "stopped") {
               yield* recoverTurnStartFailure(cause);
             }
@@ -1307,7 +1327,7 @@ const make = Effect.gen(function* () {
   const processTurnInterruptRequested = Effect.fn("processTurnInterruptRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.turn-interrupt-requested" }>,
   ) {
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
@@ -1332,7 +1352,7 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
-      const current = yield* resolveThread(thread.id);
+      const current = yield* resolveThreadShell(thread.id);
       if (current?.session) {
         yield* setThreadSession({
           threadId: thread.id,
@@ -1356,7 +1376,7 @@ const make = Effect.gen(function* () {
   const processApprovalResponseRequested = Effect.fn("processApprovalResponseRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.approval-response-requested" }>,
   ) {
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
@@ -1400,7 +1420,7 @@ const make = Effect.gen(function* () {
     function* (
       event: Extract<ProviderIntentEvent, { type: "thread.user-input-response-requested" }>,
     ) {
-      const thread = yield* resolveThread(event.payload.threadId);
+      const thread = yield* resolveThreadShell(event.payload.threadId);
       if (!thread) {
         return;
       }
@@ -1444,7 +1464,7 @@ const make = Effect.gen(function* () {
   const processSessionStopRequested = Effect.fn("processSessionStopRequested")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>,
   ) {
-    const thread = yield* resolveThread(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
@@ -1496,7 +1516,7 @@ const make = Effect.gen(function* () {
         yield* threadTitleRegenerationWorker.enqueue(event);
         return;
       case "thread.runtime-mode-set": {
-        const thread = yield* resolveThread(event.payload.threadId);
+        const thread = yield* resolveThreadShell(event.payload.threadId);
         if (!thread?.session || thread.session.status === "stopped") {
           return;
         }
