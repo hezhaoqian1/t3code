@@ -799,6 +799,108 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  // FD DeepSeek models reach Codex as Responses reasoning items whose summary
+  // is empty and whose content holds `reasoning_text`. Codex app-server
+  // 0.159.3 forwards that stream as item/reasoning/textDelta and repeats the
+  // whole content on item/completed, with no config switch involved.
+  it.effect("maps raw reasoning text deltas to reasoning_text content deltas", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-raw-reasoning-delta"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/reasoning/textDelta",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("rs_1"),
+        payload: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          itemId: "rs_1",
+          contentIndex: 0,
+          delta: "Check the 回撤 first.",
+        },
+      } satisfies ProviderEvent);
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "content.delta") {
+        NodeAssert.fail("expected a content delta");
+      }
+      NodeAssert.equal(firstEvent.value.itemId, "rs_1");
+      NodeAssert.deepStrictEqual(firstEvent.value.payload, {
+        streamKind: "reasoning_text",
+        delta: "Check the 回撤 first.",
+        contentIndex: 0,
+      });
+    }),
+  );
+
+  it.effect("carries a completed reasoning item's raw content as its detail", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const eventsFiber = yield* Stream.take(adapter.streamEvents, 2).pipe(
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+
+      for (const [id, item] of [
+        [
+          "evt-raw-reasoning-complete",
+          {
+            type: "reasoning" as const,
+            id: "rs_1",
+            summary: [],
+            content: ["The user wants a 投后复盘.", " Check the drawdown first. "],
+          },
+        ],
+        [
+          "evt-summary-reasoning-complete",
+          {
+            type: "reasoning" as const,
+            id: "rs_2",
+            summary: ["**Reading the report**"],
+            content: ["raw text the summary replaces"],
+          },
+        ],
+      ] as const) {
+        yield* runtime.emit({
+          id: asEventId(id),
+          kind: "notification",
+          provider: ProviderDriverKind.make("codex"),
+          createdAt: "2026-01-01T00:00:00.000Z",
+          method: "item/completed",
+          threadId: asThreadId("thread-1"),
+          turnId: asTurnId("turn-1"),
+          itemId: asItemId(item.id),
+          payload: {
+            completedAtMs: 1_778_000_000_000,
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item,
+          },
+        });
+      }
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      NodeAssert.deepStrictEqual(
+        events.map((event) =>
+          event.type === "item.completed"
+            ? [event.itemId, event.payload.itemType, event.payload.detail]
+            : [event.type],
+        ),
+        [
+          ["rs_1", "reasoning", "The user wants a 投后复盘.\n\nCheck the drawdown first."],
+          ["rs_2", "reasoning", "**Reading the report**"],
+        ],
+      );
+    }),
+  );
+
   it.effect("maps completed plan items to canonical proposed-plan completion events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

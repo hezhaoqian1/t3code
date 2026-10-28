@@ -76,6 +76,115 @@ describe("FdEnterpriseThreadRuntime", () => {
     }).pipe(Effect.provide(FdEnterpriseThreadRuntimeLive)),
   );
 
+  effectIt.effect("keeps FD Skill thinking as memory-only reasoning messages", () =>
+    Effect.gen(function* () {
+      const runtime = yield* FdEnterpriseThreadRuntime;
+      const reasoningItem = RuntimeItemId.make(`${turnId}:reasoning`);
+      for (const delta of ["正在核对", "授权范围"]) {
+        yield* runtime.applyRuntimeEvent({
+          ...eventBase,
+          itemId: reasoningItem,
+          type: "content.delta",
+          payload: { streamKind: "reasoning_summary_text", delta },
+        });
+      }
+      const thinking = (yield* runtime.getSnapshot(threadId)).messages;
+      expect(thinking.map((entry) => [entry.role, entry.text, entry.streaming])).toEqual([
+        ["reasoning", "正在核对授权范围", true],
+      ]);
+      // Thinking is never a step of work: no tool or progress row.
+      expect((yield* runtime.getSnapshot(threadId)).activities).toEqual([]);
+
+      // A tool call closes the block; thinking after it opens a new one.
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId: RuntimeItemId.make("tool-1"),
+        type: "item.started",
+        payload: { itemType: "dynamic_tool_call", status: "inProgress", title: "企业查询" },
+      });
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId: reasoningItem,
+        type: "content.delta",
+        payload: { streamKind: "reasoning_summary_text", delta: "整理查询结果" },
+      });
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId: RuntimeItemId.make("answer"),
+        type: "content.delta",
+        payload: { streamKind: "assistant_text", delta: "共 394 只" },
+      });
+
+      const snapshot = yield* runtime.getSnapshot(threadId);
+      expect(
+        snapshot.messages.map((entry) => [entry.id, entry.role, entry.text, entry.streaming]),
+      ).toEqual([
+        [`fd-reasoning:summary:${reasoningItem}`, "reasoning", "正在核对授权范围", false],
+        [`fd-reasoning:summary:${reasoningItem}:segment:1`, "reasoning", "整理查询结果", false],
+        ["answer", "assistant", "共 394 只", true],
+      ]);
+      expect(snapshot.activities.map((activity) => activity.kind)).toEqual(["tool.started"]);
+      // Thinking is never acknowledged as durable, so it stays in the overlay.
+      yield* runtime.releaseDurableMessages(threadId, [
+        message("answer", "assistant", "共 394 只"),
+      ]);
+      expect((yield* runtime.getSnapshot(threadId)).messages.map((entry) => entry.role)).toEqual([
+        "reasoning",
+        "reasoning",
+        "assistant",
+      ]);
+    }).pipe(Effect.provide(FdEnterpriseThreadRuntimeLive)),
+  );
+
+  effectIt.effect("turns a Codex FD Skill reasoning item into one closed thinking block", () =>
+    Effect.gen(function* () {
+      const runtime = yield* FdEnterpriseThreadRuntime;
+      const itemId = RuntimeItemId.make("msg_reasoning");
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId,
+        type: "item.started",
+        payload: { itemType: "reasoning", status: "inProgress", title: "Reasoning" },
+      });
+      for (const [contentIndex, delta] of [
+        [0, "Check the quota"],
+        [1, "then the 授权"],
+      ] as const) {
+        yield* runtime.applyRuntimeEvent({
+          ...eventBase,
+          itemId,
+          type: "content.delta",
+          payload: { streamKind: "reasoning_text", delta, contentIndex },
+        });
+      }
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId,
+        type: "item.completed",
+        payload: {
+          itemType: "reasoning",
+          status: "completed",
+          title: "Reasoning",
+          detail: "Check the quota\n\nthen the 授权",
+        },
+      });
+      // A reasoning item reported only on completion still shows its text.
+      yield* runtime.applyRuntimeEvent({
+        ...eventBase,
+        itemId: RuntimeItemId.make("msg_reasoning_snapshot"),
+        type: "item.completed",
+        payload: { itemType: "reasoning", status: "completed", detail: "Only the snapshot" },
+      });
+
+      const snapshot = yield* runtime.getSnapshot(threadId);
+      expect(snapshot.activities).toEqual([]);
+      expect(snapshot.messages.map((entry) => [entry.role, entry.text, entry.streaming])).toEqual([
+        ["reasoning", "Check the quota\n\nthen the 授权", false],
+        ["reasoning", "Only the snapshot", false],
+      ]);
+    }).pipe(Effect.provide(FdEnterpriseThreadRuntimeLive)),
+  );
+
   it("removes restored history already persisted under the same stable ID", () => {
     const persisted = message("fd-enterprise-history:7:11", "assistant", "已持久化回答");
     const overlay = {

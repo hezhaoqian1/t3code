@@ -83,6 +83,13 @@ export function renderResponsesCodexConfig(provider: ResponsesCodexProviderConfi
     // Codex keeps 10 KB of each tool result for custom models, about 3,000
     // Chinese characters: too little for a page of a document or a file.
     `tool_output_token_limit = ${FD_TOOL_OUTPUT_TOKEN_LIMIT}`,
+    // Thinking traces need no setting here. The FD models return Responses
+    // reasoning items with an empty summary and `reasoning_text` content, and
+    // app-server 0.159.3 forwards that stream as item/reasoning/textDelta and
+    // the whole content on item/completed whether or not
+    // `show_raw_agent_reasoning` is set (checked against the real binary).
+    // Never write `hide_agent_reasoning = true`: it would hide the trace the
+    // conversation shows under its thinking group.
     "",
     `[model_providers.${provider.providerId}]`,
     `name = ${tomlString(provider.displayName)}`,

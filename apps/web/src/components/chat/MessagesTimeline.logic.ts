@@ -160,7 +160,7 @@ function maxIsoTimestamp(a: string | null, b: string | null): string | null {
 
 export interface TimelineDurationMessage {
   id: string;
-  role: "user" | "assistant" | "system";
+  role: ChatMessage["role"];
   createdAt: string;
   updatedAt: string;
   streaming: boolean;

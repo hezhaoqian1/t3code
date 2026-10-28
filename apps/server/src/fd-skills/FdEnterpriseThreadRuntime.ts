@@ -41,6 +41,20 @@ export interface FdEnterpriseDurableMessage {
   readonly createdAt: string;
 }
 
+/**
+ * One thinking block in the overlay. FD Skill turns never persist provider
+ * output, so their thinking trace lives here beside the streamed answer, as a
+ * `reasoning` message the timeline folds under its thinking group.
+ */
+interface ReasoningBlock {
+  readonly messageId: MessageId;
+  readonly turnId: ProviderRuntimeEvent["turnId"] | null;
+  readonly segment: number;
+  open: boolean;
+  hasText: boolean;
+  partIndex: number | undefined;
+}
+
 interface ThreadOverlayState {
   messages: Array<OrchestrationMessage>;
   activities: Array<OrchestrationThreadActivity>;
@@ -50,7 +64,9 @@ interface ThreadOverlayState {
   historyLoading: Promise<void> | undefined;
   readonly stagedTurns: Map<MessageId, StagedTurn>;
   readonly liveMessageIds: Set<MessageId>;
-  readonly reasoningByItemId: Map<string, string>;
+  /** Thinking blocks keyed by stream and item. A closed block reopens as a new
+   *  segment, so thinking after a tool call never appends to an earlier row. */
+  readonly reasoningByItemId: Map<string, ReasoningBlock>;
 }
 
 export interface FdEnterpriseTurnInput {
@@ -238,7 +254,7 @@ const make = Effect.gen(function* () {
   const emitMessage = (input: {
     threadId: ThreadId;
     messageId: MessageId;
-    role: "user" | "assistant";
+    role: "user" | "assistant" | "reasoning";
     text: string;
     attachments?: OrchestrationMessage["attachments"];
     turnId: ProviderRuntimeEvent["turnId"] | null;
@@ -394,6 +410,124 @@ const make = Effect.gen(function* () {
       });
     });
 
+  // Visible text, a tool call or the end of a reasoning item closes the turn's
+  // open thinking block, so the next block does not swallow what follows.
+  const closeReasoningForTurn = (
+    threadId: ThreadId,
+    turnId: ProviderRuntimeEvent["turnId"] | null,
+    createdAt: string,
+  ) =>
+    Effect.forEach(
+      Array.from(stateFor(threadId).reasoningByItemId.values()).filter(
+        (block) => block.open && block.turnId === turnId,
+      ),
+      (block) => {
+        block.open = false;
+        return emitMessage({
+          threadId,
+          messageId: block.messageId,
+          role: "reasoning",
+          text: "",
+          turnId: block.turnId,
+          streaming: false,
+          createdAt,
+        });
+      },
+      { discard: true },
+    );
+
+  const appendReasoning = (
+    event: Extract<ProviderRuntimeEvent, { type: "content.delta" }>,
+    streamKind: "reasoning_text" | "reasoning_summary_text",
+  ) =>
+    Effect.gen(function* () {
+      const state = stateFor(event.threadId);
+      const turnId = event.turnId ?? null;
+      const stream = streamKind === "reasoning_summary_text" ? "summary" : "raw";
+      const key = `${stream}:${event.itemId ?? `${event.turnId ?? "turn"}:reasoning`}`;
+      let block = state.reasoningByItemId.get(key);
+      if (!block?.open) {
+        // A provider may switch between summary and raw text, or start the
+        // next item, without closing the previous block.
+        yield* closeReasoningForTurn(event.threadId, turnId, event.createdAt);
+        const segment = block ? block.segment + 1 : 0;
+        block = {
+          messageId: MessageId.make(
+            `fd-reasoning:${key}${segment === 0 ? "" : `:segment:${segment}`}`,
+          ),
+          turnId,
+          segment,
+          open: true,
+          hasText: false,
+          partIndex: undefined,
+        };
+        state.reasoningByItemId.set(key, block);
+        state.liveMessageIds.add(block.messageId);
+      }
+      // Codex splits a trace into indexed parts; keep them readable apart.
+      const partIndex = event.payload.summaryIndex ?? event.payload.contentIndex;
+      const separator =
+        partIndex !== undefined && block.partIndex !== undefined && partIndex !== block.partIndex
+          ? "\n\n"
+          : "";
+      if (partIndex !== undefined) block.partIndex = partIndex;
+      block.hasText = true;
+      yield* emitMessage({
+        threadId: event.threadId,
+        messageId: block.messageId,
+        role: "reasoning",
+        text: `${separator}${event.payload.delta}`,
+        turnId,
+        streaming: true,
+        createdAt: event.createdAt,
+      });
+    });
+
+  const completeReasoningItem = (
+    event: Extract<ProviderRuntimeEvent, { type: "item.completed" }>,
+  ) =>
+    Effect.gen(function* () {
+      const state = stateFor(event.threadId);
+      const turnId = event.turnId ?? null;
+      const detail = event.payload.detail?.trim() ?? "";
+      const itemKey = event.itemId ?? `${event.turnId ?? "turn"}:reasoning`;
+      const blocks = [`raw:${itemKey}`, `summary:${itemKey}`].flatMap((key) => {
+        const block = state.reasoningByItemId.get(key);
+        return block ? [block] : [];
+      });
+      const open = blocks.find((block) => block.open);
+      // The completion repeats the whole block, so it only stands in for
+      // deltas that never arrived; appending it would print the trace twice.
+      if (open && !open.hasText && detail.length > 0) {
+        open.hasText = true;
+        yield* emitMessage({
+          threadId: event.threadId,
+          messageId: open.messageId,
+          role: "reasoning",
+          text: detail,
+          turnId,
+          streaming: true,
+          createdAt: event.createdAt,
+        });
+      }
+      if (blocks.length === 0 && detail.length > 0) {
+        const messageId = MessageId.make(`fd-reasoning:snapshot:${itemKey}`);
+        if (!state.messages.some((message) => message.id === messageId)) {
+          state.liveMessageIds.add(messageId);
+          yield* emitMessage({
+            threadId: event.threadId,
+            messageId,
+            role: "reasoning",
+            text: detail,
+            turnId,
+            streaming: false,
+            createdAt: event.createdAt,
+          });
+        }
+      }
+      yield* closeReasoningForTurn(event.threadId, turnId, event.createdAt);
+    });
+
   const applyRuntimeEvent: FdEnterpriseThreadRuntimeShape["applyRuntimeEvent"] = (event) => {
     if (event.persistence !== "memory-only") return Effect.void;
     if (event.volatileGeneration !== undefined && event.volatileGeneration !== historyGeneration) {
@@ -404,33 +538,37 @@ const make = Effect.gen(function* () {
         event.itemId ?? RuntimeItemId.make(`${event.turnId ?? "turn"}:assistant`),
       );
       stateFor(event.threadId).liveMessageIds.add(messageId);
-      return emitMessage({
-        threadId: event.threadId,
-        messageId,
-        role: "assistant",
-        text: event.payload.delta,
-        turnId: event.turnId ?? null,
-        streaming: true,
-        createdAt: event.createdAt,
-      }).pipe(Effect.as(undefined));
+      return closeReasoningForTurn(event.threadId, event.turnId ?? null, event.createdAt).pipe(
+        Effect.andThen(
+          emitMessage({
+            threadId: event.threadId,
+            messageId,
+            role: "assistant",
+            text: event.payload.delta,
+            turnId: event.turnId ?? null,
+            streaming: true,
+            createdAt: event.createdAt,
+          }),
+        ),
+        Effect.as(undefined),
+      );
     }
-    if (event.type === "content.delta" && event.payload.streamKind === "reasoning_summary_text") {
-      const state = stateFor(event.threadId);
-      const itemId = event.itemId ?? RuntimeItemId.make(`${event.turnId ?? "turn"}:reasoning`);
-      const summary = `${state.reasoningByItemId.get(itemId) ?? ""}${event.payload.delta}`;
-      state.reasoningByItemId.set(itemId, summary);
-      return emitActivity({
-        threadId: event.threadId,
-        id: `fd-reasoning:${itemId}`,
-        tone: "info",
-        kind: "reasoning.summary",
-        summary: "正在分析业务需求",
-        payload: { text: summary },
-        turnId: event.turnId ?? null,
-        createdAt: event.createdAt,
-      }).pipe(Effect.as(undefined));
+    if (
+      event.type === "content.delta" &&
+      (event.payload.streamKind === "reasoning_text" ||
+        event.payload.streamKind === "reasoning_summary_text")
+    ) {
+      if (event.payload.delta.length === 0) return Effect.void;
+      return appendReasoning(event, event.payload.streamKind).pipe(Effect.as(undefined));
     }
     if (event.type === "item.started" || event.type === "item.completed") {
+      if (event.payload.itemType === "reasoning") {
+        // A reasoning item is a thinking block, not a step of work: it never
+        // becomes a tool row.
+        return event.type === "item.completed"
+          ? completeReasoningItem(event).pipe(Effect.as(undefined))
+          : Effect.void;
+      }
       if (event.payload.itemType === "assistant_message") {
         if (event.type !== "item.completed") return Effect.void;
         const final = (() => {
@@ -471,27 +609,37 @@ const make = Effect.gen(function* () {
           turnId: event.turnId ?? null,
           createdAt: event.createdAt,
         } satisfies FdEnterpriseDurableMessage;
-        return emitMessage({
-          threadId: event.threadId,
-          messageId: finalMessageId,
-          role: "assistant",
-          text: final.text,
-          turnId: event.turnId ?? null,
-          streaming: false,
-          createdAt: event.createdAt,
-        }).pipe(Effect.as(durableMessage));
+        return closeReasoningForTurn(event.threadId, event.turnId ?? null, event.createdAt).pipe(
+          Effect.andThen(
+            emitMessage({
+              threadId: event.threadId,
+              messageId: finalMessageId,
+              role: "assistant",
+              text: final.text,
+              turnId: event.turnId ?? null,
+              streaming: false,
+              createdAt: event.createdAt,
+            }),
+          ),
+          Effect.as(durableMessage),
+        );
       }
       const completed = event.type === "item.completed";
-      return emitActivity({
-        threadId: event.threadId,
-        id: `fd-tool:${event.itemId ?? event.eventId}`,
-        tone: completed && event.payload.status === "failed" ? "error" : "tool",
-        kind: completed ? "tool.completed" : "tool.started",
-        summary: event.payload.title ?? (completed ? "企业查询已完成" : "正在执行企业查询"),
-        payload: event.payload.detail ? { detail: event.payload.detail } : {},
-        turnId: event.turnId ?? null,
-        createdAt: event.createdAt,
-      }).pipe(Effect.as(undefined));
+      return closeReasoningForTurn(event.threadId, event.turnId ?? null, event.createdAt).pipe(
+        Effect.andThen(
+          emitActivity({
+            threadId: event.threadId,
+            id: `fd-tool:${event.itemId ?? event.eventId}`,
+            tone: completed && event.payload.status === "failed" ? "error" : "tool",
+            kind: completed ? "tool.completed" : "tool.started",
+            summary: event.payload.title ?? (completed ? "企业查询已完成" : "正在执行企业查询"),
+            payload: event.payload.detail ? { detail: event.payload.detail } : {},
+            turnId: event.turnId ?? null,
+            createdAt: event.createdAt,
+          }),
+        ),
+        Effect.as(undefined),
+      );
     }
     return Effect.void;
   };

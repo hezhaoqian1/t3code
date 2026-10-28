@@ -1046,6 +1046,97 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.titleRegeneration).toBeNull();
   });
 
+  it("leaves thinking traces out of the title context", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+    harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: "Expired QR token" }));
+
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-title-before-thinking"),
+        threadId: ThreadId.make("thread-1"),
+        title: "Pairing fails",
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-before-thinking-title"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-before-thinking-title"),
+          role: "user",
+          text: "Fix pairing",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.message.reasoning.delta",
+        commandId: CommandId.make("cmd-reasoning-before-thinking-title"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("reasoning:raw:thinking-title"),
+        delta: "Consider token expiry, then the QR payload.",
+        createdAt: "2026-01-01T00:00:00.500Z",
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.message.reasoning.complete",
+        commandId: CommandId.make("cmd-reasoning-complete-before-thinking-title"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("reasoning:raw:thinking-title"),
+        createdAt: "2026-01-01T00:00:00.600Z",
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.message.assistant.delta",
+        commandId: CommandId.make("cmd-assistant-before-thinking-title"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("assistant-message-before-thinking-title"),
+        delta: "The QR token expired.",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.message.assistant.complete",
+        commandId: CommandId.make("cmd-assistant-complete-before-thinking-title"),
+        threadId: ThreadId.make("thread-1"),
+        messageId: asMessageId("assistant-message-before-thinking-title"),
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.meta.update",
+        commandId: CommandId.make("cmd-thread-title-regenerate-thinking"),
+        threadId: ThreadId.make("thread-1"),
+        regenerateTitle: true,
+      }),
+    );
+
+    await harness.drain();
+
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.messages.map((message) => message.role)).toEqual([
+      "user",
+      "reasoning",
+      "assistant",
+    ]);
+    expect(harness.generateThreadTitle).toHaveBeenCalledTimes(1);
+    expect(harness.generateThreadTitle.mock.calls[0]?.[0]?.message).toBe(
+      ["USER:", "Fix pairing", "", "ASSISTANT:", "The QR token expired."].join("\n"),
+    );
+  });
+
   it("pins the first user message when regeneration context is truncated", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

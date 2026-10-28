@@ -99,13 +99,15 @@ const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n"
 const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
 
 type ThreadTitleMessage = {
-  readonly role: "user" | "assistant" | "system";
+  readonly role: "user" | "assistant" | "system" | "reasoning";
   readonly text: string;
   readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
 };
 
 function formatThreadTitleSection(message: ThreadTitleMessage): string | undefined {
-  if (message.role === "system") {
+  // Thinking traces are working notes, not what the thread is about, and they
+  // dwarf the answer they precede. Titling on them would be worse and costlier.
+  if (message.role === "system" || message.role === "reasoning") {
     return undefined;
   }
   const text = message.text.trim();
