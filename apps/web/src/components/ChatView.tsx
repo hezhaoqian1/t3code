@@ -16,6 +16,7 @@ import {
   type TurnId,
   type KeybindingCommand,
   OrchestrationThreadActivity,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ProviderInteractionMode,
   ProviderDriverKind,
   RuntimeMode,
@@ -67,7 +68,7 @@ import {
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
-import { readLocalApi } from "../localApi";
+import { readPreparedConnection } from "../state/session";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
@@ -158,7 +159,7 @@ import {
   GitBranchIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { cn, randomHex } from "~/lib/utils";
+import { cn, randomHex, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -329,6 +330,10 @@ import {
   startNewThreadForProject,
   waitForStartedServerThread,
   buildRevertTurnCountByUserMessageId,
+  buildRewindTurnCountByUserMessageId,
+  prepareRevertedMessageAttachments,
+  restoreRewoundMessageToDraft,
+  waitForRevertedMessage,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -337,6 +342,8 @@ import { describeActionError, sanitizeThreadErrorMessage } from "~/rpc/transport
 import { RightPanelSheet } from "./RightPanelSheet";
 import { previewEnvironment } from "../state/preview";
 import { useAtomCommand } from "../state/use-atom-command";
+import { useAtomQueryRunner } from "../state/use-atom-query-runner";
+import { assetEnvironment } from "../state/assets";
 import { Button } from "./ui/button";
 import {
   AlertDialog,
@@ -354,7 +361,6 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_TURN_DIFF_SUMMARIES = new Map<MessageId, TurnDiffSummary>();
-const EMPTY_REVERT_TURN_COUNTS = new Map<MessageId, number>();
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
@@ -1332,7 +1338,21 @@ function ChatViewContent(props: ChatViewProps) {
     Record<string, LocalThreadErrorEntry>
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
-  const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const isRevertingCheckpoint = useComposerDraftStore((store) =>
+    store.rewindingThreadKeys.has(routeThreadKey),
+  );
+  // The route this view shows right now; a rewind that finishes after the
+  // user moved on must not touch the other thread's composer.
+  const currentRouteThreadKeyRef = useRef<string | null>(routeThreadKey);
+  useLayoutEffect(() => {
+    currentRouteThreadKeyRef.current = routeThreadKey;
+    return () => {
+      currentRouteThreadKeyRef.current = null;
+    };
+  }, [routeThreadKey]);
+  const createAttachmentAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
+    reportFailure: false,
+  });
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -2362,6 +2382,19 @@ function ChatViewContent(props: ChatViewProps) {
     lastRevertTurnCountRef.current = next;
     return next;
   }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  // Every sent message can be rewound to, checkpoint or not.
+  const lastRewindTurnCountRef = useRef<Map<MessageId, number> | null>(null);
+  const rewindTurnCountByUserMessageId = useMemo(() => {
+    const next = buildRewindTurnCountByUserMessageId(
+      {
+        timelineEntries,
+        checkpointTurnCountByUserMessageId: revertTurnCountByUserMessageId,
+      },
+      lastRewindTurnCountRef.current,
+    );
+    lastRewindTurnCountRef.current = next;
+    return next;
+  }, [revertTurnCountByUserMessageId, timelineEntries]);
 
   const gitCwd = activeProject
     ? projectScriptCwd({
@@ -3728,10 +3761,6 @@ function ChatViewContent(props: ChatViewProps) {
   }, [activeThread?.id]);
 
   useEffect(() => {
-    setIsRevertingCheckpoint(false);
-  }, [activeThread?.id]);
-
-  useEffect(() => {
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
@@ -4533,63 +4562,151 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef,
   ]);
 
-  const onRevertToTurnCount = useCallback(
-    async (turnCount: number) => {
-      const localApi = readLocalApi();
-      if (!localApi || !activeThread || isRevertingCheckpoint) return;
+  // "从这里重来": drops the chosen message and everything after it from the
+  // conversation (the model's history included), then puts the message back
+  // into the composer. Files stay as they are unless `restoreFilesTurnCount`
+  // names a Git checkpoint to restore them to.
+  const rewindToMessage = useCallback(
+    async (input: {
+      readonly messageId: MessageId;
+      readonly restoreFilesTurnCount: number | null;
+    }) => {
+      if (!activeThread || isRevertingCheckpoint) return;
+      const message = activeThread.messages.find((entry) => entry.id === input.messageId);
+      if (!message || message.role !== "user") return;
 
       if (activeEnvironmentUnavailable) {
-        setThreadError(
-          activeThread.id,
-          "Reconnect the local service before reverting checkpoints.",
-        );
+        setThreadError(activeThread.id, "本地服务正在连接，请稍后再从这条消息重来。");
         return;
       }
       if (phase === "running" || isSendBusy || isConnecting) {
-        setThreadError(activeThread.id, "Interrupt the current turn before reverting checkpoints.");
-        return;
-      }
-      const confirmed = await localApi.dialogs.confirm(
-        [
-          `Revert this thread to checkpoint ${turnCount}?`,
-          "This will discard newer messages and turn diffs in this thread.",
-          "This action cannot be undone.",
-        ].join("\n"),
-      );
-      if (!confirmed) {
+        setThreadError(
+          activeThread.id,
+          "AI 还在处理这个任务，请先停止或等它完成，再从之前的消息重来。",
+        );
         return;
       }
 
-      setIsRevertingCheckpoint(true);
+      const threadKey = routeThreadKey;
+      const draftTarget = composerDraftTarget;
+      useComposerDraftStore.setState((store) => ({
+        rewindingThreadKeys: new Set(store.rewindingThreadKeys).add(threadKey),
+      }));
       setThreadError(activeThread.id, null);
-      const result = await revertThreadCheckpoint({
-        environmentId,
-        input: {
-          threadId: activeThread.id,
-          turnCount,
-        },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
+      try {
+        if (composerRef.current?.hasPendingAttachments()) {
+          throw new Error("输入框里的图片还在处理，请稍等片刻再从这条消息重来。");
+        }
+        const connection = readPreparedConnection(environmentId);
+        if (!connection) throw new Error("本地服务正在连接，请稍后再从这条消息重来。");
+        // Copy the attachments first: the rewind removes the stored files of
+        // the messages it drops.
+        const restoredFiles = await prepareRevertedMessageAttachments({
+          message,
+          environmentId,
+          httpBaseUrl: connection.httpBaseUrl,
+          createAssetUrl: createAttachmentAssetUrl,
+        });
+        const composerContext = composerRef.current?.getSendContext();
+        const draftImageCount =
+          composerContext?.images.length ??
+          useComposerDraftStore.getState().getComposerDraft(draftTarget)?.images.length ??
+          0;
+        const draftDocumentCount = composerContext?.documents.length ?? 0;
+        if (
+          draftImageCount + draftDocumentCount + restoredFiles.length >
+          PROVIDER_SEND_TURN_MAX_ATTACHMENTS
+        ) {
+          throw new Error(
+            "输入框里的附件太多，放不下这条消息的附件。请先移除一些，再从这条消息重来。",
+          );
+        }
+
+        await waitForRevertedMessage(routeThreadRef, input.messageId, async () => {
+          const result = await revertThreadCheckpoint({
+            environmentId,
+            input: {
+              threadId: activeThread.id,
+              turnCount: input.restoreFilesTurnCount ?? 0,
+              messageId: input.messageId,
+              restoreFiles: input.restoreFilesTurnCount !== null,
+            },
+          });
+          if (result._tag === "Failure") throw squashAtomCommandFailure(result);
+        });
+
+        const { prompt: nextPrompt, documents } = restoreRewoundMessageToDraft({
+          store: useComposerDraftStore.getState(),
+          target: draftTarget,
+          message,
+          files: restoredFiles,
+          createId: randomUUID,
+          createPreviewUrl: (file) => URL.createObjectURL(file),
+        });
+        if (currentRouteThreadKeyRef.current === threadKey) {
+          // Documents live in the mounted composer, so only the thread still
+          // on screen can take them back.
+          composerRef.current?.addDocuments(documents);
+          promptRef.current = nextPrompt;
+          composerRef.current?.resetCursorState({
+            prompt: nextPrompt,
+            cursor: collapseExpandedComposerCursor(nextPrompt, nextPrompt.length),
+          });
+          window.requestAnimationFrame(() => {
+            if (currentRouteThreadKeyRef.current === threadKey) composerRef.current?.focusAtEnd();
+          });
+        }
+      } catch (error) {
         setThreadError(
           activeThread.id,
-          error instanceof Error ? error.message : "Failed to revert thread state.",
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : "没能从这条消息重来，请稍后再试。",
         );
+      } finally {
+        useComposerDraftStore.setState((store) => {
+          const remaining = new Set(store.rewindingThreadKeys);
+          remaining.delete(threadKey);
+          return { rewindingThreadKeys: remaining };
+        });
       }
-      setIsRevertingCheckpoint(false);
     },
     [
       activeThread,
       activeEnvironmentUnavailable,
+      composerDraftTarget,
+      composerRef,
+      createAttachmentAssetUrl,
       environmentId,
       isConnecting,
       isRevertingCheckpoint,
       isSendBusy,
       phase,
       revertThreadCheckpoint,
+      routeThreadKey,
+      routeThreadRef,
       setThreadError,
     ],
   );
+
+  // The confirmation for "从这里重来". It belongs to the thread it was opened
+  // in and closes when the route changes.
+  const [pendingRewind, setPendingRewind] = useState<{
+    readonly messageId: MessageId;
+    readonly restoreFilesTurnCount: number | null;
+    readonly routeThreadKey: string;
+  } | null>(null);
+  if (pendingRewind !== null && pendingRewind.routeThreadKey !== routeThreadKey) {
+    setPendingRewind(null);
+  }
+  const confirmPendingRewind = (restoreFiles: boolean) => {
+    if (pendingRewind === null || pendingRewind.routeThreadKey !== routeThreadKey) return;
+    setPendingRewind(null);
+    void rewindToMessage({
+      messageId: pendingRewind.messageId,
+      restoreFilesTurnCount: restoreFiles ? pendingRewind.restoreFilesTurnCount : null,
+    });
+  };
 
   // Set by Ctrl+Shift+Enter right before it submits the composer.
   const steerNextSendRef = useRef(false);
@@ -4692,6 +4809,7 @@ function ChatViewContent(props: ChatViewProps) {
       !activeThread ||
       isSendBusy ||
       isConnecting ||
+      isRevertingCheckpoint ||
       threadDetailLoading ||
       sendInFlightRef.current
     ) {
@@ -5927,18 +6045,28 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThreadRef, isServerThread, onDiffPanelOpen],
   );
-  // Both the Map and the revert handler are read from refs at call-time so
-  // the callback reference is fully stable and never busts context identity.
-  const revertTurnCountRef = useRef(revertTurnCountByUserMessageId);
-  revertTurnCountRef.current = revertTurnCountByUserMessageId;
-  const onRevertToTurnCountRef = useRef(onRevertToTurnCount);
-  onRevertToTurnCountRef.current = onRevertToTurnCount;
+  // The maps and the route are read from refs at call-time so the callback
+  // reference is fully stable and never busts context identity.
+  const rewindTargetsRef = useRef({
+    rewindable: rewindTurnCountByUserMessageId,
+    checkpointTurnCounts: revertTurnCountByUserMessageId,
+    routeThreadKey,
+  });
+  rewindTargetsRef.current = {
+    rewindable: rewindTurnCountByUserMessageId,
+    checkpointTurnCounts: revertTurnCountByUserMessageId,
+    routeThreadKey,
+  };
   const onRevertUserMessage = useCallback((messageId: MessageId) => {
-    const targetTurnCount = revertTurnCountRef.current.get(messageId);
-    if (typeof targetTurnCount !== "number") {
+    const targets = rewindTargetsRef.current;
+    if (!targets.rewindable.has(messageId)) {
       return;
     }
-    void onRevertToTurnCountRef.current(targetTurnCount);
+    setPendingRewind({
+      messageId,
+      restoreFilesTurnCount: targets.checkpointTurnCounts.get(messageId) ?? null,
+      routeThreadKey: targets.routeThreadKey,
+    });
   }, []);
 
   // Empty state: no active thread
@@ -6151,9 +6279,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onOpenTurnDiff={onOpenTurnDiff}
                 onOpenPresentation={onOpenPresentation}
                 onContinuePresentationEdit={onContinuePresentationEdit}
-                revertTurnCountByUserMessageId={
-                  isOfficeMode ? EMPTY_REVERT_TURN_COUNTS : revertTurnCountByUserMessageId
-                }
+                revertTurnCountByUserMessageId={rewindTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}
                 onRegenerateAssistantMessage={onRegenerateAssistantMessage}
                 isRevertingCheckpoint={isRevertingCheckpoint}
@@ -6197,6 +6323,7 @@ function ChatViewContent(props: ChatViewProps) {
             {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
             <div
               ref={setComposerOverlayElement}
+              inert={isRevertingCheckpoint}
               data-chat-composer-overlay="true"
               className={
                 isDraftHeroState
@@ -6280,7 +6407,14 @@ function ChatViewContent(props: ChatViewProps) {
                             phase={phase}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
-                            sendDisabledReason={threadDetailLoading ? "Messages loading" : null}
+                            isRevertingCheckpoint={isRevertingCheckpoint}
+                            sendDisabledReason={
+                              isRevertingCheckpoint
+                                ? "正在回到之前的消息…"
+                                : threadDetailLoading
+                                  ? "Messages loading"
+                                  : null
+                            }
                             isPreparingWorktree={isPreparingWorktree}
                             environmentUnavailable={activeEnvironmentUnavailableState}
                             activePendingApproval={activePendingApproval}
@@ -6438,6 +6572,39 @@ function ChatViewContent(props: ChatViewProps) {
                     }}
                   >
                     Switch branch
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogPopup>
+            </AlertDialog>
+
+            <AlertDialog
+              open={pendingRewind !== null && pendingRewind.routeThreadKey === routeThreadKey}
+              onOpenChange={(open) => {
+                if (!open) setPendingRewind(null);
+              }}
+            >
+              <AlertDialogPopup>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>从这条消息重新开始？</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    之后的对话会被移除，AI
+                    也不会再记得这些内容；任务文件夹里的文件保持不变。这条消息会放回输入框，可以修改后重新发送。
+                  </AlertDialogDescription>
+                  {typeof pendingRewind?.restoreFilesTurnCount === "number" ? (
+                    <AlertDialogDescription>
+                      如果想把文件也恢复到发送这条消息之前的样子，请选择“连文件一起恢复”，之后改动过的文件会被覆盖。
+                    </AlertDialogDescription>
+                  ) : null}
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogClose render={<Button variant="outline" />}>取消</AlertDialogClose>
+                  {typeof pendingRewind?.restoreFilesTurnCount === "number" ? (
+                    <Button variant="destructive" onClick={() => confirmPendingRewind(true)}>
+                      连文件一起恢复
+                    </Button>
+                  ) : null}
+                  <Button variant="default" onClick={() => confirmPendingRewind(false)}>
+                    从这里重来
                   </Button>
                 </AlertDialogFooter>
               </AlertDialogPopup>

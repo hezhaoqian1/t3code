@@ -375,6 +375,12 @@ interface ComposerDraftStoreState {
   draftsByThreadKey: Record<string, ComposerThreadDraftState>;
   draftThreadsByThreadKey: Record<string, DraftThreadState>;
   logicalProjectDraftThreadKeyByLogicalProjectKey: Record<string, string>;
+  /**
+   * Threads whose conversation is being rewound to an earlier message. The
+   * composer stays locked until the rewound prompt is back in it. Never
+   * persisted: a reload ends the wait.
+   */
+  rewindingThreadKeys: ReadonlySet<string>;
   stickyModelSelectionByProvider: Partial<Record<ProviderInstanceId, ModelSelection>>;
   stickyActiveProvider: ProviderInstanceId | null;
   /** Returns the editable composer content for a draft session or server thread. */
@@ -494,7 +500,11 @@ interface ComposerDraftStoreState {
     interactionMode: ProviderInteractionMode | null | undefined,
   ) => void;
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => void;
-  addImages: (threadRef: ComposerThreadTarget, images: ComposerImageAttachment[]) => void;
+  addImages: (
+    threadRef: ComposerThreadTarget,
+    images: ComposerImageAttachment[],
+    options?: { allowDuplicates?: boolean },
+  ) => void;
   removeImage: (threadRef: ComposerThreadTarget, imageId: string) => void;
   insertTerminalContext: (
     threadRef: ComposerThreadTarget,
@@ -2213,6 +2223,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
         draftsByThreadKey: {},
         draftThreadsByThreadKey: {},
         logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+        rewindingThreadKeys: new Set<string>(),
         stickyModelSelectionByProvider: {},
         stickyActiveProvider: null,
         getComposerDraft: (target) => getComposerDraftState(get(), target),
@@ -2892,7 +2903,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             image,
           ]);
         },
-        addImages: (threadRef, images) => {
+        addImages: (threadRef, images, options) => {
           const threadKey = resolveComposerDraftKey(get(), threadRef) ?? "";
           if (threadKey.length === 0 || images.length === 0) {
             return;
@@ -2907,7 +2918,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const dedupedIncoming: ComposerImageAttachment[] = [];
             for (const image of images) {
               const dedupKey = composerImageDedupKey(image);
-              if (existingIds.has(image.id) || existingDedupKeys.has(dedupKey)) {
+              // A rewound message's image comes back even if the draft holds
+              // an identical one: they are separate attachments.
+              if (
+                existingIds.has(image.id) ||
+                (!options?.allowDuplicates && existingDedupKeys.has(dedupKey))
+              ) {
                 // Avoid revoking a blob URL that's still referenced by an accepted image.
                 if (!acceptedPreviewUrls.has(image.previewUrl)) {
                   revokeObjectPreviewUrl(image.previewUrl);
@@ -3577,6 +3593,11 @@ export function clearComposerDraftsEnvironment(environmentId: EnvironmentId): vo
       draftsByThreadKey: nextDrafts,
       draftThreadsByThreadKey: nextDraftThreads,
       logicalProjectDraftThreadKeyByLogicalProjectKey: nextLogicalMappings,
+      rewindingThreadKeys: new Set(
+        [...state.rewindingThreadKeys].filter(
+          (threadKey) => parseScopedThreadKey(threadKey)?.environmentId !== environmentId,
+        ),
+      ),
     };
   });
   composerDebouncedStorage.flush();

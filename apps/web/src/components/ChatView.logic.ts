@@ -1,4 +1,5 @@
 import {
+  type AssetResource,
   type EnvironmentId,
   isProviderDriverKind,
   ProjectId,
@@ -12,15 +13,25 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { shallow } from "zustand/vanilla/shallow";
+import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
+import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+import { isFdEnterpriseHistoryMessageId } from "@t3tools/shared/conversationRewind";
 import {
+  type ChatAttachment,
   type ChatMessage,
+  type ComposerDocumentAttachment,
   type SessionPhase,
   type Thread,
   type ThreadShell,
   type TurnDiffSummary,
 } from "../types";
 import type { TimelineEntry } from "../session-logic";
-import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
+import {
+  type ComposerImageAttachment,
+  type DraftId,
+  type DraftThreadState,
+} from "../composerDraftStore";
+import { recallableComposerPrompt } from "./chat/composerPromptHistory";
 import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentThreadDetails } from "../state/threads";
@@ -81,6 +92,217 @@ export function buildRevertTurnCountByUserMessageId(
     }
   }
   return previous !== null && shallow(previous, byUserMessageId) ? previous : byUserMessageId;
+}
+
+/**
+ * The user messages the conversation can be rewound to ("从这里重来"), each
+ * mapped to the checkpoint a files-too rewind would restore, or 0 when there
+ * is none. App-created task folders have no checkpoints, so every sent
+ * message qualifies. FD Skill history lives on the enterprise service and
+ * cannot be rewound, so messages at or before the last FD Skill message do not.
+ * Returns `previous` when unchanged so timeline rows keep their identity.
+ */
+export function buildRewindTurnCountByUserMessageId(
+  input: {
+    readonly timelineEntries: ReadonlyArray<TimelineEntry>;
+    readonly checkpointTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
+  },
+  previous: Map<MessageId, number> | null = null,
+): Map<MessageId, number> {
+  let firstRewindableIndex = 0;
+  for (let index = input.timelineEntries.length - 1; index >= 0; index -= 1) {
+    const entry = input.timelineEntries[index];
+    if (entry?.kind === "message" && isFdEnterpriseHistoryMessageId(entry.message.id)) {
+      firstRewindableIndex = index + 1;
+      break;
+    }
+  }
+  const byUserMessageId = new Map<MessageId, number>();
+  for (let index = firstRewindableIndex; index < input.timelineEntries.length; index += 1) {
+    const entry = input.timelineEntries[index];
+    if (!entry || entry.kind !== "message" || entry.message.role !== "user") continue;
+    byUserMessageId.set(
+      entry.message.id,
+      input.checkpointTurnCountByUserMessageId.get(entry.message.id) ?? 0,
+    );
+  }
+  return previous !== null && shallow(previous, byUserMessageId) ? previous : byUserMessageId;
+}
+
+export interface RewoundAttachmentFile {
+  readonly attachment: ChatAttachment;
+  readonly file: File;
+}
+
+/**
+ * Copies a message's attachments before it is rewound: the rewind prunes the
+ * stored files of removed messages, and the copies go back into the composer.
+ */
+export async function prepareRevertedMessageAttachments(input: {
+  readonly message: ChatMessage;
+  readonly environmentId: EnvironmentId;
+  readonly httpBaseUrl: string;
+  readonly createAssetUrl: (target: {
+    readonly environmentId: EnvironmentId;
+    readonly input: { readonly resource: AssetResource };
+  }) => Promise<AtomCommandResult<{ readonly relativeUrl: string }, unknown>>;
+}): Promise<RewoundAttachmentFile[]> {
+  return Promise.all(
+    (input.message.attachments ?? []).map(async (attachment) => {
+      const failure = new Error(`没能取回附件“${attachment.name}”，请稍后再试。`);
+      const result = await input.createAssetUrl({
+        environmentId: input.environmentId,
+        input: { resource: { _tag: "attachment", attachmentId: attachment.id } },
+      });
+      if (result._tag === "Failure") throw failure;
+      const url = resolveAssetUrl(input.httpBaseUrl, result.value.relativeUrl);
+      if (url === null) throw failure;
+      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) throw failure;
+      const file = new File([await response.blob()], attachment.name, {
+        type: attachment.mimeType,
+      });
+      return { attachment, file };
+    }),
+  );
+}
+
+/** The composer draft operations a rewound message is restored with. */
+export interface RewindDraftStore {
+  readonly getComposerDraft: (
+    target: ScopedThreadRef | DraftId,
+  ) => { readonly prompt: string } | null;
+  readonly setPrompt: (target: ScopedThreadRef | DraftId, prompt: string) => void;
+  readonly addImages: (
+    target: ScopedThreadRef | DraftId,
+    images: ComposerImageAttachment[],
+    options?: { allowDuplicates?: boolean },
+  ) => void;
+}
+
+/**
+ * Puts a rewound message back into its thread's composer draft: the typed
+ * text below anything still unsent, and the attachment copies as new chips.
+ * Send-time additions (terminal output, annotations) are left out, like the
+ * prompt history does. Documents live in the mounted composer, so they are
+ * returned for the caller to add there.
+ */
+export function restoreRewoundMessageToDraft(input: {
+  readonly store: RewindDraftStore;
+  readonly target: ScopedThreadRef | DraftId;
+  readonly message: ChatMessage;
+  readonly files: ReadonlyArray<RewoundAttachmentFile>;
+  readonly createId: () => string;
+  readonly createPreviewUrl: (file: File) => string;
+}): { readonly prompt: string; readonly documents: ComposerDocumentAttachment[] } {
+  const currentPrompt = input.store.getComposerDraft(input.target)?.prompt ?? "";
+  const restoredPrompt = recallableComposerPrompt(input.message.text);
+  const prompt =
+    restoredPrompt.length === 0
+      ? currentPrompt
+      : currentPrompt.trim().length > 0
+        ? `${currentPrompt}\n\n${restoredPrompt}`
+        : restoredPrompt;
+  input.store.setPrompt(input.target, prompt);
+  const images: ComposerImageAttachment[] = [];
+  const documents: ComposerDocumentAttachment[] = [];
+  for (const { attachment, file } of input.files) {
+    if (attachment.type === "image") {
+      images.push({
+        type: "image",
+        id: input.createId(),
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: file.size,
+        previewUrl: input.createPreviewUrl(file),
+        file,
+      });
+    } else {
+      documents.push({
+        type: "document",
+        id: input.createId(),
+        name: attachment.name,
+        mimeType: attachment.mimeType,
+        sizeBytes: file.size,
+        ...(attachment.source !== undefined ? { source: attachment.source } : {}),
+        file,
+      });
+    }
+  }
+  // A restored image is a separate attachment even when the draft already
+  // holds an identical one.
+  if (images.length > 0) input.store.addImages(input.target, images, { allowDuplicates: true });
+  return { prompt, documents };
+}
+
+/**
+ * Waits until a rewind has removed `messageId` from the thread, or rejects
+ * with the reason the server gave. `revert` sends the command; acceptance
+ * alone is not enough, because the rewind itself runs afterwards.
+ */
+export async function waitForRevertedMessage(
+  threadRef: ScopedThreadRef,
+  messageId: MessageId,
+  revert: () => Promise<void>,
+  timeoutMs = 120_000,
+): Promise<void> {
+  const threadAtom = environmentThreadDetails.detailAtom(threadRef);
+  const initial = appAtomRegistry.get(threadAtom);
+  if (!initial?.messages.some((message) => message.id === messageId)) {
+    throw new Error("找不到要重来的那条消息，它可能已经被移除。");
+  }
+  const previousFailures = new Set(
+    initial.activities
+      .filter((activity) => activity.kind === "checkpoint.revert.failed")
+      .map((activity) => activity.id),
+  );
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let accepted = false;
+    let unsubscribe = () => {};
+    let timeout: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) globalThis.clearTimeout(timeout);
+      unsubscribe();
+      if (error !== undefined) reject(error);
+      else resolve();
+    };
+    const inspect = () => {
+      const thread = appAtomRegistry.get(threadAtom);
+      if (!thread) return;
+      const failure = thread.activities.findLast(
+        (activity) =>
+          activity.kind === "checkpoint.revert.failed" && !previousFailures.has(activity.id),
+      );
+      if (failure) {
+        const payload = failure.payload;
+        finish(
+          new Error(
+            typeof payload === "object" &&
+              payload !== null &&
+              "detail" in payload &&
+              typeof payload.detail === "string"
+              ? payload.detail
+              : failure.summary,
+          ),
+        );
+      } else if (accepted && !thread.messages.some((message) => message.id === messageId)) {
+        finish();
+      }
+    };
+    unsubscribe = appAtomRegistry.subscribe(threadAtom, inspect);
+    timeout = globalThis.setTimeout(() => {
+      finish(new Error("等待太久，没能确认对话已经回到这条消息之前，请刷新后查看。"));
+    }, timeoutMs);
+    Promise.resolve()
+      .then(revert)
+      .then(() => {
+        accepted = true;
+        inspect();
+      }, finish);
+  });
 }
 
 export function scheduleEnvironmentReconnectWarning(showWarning: () => void): () => void {
