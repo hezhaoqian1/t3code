@@ -8,7 +8,7 @@ import {
   OrchestrationProposedPlanId,
   OrchestrationReadModel,
   OrchestrationThreadSearchSource,
-  OrchestrationShellSnapshot,
+  type OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
@@ -67,7 +67,6 @@ import {
 } from "../Services/ProjectionSnapshotQuery.ts";
 
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
-const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
@@ -1921,7 +1920,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
             );
 
-            const snapshot = {
+            // Built from schema-decoded rows, so no second decode here. The HTTP
+            // and RPC layers encode it against OrchestrationShellSnapshot on the
+            // way out, like the per-item shells from getThreadShellById.
+            return {
               snapshotSequence: computeSnapshotSequence(stateRows),
               projects: Arr.filterMap(projectRows, (row) =>
                 row.deletedAt === null
@@ -1965,15 +1967,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   : Result.failVoid,
               ),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
-            };
-
-            return yield* decodeShellSnapshot(snapshot).pipe(
-              Effect.mapError(
-                toPersistenceDecodeError(
-                  "ProjectionSnapshotQuery.getShellSnapshot:decodeShellSnapshot",
-                ),
-              ),
-            );
+            } satisfies OrchestrationShellSnapshot;
           }),
         ),
         Effect.mapError((error) => {
@@ -2067,7 +2061,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
             );
 
-            const snapshot = {
+            return {
               snapshotSequence: computeSnapshotSequence(stateRows),
               projects: Arr.filterMap(projectRows, (row) =>
                 row.deletedAt === null && activeProjectIds.has(row.projectId)
@@ -2109,15 +2103,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 }),
               ),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
-            };
-
-            return yield* decodeShellSnapshot(snapshot).pipe(
-              Effect.mapError(
-                toPersistenceDecodeError(
-                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:decodeShellSnapshot",
-                ),
-              ),
-            );
+            } satisfies OrchestrationShellSnapshot;
           }),
         ),
         Effect.mapError((error) => {
