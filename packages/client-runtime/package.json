@@ -47,6 +47,10 @@
       "types": "./src/textPaste.ts",
       "default": "./src/textPaste.ts"
     },
+    "./work-log/presentation": {
+      "types": "./src/work-log/presentation.ts",
+      "default": "./src/work-log/presentation.ts"
+    },
     "./state/connections": {
       "types": "./src/state/connections.ts",
       "default": "./src/state/connections.ts"
