@@ -6,11 +6,20 @@ import {
   type ProviderDriverKind,
   type ServerProvider,
   type ScopedProjectRef,
+  type MessageId,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
+import { shallow } from "zustand/vanilla/shallow";
+import {
+  type ChatMessage,
+  type SessionPhase,
+  type Thread,
+  type ThreadShell,
+  type TurnDiffSummary,
+} from "../types";
+import type { TimelineEntry } from "../session-logic";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
 import { appAtomRegistry } from "../rpc/atomRegistry";
@@ -28,6 +37,51 @@ export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
+
+/**
+ * Maps each user message to the checkpoint turn count a revert should target.
+ * Returns `previous` when the result is unchanged: a streamed assistant
+ * paragraph rebuilds `timelineEntries`, and the timeline row projection only
+ * reuses rows while this Map keeps its identity.
+ */
+export function buildRevertTurnCountByUserMessageId(
+  input: {
+    readonly timelineEntries: ReadonlyArray<TimelineEntry>;
+    readonly turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
+    readonly inferredCheckpointTurnCountByTurnId: Readonly<Record<string, number | undefined>>;
+  },
+  previous: Map<MessageId, number> | null = null,
+): Map<MessageId, number> {
+  const byUserMessageId = new Map<MessageId, number>();
+  for (let index = 0; index < input.timelineEntries.length; index += 1) {
+    const entry = input.timelineEntries[index];
+    if (!entry || entry.kind !== "message" || entry.message.role !== "user") {
+      continue;
+    }
+
+    for (let nextIndex = index + 1; nextIndex < input.timelineEntries.length; nextIndex += 1) {
+      const nextEntry = input.timelineEntries[nextIndex];
+      if (!nextEntry || nextEntry.kind !== "message") {
+        continue;
+      }
+      if (nextEntry.message.role === "user") {
+        break;
+      }
+      const summary = input.turnDiffSummaryByAssistantMessageId.get(nextEntry.message.id);
+      if (!summary) {
+        continue;
+      }
+      const turnCount =
+        summary.checkpointTurnCount ?? input.inferredCheckpointTurnCountByTurnId[summary.turnId];
+      if (typeof turnCount !== "number") {
+        break;
+      }
+      byUserMessageId.set(entry.message.id, Math.max(0, turnCount - 1));
+      break;
+    }
+  }
+  return previous !== null && shallow(previous, byUserMessageId) ? previous : byUserMessageId;
+}
 
 export function scheduleEnvironmentReconnectWarning(showWarning: () => void): () => void {
   const timeoutId = globalThis.setTimeout(showWarning, ENVIRONMENT_RECONNECT_WARNING_GRACE_MS);

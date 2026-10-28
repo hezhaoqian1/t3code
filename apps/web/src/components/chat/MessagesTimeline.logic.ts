@@ -1,6 +1,8 @@
 import * as Equal from "effect/Equal";
+import { shallow } from "zustand/vanilla/shallow";
 import {
   formatDuration,
+  isStreamingMessageTextUpdate,
   workEntryIndicatesToolNeutralStatus,
   workLogEntryIsToolLike,
   type TimelineEntry,
@@ -798,6 +800,84 @@ export function deriveMessagesTimelineRows(input: {
   }
 
   return nextRows;
+}
+
+type MessagesTimelineRowsInput = Parameters<typeof deriveMessagesTimelineRows>[0];
+
+export interface MessagesTimelineRowsProjection {
+  readonly input: MessagesTimelineRowsInput;
+  readonly rows: MessagesTimelineRow[];
+}
+
+// Every thread-list update replaces the shell thread, and with it the
+// latest-turn object, while text streams. Compare it by value so the row reuse
+// stays engaged; every other input must keep its identity.
+function sameRowsContext(
+  previous: Omit<MessagesTimelineRowsInput, "timelineEntries">,
+  next: Omit<MessagesTimelineRowsInput, "timelineEntries">,
+): boolean {
+  const { latestTurn: previousLatestTurn, ...previousRest } = previous;
+  const { latestTurn: nextLatestTurn, ...nextRest } = next;
+  return (
+    shallow(previousRest, nextRest) &&
+    (previousLatestTurn === nextLatestTurn ||
+      (previousLatestTurn != null &&
+        nextLatestTurn != null &&
+        shallow(previousLatestTurn, nextLatestTurn)))
+  );
+}
+
+function replaceStreamingMessageRows(
+  input: MessagesTimelineRowsInput,
+  previous: MessagesTimelineRowsProjection,
+): MessagesTimelineRow[] | null {
+  const { timelineEntries: previousEntries, ...previousContext } = previous.input;
+  const { timelineEntries, ...context } = input;
+  if (
+    timelineEntries.length !== previousEntries.length ||
+    !sameRowsContext(previousContext, context)
+  ) {
+    return null;
+  }
+  const replacements = new Map<ChatMessage, ChatMessage>();
+  for (const [index, entry] of timelineEntries.entries()) {
+    const previousEntry = previousEntries[index]!;
+    if (entry === previousEntry) continue;
+    if (
+      entry.kind !== "message" ||
+      previousEntry.kind !== "message" ||
+      entry.id !== previousEntry.id ||
+      entry.createdAt !== previousEntry.createdAt
+    ) {
+      return null;
+    }
+    if (entry.message === previousEntry.message) continue;
+    if (!isStreamingMessageTextUpdate(previousEntry.message, entry.message)) return null;
+    replacements.set(previousEntry.message, entry.message);
+  }
+  if (replacements.size === 0) return previous.rows;
+  return previous.rows.map((row) => {
+    if (row.kind !== "message") return row;
+    const message = replacements.get(row.message);
+    return message ? { ...row, message } : row;
+  });
+}
+
+/**
+ * Keep one projection per timeline. While assistant text streams, only the
+ * streaming message rows are replaced; any structural, metadata, activity or
+ * control change re-derives every row.
+ */
+export function deriveMessagesTimelineRowsWithState(
+  input: MessagesTimelineRowsInput,
+  previous: MessagesTimelineRowsProjection | null = null,
+): MessagesTimelineRowsProjection {
+  return {
+    input,
+    rows:
+      (previous === null ? null : replaceStreamingMessageRows(input, previous)) ??
+      deriveMessagesTimelineRows(input),
+  };
 }
 
 export function computeStableMessagesTimelineRows(

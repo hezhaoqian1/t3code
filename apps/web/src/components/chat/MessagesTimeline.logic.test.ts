@@ -1,14 +1,200 @@
+import { MessageId, TurnId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  deriveMessagesTimelineRowsWithState,
   normalizeCompactToolLabel,
   reconcileTurnDisclosureState,
   resolveAssistantMessageCopyState,
   resolveUnsettledTurnId,
   workEntryEmployeeSummary,
 } from "./MessagesTimeline.logic";
+import {
+  deriveTimelineEntries,
+  deriveTimelineEntriesWithState,
+  type WorkLogEntry,
+} from "../../session-logic";
+import type { ChatMessage, TurnDiffSummary } from "../../types";
+
+describe("streaming row projection", () => {
+  function fixture(text = "") {
+    const turnId = TurnId.make("live-turn");
+    const historyTurnId = TurnId.make("history-turn");
+    const time = (second: number) => new Date(Date.UTC(2026, 8, 4, 0, 0, second)).toISOString();
+    const messages: ChatMessage[] = [
+      {
+        id: MessageId.make("history-user"),
+        role: "user",
+        text: "整理这份报告",
+        turnId: null,
+        createdAt: time(0),
+        updatedAt: time(0),
+        streaming: false,
+      },
+      {
+        id: MessageId.make("history-assistant"),
+        role: "assistant",
+        text: "已完成",
+        turnId: historyTurnId,
+        createdAt: time(3),
+        updatedAt: time(4),
+        streaming: false,
+      },
+      {
+        id: MessageId.make("live-user"),
+        role: "user",
+        text: "继续",
+        turnId: null,
+        createdAt: time(5),
+        updatedAt: time(5),
+        streaming: false,
+      },
+      {
+        id: MessageId.make("live-assistant"),
+        role: "assistant",
+        text,
+        turnId,
+        createdAt: time(7),
+        updatedAt: time(7),
+        streaming: true,
+      },
+    ];
+    const work: WorkLogEntry[] = [
+      {
+        id: "history-work",
+        turnId: historyTurnId,
+        createdAt: time(1),
+        label: "Ran command",
+        tone: "tool",
+        command: "vp test",
+        toolLifecycleStatus: "failed",
+        sourceActivityKind: "tool.completed",
+      },
+      {
+        id: "live-work",
+        turnId,
+        createdAt: time(6),
+        label: "Read file",
+        tone: "tool",
+        changedFiles: ["/repo/src/index.ts"],
+        toolLifecycleStatus: "completed",
+        sourceActivityKind: "tool.completed",
+      },
+    ];
+    const timeline = deriveTimelineEntriesWithState(messages, [], work);
+    const input = {
+      timelineEntries: timeline.entries,
+      latestTurn: { turnId, state: "running" as const, startedAt: time(5), completedAt: null },
+      runningTurnId: turnId,
+      isWorking: true,
+      activeTurnStartedAt: time(5),
+      turnDiffSummaryByAssistantMessageId: new Map<MessageId, TurnDiffSummary>(),
+      revertTurnCountByUserMessageId: new Map<MessageId, number>(),
+    } satisfies Parameters<typeof deriveMessagesTimelineRows>[0];
+    return { messages, work, timeline, input, time };
+  }
+
+  it.each([
+    ["", "第一段"],
+    [" \n", "第一段"],
+    ["第一段", "第一段\n\n第二段"],
+    ["第一段", ""],
+  ])("keeps row parity and history identity when text changes from %j to %j", (before, after) => {
+    const initial = fixture(before);
+    const previous = deriveMessagesTimelineRowsWithState(initial.input);
+    Object.freeze(previous.rows);
+    for (const row of previous.rows) Object.freeze(row);
+    const last = initial.messages.at(-1)!;
+    const messages = [
+      ...initial.messages.slice(0, -1),
+      { ...last, text: after, updatedAt: initial.time(8) },
+    ];
+    const timeline = deriveTimelineEntriesWithState(
+      messages,
+      [],
+      initial.work,
+      [],
+      initial.timeline,
+    );
+    const input = { ...initial.input, timelineEntries: timeline.entries };
+    const next = deriveMessagesTimelineRowsWithState(input, previous);
+
+    expect(next.rows).toEqual(
+      deriveMessagesTimelineRows({
+        ...input,
+        timelineEntries: deriveTimelineEntries(messages, [], initial.work),
+      }),
+    );
+    for (const [index, row] of previous.rows.entries()) {
+      if (row.kind === "message" && row.message === last) {
+        expect(next.rows[index]).toMatchObject({ message: { text: after } });
+        expect(row.message.text).toBe(before);
+      } else {
+        expect(next.rows[index]).toBe(row);
+      }
+    }
+  });
+
+  it("re-derives every row for a structural change", () => {
+    const initial = fixture("第一段");
+    const previous = deriveMessagesTimelineRowsWithState(initial.input);
+    const completed = initial.messages.map((message, index) =>
+      index === initial.messages.length - 1 ? { ...message, streaming: false } : message,
+    );
+    const timeline = deriveTimelineEntriesWithState(
+      completed,
+      [],
+      initial.work,
+      [],
+      initial.timeline,
+    );
+    const completedInput = { ...initial.input, timelineEntries: timeline.entries };
+    const next = deriveMessagesTimelineRowsWithState(completedInput, previous);
+    expect(next.rows).toEqual(deriveMessagesTimelineRows(completedInput));
+
+    const settledInput = { ...initial.input, isWorking: false };
+    expect(deriveMessagesTimelineRowsWithState(settledInput, previous).rows).toEqual(
+      deriveMessagesTimelineRows(settledInput),
+    );
+  });
+
+  it("keeps reusing rows when the thread list resends an equal latest turn", () => {
+    const initial = fixture("第一段");
+    const previous = deriveMessagesTimelineRowsWithState(initial.input);
+    const last = initial.messages.at(-1)!;
+    const messages = [...initial.messages.slice(0, -1), { ...last, text: "第一段\n\n第二段" }];
+    const timeline = deriveTimelineEntriesWithState(
+      messages,
+      [],
+      initial.work,
+      [],
+      initial.timeline,
+    );
+    const input = {
+      ...initial.input,
+      timelineEntries: timeline.entries,
+      latestTurn: { ...initial.input.latestTurn },
+    };
+    const next = deriveMessagesTimelineRowsWithState(input, previous);
+    expect(next.rows).toEqual(deriveMessagesTimelineRows(input));
+    expect(next.rows[0]).toBe(previous.rows[0]);
+
+    const settled = { ...input, latestTurn: { ...input.latestTurn, state: "completed" as const } };
+    expect(deriveMessagesTimelineRowsWithState(settled, next).rows).toEqual(
+      deriveMessagesTimelineRows(settled),
+    );
+  });
+
+  it("returns the previous rows when nothing changed", () => {
+    const initial = fixture("第一段");
+    const previous = deriveMessagesTimelineRowsWithState(initial.input);
+    expect(deriveMessagesTimelineRowsWithState({ ...initial.input }, previous).rows).toBe(
+      previous.rows,
+    );
+  });
+});
 
 describe("turn disclosure lifecycle", () => {
   const turnId = "turn-1" as never;

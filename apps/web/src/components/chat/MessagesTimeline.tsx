@@ -32,9 +32,12 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
+import { useAssetUrls } from "../../assets/assetUrls";
 import { FileDiff } from "@pierre/diffs/react";
 import {
+  createMessageAttachmentPreviewProjector,
   deriveTimelineEntries,
+  selectMessageImageResources,
   formatDuration,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
@@ -86,7 +89,8 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import { MessageFeedbackControls } from "./MessageFeedbackControls";
 import {
   computeStableMessagesTimelineRows,
-  deriveMessagesTimelineRows,
+  deriveMessagesTimelineRowsWithState,
+  type MessagesTimelineRowsProjection,
   normalizeCompactToolLabel,
   reconcileTurnDisclosureState,
   resolveUnsettledTurnId,
@@ -448,9 +452,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     );
   }, [latestTurn, runningTurnId, unsettledTurnId, expandedTurnIds, collapsedTurnIds]);
 
-  const rawRows = useMemo(
-    () =>
-      deriveMessagesTimelineRows({
+  // While assistant text streams, reuse the previous rows and swap only the
+  // streaming message; anything else re-derives the whole timeline.
+  const rowsProjectionRef = useRef<{
+    threadKey: string;
+    workspaceRoot: string | undefined;
+    projection: MessagesTimelineRowsProjection;
+  } | null>(null);
+  const rawRows = useMemo(() => {
+    const previous = rowsProjectionRef.current;
+    const projection = deriveMessagesTimelineRowsWithState(
+      {
         timelineEntries,
         latestTurn,
         runningTurnId,
@@ -461,20 +473,28 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
-      }),
-    [
-      timelineEntries,
-      latestTurn,
-      runningTurnId,
-      expandedTurnIds,
-      collapsedTurnIds,
-      expandedWorkGroupIds,
-      isWorking,
-      activeTurnStartedAt,
-      turnDiffSummaryByAssistantMessageId,
-      revertTurnCountByUserMessageId,
-    ],
-  );
+      },
+      previous?.threadKey === routeThreadKey && previous.workspaceRoot === workspaceRoot
+        ? previous.projection
+        : null,
+    );
+    rowsProjectionRef.current = { threadKey: routeThreadKey, workspaceRoot, projection };
+    return projection.rows;
+  }, [
+    rowsProjectionRef,
+    routeThreadKey,
+    workspaceRoot,
+    timelineEntries,
+    latestTurn,
+    runningTurnId,
+    expandedTurnIds,
+    collapsedTurnIds,
+    expandedWorkGroupIds,
+    isWorking,
+    activeTurnStartedAt,
+    turnDiffSummaryByAssistantMessageId,
+    revertTurnCountByUserMessageId,
+  ]);
   const rows = useStableRows(rawRows);
   const feedbackUserInputByAssistantMessageId = useMemo(() => {
     const result = new Map<MessageId, string>();
@@ -1049,8 +1069,27 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
 
 function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
+  // Each mounted row requests its own stored image URLs, so a long thread
+  // only asks for the images that are actually on screen.
+  const imageResources = useMemo(
+    () => selectMessageImageResources(row.message.attachments),
+    [row.message.attachments],
+  );
+  const imageUrls = useAssetUrls(ctx.activeThreadEnvironmentId, imageResources);
+  const [projectImagePreviews] = useState(createMessageAttachmentPreviewProjector);
+  const messageWithPreviews = useMemo(() => {
+    const urlsById = new Map(
+      imageResources.flatMap((resource, index) => {
+        const url = imageUrls[index];
+        return url ? [[resource.attachmentId, url] as const] : [];
+      }),
+    );
+    return projectImagePreviews(row.message, (attachment) => urlsById.get(attachment.id));
+  }, [imageResources, imageUrls, projectImagePreviews, row.message]);
   const attachments = row.message.attachments ?? [];
-  const userImages = attachments.filter((attachment) => attachment.type === "image");
+  const userImages = (messageWithPreviews.attachments ?? []).filter(
+    (attachment) => attachment.type === "image",
+  );
   const userDocuments = attachments.filter((attachment) => attachment.type === "document");
   const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
   const terminalContexts = displayedUserMessage.contexts;
