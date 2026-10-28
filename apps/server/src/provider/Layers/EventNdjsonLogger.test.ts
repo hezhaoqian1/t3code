@@ -315,7 +315,7 @@ describe("EventNdjsonLogger", () => {
     }),
   );
 
-  it.effect("drops transient canonical events before serialization", () =>
+  it.effect("drops transient provider events before serialization", () =>
     Effect.gen(function* () {
       const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
       const basePath = NodePath.join(tempDir, "events.log");
@@ -331,6 +331,55 @@ describe("EventNdjsonLogger", () => {
         yield* canonical.write(circularDelta, threadId);
         yield* canonical.write({ type: "item.completed", id: "final" }, threadId);
         yield* native.write({ type: "content.delta", id: "native-delta" }, threadId);
+        yield* native.write(
+          { method: "item/agentMessage/delta", payload: circularDelta },
+          threadId,
+        );
+        yield* native.write(
+          { method: "item/commandExecution/outputDelta", payload: circularDelta },
+          threadId,
+        );
+        yield* native.write(
+          { method: "thread/realtime/outputAudio/delta", payload: circularDelta },
+          threadId,
+        );
+        yield* native.write(
+          { method: "thread/realtime/transcript/delta", payload: circularDelta },
+          threadId,
+        );
+        yield* native.write(
+          {
+            event: {
+              method: "claude/stream_event/content_block_delta/text_delta",
+              payload: circularDelta,
+            },
+          },
+          threadId,
+        );
+        yield* native.write(
+          {
+            event: {
+              method: "session/update",
+              payload: { update: { sessionUpdate: "agent_message_chunk" } },
+            },
+          },
+          threadId,
+        );
+        yield* native.write(
+          {
+            event: {
+              type: "message.part.updated",
+              payload: { properties: { part: { type: "text" } } },
+            },
+          },
+          threadId,
+        );
+        // Completed items, including the command that ran, are still logged.
+        yield* native.write(
+          { method: "item/completed", params: { item: { type: "commandExecution" } } },
+          threadId,
+        );
+        yield* native.write({ type: "turn.completed", id: "native-final" }, threadId);
         yield* store.close();
 
         const lines = NodeFS.readFileSync(ownedLogPath(basePath, "thread-filtered"), "utf8")
@@ -342,7 +391,11 @@ describe("EventNdjsonLogger", () => {
           lines.map(({ stream, payload }) => ({ stream, payload })),
           [
             { stream: "CANON", payload: '{"type":"item.completed","id":"final"}' },
-            { stream: "NTIVE", payload: '{"type":"content.delta","id":"native-delta"}' },
+            {
+              stream: "NTIVE",
+              payload: '{"method":"item/completed","params":{"item":{"type":"commandExecution"}}}',
+            },
+            { stream: "NTIVE", payload: '{"type":"turn.completed","id":"native-final"}' },
           ],
         );
       } finally {

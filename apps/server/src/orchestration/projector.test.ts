@@ -7,6 +7,7 @@ import {
   type OrchestrationEvent,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import { it as effectIt } from "@effect/vitest";
 import { describe, expect, it } from "vite-plus/test";
 
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
@@ -956,4 +957,86 @@ describe("orchestration projector", () => {
     expect(thread?.checkpoints[0]?.turnId).toBe("turn-100");
     expect(thread?.checkpoints.at(-1)?.turnId).toBe("turn-599");
   });
+
+  effectIt.effect("patches only the target thread on thread events", () =>
+    Effect.gen(function* () {
+      const createdAt = "2026-02-23T09:00:00.000Z";
+      const deltaAt = "2026-02-23T09:00:01.000Z";
+      let model = createEmptyReadModel(createdAt);
+      for (const [index, threadId] of ["thread-1", "thread-2", "thread-3"].entries()) {
+        model = yield* projectEvent(
+          model,
+          makeEvent({
+            sequence: index + 1,
+            type: "thread.created",
+            aggregateKind: "thread",
+            aggregateId: threadId,
+            occurredAt: createdAt,
+            commandId: `cmd-create-${threadId}`,
+            payload: {
+              threadId,
+              projectId: "project-1",
+              title: threadId,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5.3-codex",
+              },
+              runtimeMode: "full-access",
+              branch: null,
+              worktreePath: null,
+              createdAt,
+              updatedAt: createdAt,
+            },
+          }),
+        );
+      }
+
+      const afterDelta = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 4,
+          type: "thread.message-sent",
+          aggregateKind: "thread",
+          aggregateId: "thread-2",
+          occurredAt: deltaAt,
+          commandId: "cmd-delta",
+          payload: {
+            threadId: "thread-2",
+            messageId: "assistant:msg-1",
+            role: "assistant",
+            text: "hello",
+            turnId: "turn-1",
+            streaming: true,
+            createdAt: deltaAt,
+            updatedAt: deltaAt,
+          },
+        }),
+      );
+
+      expect(afterDelta.threads).not.toBe(model.threads);
+      expect(afterDelta.threads[0]).toBe(model.threads[0]);
+      expect(afterDelta.threads[2]).toBe(model.threads[2]);
+      expect(afterDelta.threads[1]?.messages.map((message) => message.text)).toEqual(["hello"]);
+      expect(afterDelta.threads[1]?.updatedAt).toBe(deltaAt);
+
+      const unknownThread = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 5,
+          type: "thread.runtime-mode-set",
+          aggregateKind: "thread",
+          aggregateId: "thread-missing",
+          occurredAt: deltaAt,
+          commandId: "cmd-runtime-mode",
+          payload: {
+            threadId: "thread-missing",
+            runtimeMode: "approval-required",
+            updatedAt: deltaAt,
+          },
+        }),
+      );
+      // An event for an unknown thread copies nothing.
+      expect(unknownThread.threads).toBe(model.threads);
+    }),
+  );
 });

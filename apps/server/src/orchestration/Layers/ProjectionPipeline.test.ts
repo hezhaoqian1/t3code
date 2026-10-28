@@ -2086,6 +2086,277 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
     }),
   );
 
+  it.effect("maintains shell summaries without reading message bodies or tool output", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-shell-summary");
+      const turnId = TurnId.make("turn-shell-summary-1");
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+      const eventEnvelope = (index: number, occurredAt: string) => ({
+        eventId: EventId.make(`evt-shell-summary-${index}`),
+        aggregateKind: "thread" as const,
+        aggregateId: threadId,
+        occurredAt,
+        commandId: CommandId.make(`cmd-shell-summary-${index}`),
+        causationEventId: null,
+        correlationId: CorrelationId.make(`cmd-shell-summary-${index}`),
+        metadata: {},
+      });
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-shell-summary-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-shell-summary"),
+        occurredAt: "2026-03-01T08:00:00.000Z",
+        commandId: CommandId.make("cmd-shell-summary-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-shell-summary-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-shell-summary"),
+          title: "Project Shell Summary",
+          workspaceRoot: "/tmp/project-shell-summary",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-03-01T08:00:00.000Z",
+          updatedAt: "2026-03-01T08:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        ...eventEnvelope(2, "2026-03-01T08:00:01.000Z"),
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-shell-summary"),
+          title: "Thread Shell Summary",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-03-01T08:00:01.000Z",
+          updatedAt: "2026-03-01T08:00:01.000Z",
+        },
+      });
+
+      const readSummary = sql<{
+        readonly latestUserMessageAt: string | null;
+        readonly pendingApprovalCount: number;
+        readonly pendingUserInputCount: number;
+        readonly hasActionableProposedPlan: number;
+        readonly updatedAt: string;
+      }>`
+        SELECT
+          latest_user_message_at AS "latestUserMessageAt",
+          pending_approval_count AS "pendingApprovalCount",
+          pending_user_input_count AS "pendingUserInputCount",
+          has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          updated_at AS "updatedAt"
+        FROM projection_threads
+        WHERE thread_id = 'thread-shell-summary'
+      `;
+
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        ...eventEnvelope(3, "2026-03-01T08:00:02.000Z"),
+        payload: {
+          threadId,
+          messageId: MessageId.make("message-shell-summary-user"),
+          role: "user",
+          text: "please do the thing",
+          turnId,
+          streaming: false,
+          createdAt: "2026-03-01T08:00:02.000Z",
+          updatedAt: "2026-03-01T08:00:02.000Z",
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+          pendingApprovalCount: 0,
+          pendingUserInputCount: 0,
+          hasActionableProposedPlan: 0,
+          updatedAt: "2026-03-01T08:00:02.000Z",
+        },
+      ]);
+
+      // A pending approval written behind the projector's back shows whether an
+      // event refreshed the summary: routine events must leave the count alone.
+      yield* sql`
+        INSERT INTO projection_pending_approvals (
+          request_id, thread_id, turn_id, status, decision, created_at, resolved_at
+        ) VALUES
+          ('summary-pending', 'thread-shell-summary', NULL, 'pending', NULL,
+           '2026-03-01T08:00:02.500Z', NULL),
+          ('summary-resolved', 'thread-shell-summary', NULL, 'resolved', 'accept',
+           '2026-03-01T08:00:02.500Z', '2026-03-01T08:00:02.500Z'),
+          ('summary-other-thread', 'thread-shell-summary-other', NULL, 'pending', NULL,
+           '2026-03-01T08:00:02.500Z', NULL)
+      `;
+
+      // Streamed assistant chunks bump updatedAt without a summary refresh.
+      yield* appendAndProject({
+        type: "thread.message-sent",
+        ...eventEnvelope(4, "2026-03-01T08:00:03.000Z"),
+        payload: {
+          threadId,
+          messageId: MessageId.make("message-shell-summary-assistant"),
+          role: "assistant",
+          text: "working on it",
+          turnId,
+          streaming: true,
+          createdAt: "2026-03-01T08:00:03.000Z",
+          updatedAt: "2026-03-01T08:00:03.000Z",
+        },
+      });
+
+      // So do ordinary tool activities.
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        ...eventEnvelope(5, "2026-03-01T08:00:04.000Z"),
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.make("activity-shell-summary-command"),
+            tone: "tool",
+            kind: "tool.completed",
+            summary: "Ran a command",
+            payload: { itemType: "command_execution", data: { output: "x".repeat(4_096) } },
+            turnId,
+            createdAt: "2026-03-01T08:00:04.000Z",
+          },
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+          pendingApprovalCount: 0,
+          pendingUserInputCount: 0,
+          hasActionableProposedPlan: 0,
+          updatedAt: "2026-03-01T08:00:04.000Z",
+        },
+      ]);
+
+      // User-input lifecycle activities refresh the summary.
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        ...eventEnvelope(6, "2026-03-01T08:00:05.000Z"),
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.make("activity-shell-summary-user-input"),
+            tone: "info",
+            kind: "user-input.requested",
+            summary: "User input requested",
+            payload: {
+              requestId: "user-input-request-shell-summary-1",
+              questions: [
+                {
+                  id: "confirm",
+                  header: "Confirm",
+                  question: "Proceed?",
+                  options: [{ label: "yes", description: "Proceed" }],
+                },
+              ],
+            },
+            turnId,
+            createdAt: "2026-03-01T08:00:05.000Z",
+          },
+        },
+      });
+
+      assert.deepEqual(yield* readSummary, [
+        {
+          latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+          pendingApprovalCount: 1,
+          pendingUserInputCount: 1,
+          hasActionableProposedPlan: 0,
+          updatedAt: "2026-03-01T08:00:05.000Z",
+        },
+      ]);
+
+      // From here on, decoding any message body, attachment list or tool
+      // output would fail the projection.
+      yield* sql`
+        UPDATE projection_thread_messages
+        SET attachments_json = '{not-json'
+        WHERE thread_id = 'thread-shell-summary'
+      `;
+      yield* sql`
+        UPDATE projection_thread_activities
+        SET payload_json = '{not-json'
+        WHERE thread_id = 'thread-shell-summary' AND kind = 'tool.completed'
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_proposed_plans (
+          plan_id, thread_id, turn_id, plan_markdown, implemented_at,
+          implementation_thread_id, created_at, updated_at
+        ) VALUES (
+          'summary-plan', 'thread-shell-summary', 'turn-shell-summary-1', '# Plan', NULL,
+          NULL, '2026-03-01T08:00:06.000Z', '2026-03-01T08:00:06.000Z'
+        )
+      `;
+
+      const refreshEvents = [
+        {
+          type: "thread.session-set",
+          ...eventEnvelope(7, "2026-03-01T08:00:07.000Z"),
+          payload: {
+            threadId,
+            session: {
+              threadId,
+              status: "ready",
+              providerName: "codex",
+              runtimeMode: "approval-required",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-03-01T08:00:07.000Z",
+            },
+          },
+        },
+        {
+          type: "thread.turn-diff-completed",
+          ...eventEnvelope(8, "2026-03-01T08:00:08.000Z"),
+          payload: {
+            threadId,
+            turnId,
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.make("refs/t3/checkpoints/thread-shell-summary/1"),
+            status: "ready",
+            files: [],
+            assistantMessageId: MessageId.make("message-shell-summary-assistant"),
+            completedAt: "2026-03-01T08:00:08.000Z",
+          },
+        },
+      ] satisfies ReadonlyArray<Parameters<typeof eventStore.append>[0]>;
+
+      for (const event of refreshEvents) {
+        yield* appendAndProject(event);
+        assert.deepEqual(yield* readSummary, [
+          {
+            latestUserMessageAt: "2026-03-01T08:00:02.000Z",
+            pendingApprovalCount: 1,
+            pendingUserInputCount: 1,
+            hasActionableProposedPlan: 1,
+            updatedAt: event.occurredAt,
+          },
+        ]);
+      }
+    }),
+  );
+
   it.effect("ignores non-stale provider approval response failures", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
