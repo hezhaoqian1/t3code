@@ -50,6 +50,33 @@ function isWhitespace(char: string): boolean {
 }
 
 /**
+ * A slash word with a second slash, such as `/tmp/build.sh`, is a path, not a
+ * command. The whole word counts, so a caret before the second slash still sees it.
+ */
+export function isPathWord(
+  text: string,
+  wordStart: number,
+  cursor: number,
+  isWhitespaceChar: (char: string) => boolean,
+): boolean {
+  let wordEnd = cursor;
+  while (wordEnd < text.length && !isWhitespaceChar(text[wordEnd] ?? "")) {
+    wordEnd += 1;
+  }
+  return text.slice(wordStart + 1, wordEnd).includes("/");
+}
+
+/**
+ * `$5`, `€9.99`, `$10k`, `¥500万`, `￥1.5亿元` are money, not skills, including the
+ * punctuation prose puts after one (`$10k.`, `($5)`, `¥20元，`).
+ */
+export function isCurrencyAmountQuery(query: string): boolean {
+  return /^\.?[0-9][0-9,._]*(?:[kKmMbBtTwW]|[eE][0-9]+|[千百万亿]{0,2}元?)?[.,;:!?)，。；：！？）、]*$/u.test(
+    query,
+  );
+}
+
+/**
  * Detect an active trigger (@path, $skill, /command) at the cursor position.
  *
  * Accepts an optional `isWhitespaceChar` override so callers with inline
@@ -65,7 +92,10 @@ export function detectComposerTrigger(
   const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
   const linePrefix = text.slice(lineStart, cursor);
 
-  if (linePrefix.startsWith("/")) {
+  if (
+    linePrefix.startsWith("/") &&
+    !isPathWord(text, lineStart, cursor, isWhitespaceChar ?? isWhitespace)
+  ) {
     const commandMatch = /^\/(\S*)$/.exec(linePrefix);
     if (commandMatch) {
       const commandQuery = commandMatch[1] ?? "";
@@ -106,6 +136,7 @@ export function detectComposerTrigger(
   const token = text.slice(tokenStart, cursor);
   const skillPrefix = /^\p{Sc}/u.exec(token);
   if (skillPrefix) {
+    if (isCurrencyAmountQuery(token.slice(skillPrefix[0].length))) return null;
     return {
       kind: "skill",
       query: token.slice(skillPrefix[0].length),

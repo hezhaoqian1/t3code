@@ -31,6 +31,7 @@ function makeTestLayer(input: {
   readonly platform: NodeJS.Platform;
   readonly appListeners: Map<string, (...args: readonly unknown[]) => void>;
   readonly quit?: () => void;
+  readonly exit?: (code: number) => void;
   readonly activate?: () => void;
 }) {
   const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
@@ -38,7 +39,7 @@ function makeTestLayer(input: {
     name: Effect.succeed("T3 Code"),
     whenReady: Effect.void,
     quit: Effect.sync(input.quit ?? (() => undefined)),
-    exit: () => Effect.void,
+    exit: (code) => Effect.sync(() => input.exit?.(code)),
     relaunch: () => Effect.void,
     setPath: () => Effect.void,
     setName: () => Effect.void,
@@ -183,6 +184,47 @@ describe("DesktopLifecycle", () => {
       ).pipe(Effect.provide(layer));
     });
   }
+
+  it.effect("exits on a repeated quit only once shutdown has stalled", () => {
+    const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+    const exitCodes: number[] = [];
+    // Nothing marks this shutdown complete, so it stays pending.
+    const layer = makeTestLayer({
+      platform: "win32",
+      appListeners,
+      exit: (code) => exitCodes.push(code),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+        yield* lifecycle.register;
+
+        let prevented = 0;
+        const event = {
+          preventDefault: () => {
+            prevented += 1;
+          },
+        } as Electron.Event;
+        appListeners.get("before-quit")?.(event);
+        appListeners.get("before-quit")?.(event);
+        yield* TestClock.adjust("9999 millis");
+        appListeners.get("before-quit")?.(event);
+        assert.deepEqual(
+          exitCodes,
+          [],
+          "a repeat before the threshold must not cut shutdown short",
+        );
+
+        yield* TestClock.adjust("1 millis");
+        appListeners.get("before-quit")?.(event);
+        yield* Effect.promise(() => Promise.resolve());
+
+        assert.deepEqual(exitCodes, [0]);
+        assert.equal(prevented, 4);
+      }),
+    ).pipe(Effect.provide(layer));
+  });
 
   it.effect("closes the windows and then exits when a quit stalls after shutdown", () => {
     const calls: string[] = [];

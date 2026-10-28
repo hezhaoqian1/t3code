@@ -19,10 +19,14 @@ const PREVIEW_PARTITION_PREFIX = "persist:fdai-preview-";
 // buttons — e.g. the Next.js / Vercel error overlay — fail with
 // `Failed to execute 'writeText' on 'Clipboard': Write permission denied`.
 const ALLOWED_PREVIEW_PERMISSIONS: ReadonlySet<string> = new Set([
-  "clipboard-read",
   "clipboard-sanitized-write",
-  "notifications",
   "geolocation",
+  // Deliberately NOT notifications: a page could post OS notifications branded
+  // as the app. The app's own come from the main window on the default session.
+  // Deliberately NOT clipboard-read: any previewed page could silently read what
+  // the employee copied (upstream asks once per site; previews here are task
+  // files and reports, which never need to read the clipboard). Writing — the
+  // "Copy" buttons — stays allowed through clipboard-sanitized-write.
   // Deliberately NOT local-fonts: preview sessions run untrusted web content,
   // and silently granting it would hand every page the user's installed-font
   // fingerprint (and font file bytes via FontData.blob()). The app's own font

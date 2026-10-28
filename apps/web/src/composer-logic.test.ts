@@ -27,6 +27,30 @@ describe("shouldSubmitComposerOnEnter", () => {
 });
 
 describe("detectComposerTrigger", () => {
+  it.each([
+    "It costs $5",
+    "budget $9.99",
+    "only $.99",
+    "about €20",
+    "raise $10k",
+    "$1,000",
+    "£2e6",
+    "raise $10k.",
+    "is it $5?",
+    "(about $9.99)",
+    "预算 ¥500万",
+    "认购￥1.5亿元",
+    "每份 ¥20元，",
+    "加仓 ¥300w",
+  ])("does not detect a skill trigger for the amount in %j", (text) => {
+    expect(detectComposerTrigger(text, text.length)).toBeNull();
+  });
+
+  it("does not open the slash menu for a path such as /tmp/build.sh", () => {
+    expect(detectComposerTrigger("/tmp/build.sh", "/tmp/build.sh".length)).toBeNull();
+    expect(detectComposerTrigger("/tmp/build.sh", 4)).toBeNull();
+  });
+
   it("detects @path trigger at cursor", () => {
     const text = "Please check @src/com";
     const trigger = detectComposerTrigger(text, text.length);

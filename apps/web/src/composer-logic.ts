@@ -1,3 +1,4 @@
+import { isCurrencyAmountQuery, isPathWord } from "@t3tools/shared/composerTrigger";
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
@@ -227,7 +228,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
   const linePrefix = text.slice(lineStart, cursor);
 
-  if (linePrefix.startsWith("/")) {
+  if (linePrefix.startsWith("/") && !isPathWord(text, lineStart, cursor, isWhitespace)) {
     const commandMatch = /^\/(\S*)$/.exec(linePrefix);
     if (commandMatch) {
       const commandQuery = commandMatch[1] ?? "";
@@ -244,6 +245,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
   const token = text.slice(tokenStart, cursor);
   const skillPrefix = /^\p{Sc}/u.exec(token);
   if (skillPrefix) {
+    if (isCurrencyAmountQuery(token.slice(skillPrefix[0].length))) return null;
     return {
       kind: "skill",
       query: token.slice(skillPrefix[0].length),
