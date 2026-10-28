@@ -613,6 +613,7 @@ export const make = Effect.gen(function* () {
       const recoverable =
         details.reason === "crashed" ||
         details.reason === "oom" ||
+        details.reason === "killed" ||
         details.reason === "abnormal-exit";
       // Long sessions can OOM the renderer (V8 heap exhaustion from
       // accumulated thread state). Without a reload the user is left staring
