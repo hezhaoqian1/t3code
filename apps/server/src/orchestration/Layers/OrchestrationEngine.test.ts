@@ -96,6 +96,8 @@ describe("OrchestrationEngine", () => {
   it("bootstraps command handling from persisted projections without reading the full snapshot", async () => {
     let nextSequence = 8;
     const eventStore: OrchestrationEventStoreShape = {
+      readAggregateRange: () => Stream.die("unused aggregate replay"),
+      getAggregateReplayStats: () => Effect.die("unused aggregate replay stats"),
       append: (event) =>
         Effect.sync(() => {
           const savedEvent = {
@@ -789,6 +791,8 @@ describe("OrchestrationEngine", () => {
     let shouldFailFirstAppend = true;
 
     const flakyStore: OrchestrationEventStoreShape = {
+      readAggregateRange: () => Stream.die("unused aggregate replay"),
+      getAggregateReplayStats: () => Effect.die("unused aggregate replay stats"),
       append(event) {
         if (shouldFailFirstAppend && event.commandId === CommandId.make("cmd-flaky-1")) {
           shouldFailFirstAppend = false;
@@ -1034,6 +1038,8 @@ describe("OrchestrationEngine", () => {
     let nextSequence = 1;
 
     const nonTransactionalStore: OrchestrationEventStoreShape = {
+      readAggregateRange: () => Stream.die("unused aggregate replay"),
+      getAggregateReplayStats: () => Effect.die("unused aggregate replay stats"),
       append(event) {
         const savedEvent = {
           ...event,

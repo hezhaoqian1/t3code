@@ -24,14 +24,13 @@ import {
   type OrchestrationEvent,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
-  type OrchestrationThreadStreamItem,
   type OrchestrationVolatileThreadOverlay,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
   OrchestrationSearchThreadsError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
-  type ProjectId,
+  ProjectId,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
   type ProjectFileOperation,
@@ -66,6 +65,8 @@ import {
   projectActivityEvent,
   projectThreadDetailSnapshot,
 } from "./orchestration/ActivityPayloadProjection.ts";
+import { makeLiveStreamBudget, type RetainedLiveItem } from "./orchestration/LiveStreamBudget.ts";
+import { makeThreadLiveEventCoalescer } from "./orchestration/ThreadLiveEventCoalescer.ts";
 import {
   cleanupFailedUploadedAttachments,
   normalizeDispatchCommand,
@@ -314,12 +315,14 @@ const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 // Matches the event store's default page size (DEFAULT_READ_FROM_SEQUENCE_LIMIT).
 const SHELL_RESUME_MAX_GAP = 1_000;
 
-// Same bound for thread resume. The replay reads the *global* event range and
-// filters per-thread afterwards, so a stale cursor far behind the head would
-// otherwise decode every intervening event's payload — reconnects with cursors
-// hundreds of thousands of events behind have OOM-killed servers on large
-// databases. Past this gap the client is reset with a fresh thread snapshot.
-const THREAD_RESUME_MAX_GAP = 1_000;
+// Thread replay counts only this thread's rows. Busy or pruned unrelated
+// streams must not force a full thread snapshot.
+const THREAD_RESUME_MAX_EVENTS = 1_000;
+// Row count alone does not bound replay memory: a few events with large tool
+// payloads can decode to gigabytes. Before replaying a thread, sum the
+// serialized payload bytes of its range in SQL and reset with a snapshot past
+// this budget.
+const ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES = 8 * 1024 * 1024;
 
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
@@ -510,19 +513,34 @@ const makeWsRpcLayer = (
             });
       };
 
+      // Shell updates refetch the aggregate. Message and tool bodies are not
+      // needed, so buffered shell events keep only their routing metadata.
+      const toShellEvent = ({
+        type,
+        aggregateKind,
+        aggregateId,
+        sequence,
+      }: OrchestrationEvent) => ({
+        type,
+        aggregateKind,
+        aggregateId,
+        sequence,
+      });
+      type ShellEvent = ReturnType<typeof toShellEvent>;
+
       const toShellStreamEvent = (
-        event: OrchestrationEvent,
+        event: ShellEvent,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
         switch (event.type) {
           case "project.created":
           case "project.meta-updated":
-            return projectUpsertOrRemove(event.payload.projectId, event.sequence);
+            return projectUpsertOrRemove(ProjectId.make(event.aggregateId), event.sequence);
           case "project.deleted":
             return Effect.succeed(
               Option.some({
                 kind: "project-removed" as const,
                 sequence: event.sequence,
-                projectId: event.payload.projectId,
+                projectId: ProjectId.make(event.aggregateId),
               }),
             );
           case "thread.deleted":
@@ -531,11 +549,11 @@ const makeWsRpcLayer = (
               Option.some({
                 kind: "thread-removed" as const,
                 sequence: event.sequence,
-                threadId: event.payload.threadId,
+                threadId: ThreadId.make(event.aggregateId),
               }),
             );
           case "thread.unarchived":
-            return threadUpsertOrRemove(event.payload.threadId, event.sequence);
+            return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
           default:
             if (event.aggregateKind !== "thread") {
               return Effect.succeed(Option.none());
@@ -649,13 +667,13 @@ const makeWsRpcLayer = (
       // item. The refetch runs with bounded concurrency (order-preserving).
       const SHELL_REFETCH_CONCURRENCY = 8;
       const coalesceShellEvents = (
-        events: ReadonlyArray<OrchestrationEvent>,
+        events: ReadonlyArray<ShellEvent>,
       ): Effect.Effect<ReadonlyArray<OrchestrationShellStreamEvent>, never, never> =>
         Effect.gen(function* () {
           if (events.length === 0) {
             return [];
           }
-          const latestByAggregate = new Map<string, OrchestrationEvent>();
+          const latestByAggregate = new Map<string, ShellEvent>();
           for (const event of events) {
             latestByAggregate.set(`${event.aggregateKind}:${event.aggregateId}`, event);
           }
@@ -678,16 +696,17 @@ const makeWsRpcLayer = (
         stream: Stream.Stream<OrchestrationEvent, E, R>,
       ): Stream.Stream<OrchestrationShellStreamEvent, E, R> =>
         stream.pipe(
+          Stream.map(toShellEvent),
           Stream.groupedWithin(SHELL_COALESCE_MAX_CHUNK, SHELL_COALESCE_WINDOW),
           Stream.mapEffect(coalesceShellEvents),
           Stream.flatMap((items) => Stream.fromIterable(items)),
         );
 
       type ShellLiveInput =
-        | { readonly kind: "event"; readonly event: OrchestrationEvent }
+        | { readonly kind: "event"; readonly event: ShellEvent }
         | { readonly kind: "synchronized" };
 
-      // A completion marker is queued alongside raw live events so it cannot
+      // A completion marker is queued alongside live event metadata so it cannot
       // overtake an event still waiting in the coalescing window. Split each
       // batch at markers and coalesce only the event segments on either side.
       const coalesceShellLiveInputs = (
@@ -695,7 +714,7 @@ const makeWsRpcLayer = (
       ): Effect.Effect<ReadonlyArray<OrchestrationShellStreamItem>, never, never> =>
         Effect.gen(function* () {
           const output: Array<OrchestrationShellStreamItem> = [];
-          let pendingEvents: Array<OrchestrationEvent> = [];
+          let pendingEvents: Array<ShellEvent> = [];
 
           for (const input of inputs) {
             if (input.kind === "event") {
@@ -711,15 +730,6 @@ const makeWsRpcLayer = (
           output.push(...(yield* coalesceShellEvents(pendingEvents)));
           return output;
         });
-
-      const coalesceShellLiveStream = <E, R>(
-        stream: Stream.Stream<ShellLiveInput, E, R>,
-      ): Stream.Stream<OrchestrationShellStreamItem, E, R> =>
-        stream.pipe(
-          Stream.groupedWithin(SHELL_COALESCE_MAX_CHUNK, SHELL_COALESCE_WINDOW),
-          Stream.mapEffect(coalesceShellLiveInputs),
-          Stream.flatMap((items) => Stream.fromIterable(items)),
-        );
 
       const dispatchBootstrapTurnStart = (
         command: Extract<OrchestrationCommand, { type: "thread.turn.start" }>,
@@ -1224,16 +1234,60 @@ const makeWsRpcLayer = (
               // sequence but the live subscription is not attached yet). Every
               // path below emits from this same buffered live tail. Overlapping
               // events are deduped by sequence on the client.
-              const liveBuffer = yield* Queue.unbounded<ShellLiveInput>();
+              //
+              // A client that stops reading must not grow this buffer without
+              // bound: the budget fails the stream past 1,000 items or 8 MB,
+              // and the client resumes from its last sequence.
+              const liveBudget = yield* makeLiveStreamBudget();
+              const liveBuffer = yield* Queue.unbounded<
+                RetainedLiveItem<ShellLiveInput>,
+                OrchestrationGetSnapshotError
+              >();
+              let liveBufferClosed = false;
+              const closeLiveBuffer = (error?: OrchestrationGetSnapshotError) =>
+                Effect.gen(function* () {
+                  if (liveBufferClosed) {
+                    return;
+                  }
+                  liveBufferClosed = true;
+                  liveBudget.release(yield* Queue.clear(liveBuffer).pipe(Effect.orDie));
+                  if (error) {
+                    yield* Queue.fail(liveBuffer, error);
+                  }
+                  yield* Queue.shutdown(liveBuffer);
+                });
+              yield* Effect.addFinalizer(() => closeLiveBuffer());
+              yield* liveBudget.failed.pipe(
+                Effect.catchTags({ OrchestrationGetSnapshotError: closeLiveBuffer }),
+                Effect.forkScoped,
+              );
               yield* Effect.forkScoped(
                 orchestrationEngine.streamDomainEvents.pipe(
+                  Stream.map(toShellEvent),
                   Stream.runForEach((event) =>
-                    Queue.offer(liveBuffer, { kind: "event" as const, event }),
+                    liveBudget.retain({ kind: "event" as const, event }, event).pipe(
+                      Effect.flatMap((item) => Queue.offer(liveBuffer, item)),
+                      Effect.uninterruptible,
+                    ),
                   ),
+                  // Stop the PubSub consumer even if RPC delivery is waiting
+                  // for an ACK and never pulls the failed buffer again.
+                  Effect.raceFirst(liveBudget.failed),
+                  Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
                 ),
                 { startImmediately: true },
               );
-              const bufferedLiveStream = coalesceShellLiveStream(Stream.fromQueue(liveBuffer));
+              const coalesceRetainedInputs = (
+                items: ReadonlyArray<RetainedLiveItem<ShellLiveInput>>,
+              ) =>
+                coalesceShellLiveInputs(items.map((item) => item.value)).pipe(
+                  Effect.flatMap((output) => liveBudget.replace(items, output)),
+                );
+              const bufferedLiveStream = Stream.fromQueue(liveBuffer).pipe(
+                Stream.groupedWithin(SHELL_COALESCE_MAX_CHUNK, SHELL_COALESCE_WINDOW),
+                Stream.mapEffect(coalesceRetainedInputs),
+                Stream.flatMap((items) => Stream.fromIterable(items)),
+              );
 
               const loadSnapshot = projectionSnapshotQuery.getShellSnapshot().pipe(
                 Effect.tapError((cause) =>
@@ -1251,18 +1305,21 @@ const makeWsRpcLayer = (
               // Offer the completion marker into the same queue as live events.
               // Anything buffered while snapshot/replay work was in flight is
               // therefore delivered before the client is told it is synchronized.
-              const synchronizedThenLive =
+              const synchronizedThenLive = liveBudget.deliver(
                 input.requestCompletionMarker === true
                   ? Stream.concat(
                       Stream.fromEffect(
-                        Queue.offer(liveBuffer, { kind: "synchronized" as const }).pipe(
+                        liveBudget.retain({ kind: "synchronized" as const }).pipe(
+                          Effect.flatMap((item) => Queue.offer(liveBuffer, item)),
+                          Effect.uninterruptible,
                           Effect.andThen(Queue.takeAll(liveBuffer)),
-                          Effect.flatMap(coalesceShellLiveInputs),
+                          Effect.flatMap(coalesceRetainedInputs),
                         ),
                       ).pipe(Stream.flatMap((items) => Stream.fromIterable(items))),
                       bufferedLiveStream,
                     )
-                  : bufferedLiveStream;
+                  : bufferedLiveStream,
+              );
 
               // When the client already holds a shell snapshot (cached, or loaded
               // over HTTP) it passes that snapshot's sequence, and we resume by
@@ -1431,7 +1488,7 @@ const makeWsRpcLayer = (
                 Stream.filter(isThisThreadDetailEvent),
                 Stream.map((event) => ({
                   kind: "event" as const,
-                  event: projectActivityEvent(event),
+                  event,
                 })),
               );
               const volatileEventStream = Option.isSome(enterpriseThreadRuntime)
@@ -1453,25 +1510,37 @@ const makeWsRpcLayer = (
 
               // Attach live delivery before reading either replay or snapshot state.
               // Otherwise an event published while the snapshot is loading is lost.
-              const liveBuffer = yield* Queue.unbounded<OrchestrationThreadStreamItem>();
-              yield* Effect.forkScoped(
-                liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
-              );
-              yield* Effect.forkScoped(
-                volatileStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
-              );
-              const bufferedLiveStream = Stream.fromQueue(liveBuffer);
+              // The coalescer keeps only the latest in-flight update per tool
+              // call within a 50 ms window (most tool-update frames), projects
+              // payloads for the client, and bounds what a client that stops
+              // reading can hold (1,000 items / 8 MB, then a resumable error).
+              const liveBuffer = yield* makeThreadLiveEventCoalescer();
+              const feedLiveBuffer = <E, R>(
+                source: Stream.Stream<Parameters<typeof liveBuffer.offer>[0], E, R>,
+              ) =>
+                source.pipe(
+                  Stream.runForEachArray(liveBuffer.offerAll),
+                  Effect.raceFirst(liveBuffer.failed),
+                  Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
+                );
+              yield* Effect.forkScoped(feedLiveBuffer(liveStream), { startImmediately: true });
+              yield* Effect.forkScoped(feedLiveBuffer(volatileStream), {
+                startImmediately: true,
+              });
+              const bufferedLiveStream = liveBuffer.stream;
+              let replayOnMissingSnapshot: typeof bufferedLiveStream | undefined;
               if (Option.isSome(enterpriseThreadRuntime)) {
                 // Remote legacy history must not gate local snapshots or live delivery.
                 yield* enterpriseThreadRuntime.value.ensureHistory(input.threadId).pipe(
                   Effect.andThen(enterpriseThreadRuntime.value.getSnapshot(input.threadId)),
                   Effect.flatMap(reconcileEnterpriseOverlay),
                   Effect.flatMap((overlay) =>
-                    Queue.offer(liveBuffer, {
+                    liveBuffer.offer({
                       kind: "volatile-snapshot" as const,
                       overlay,
                     }),
                   ),
+                  Effect.catchTags({ OrchestrationGetSnapshotError: () => Effect.void }),
                   Effect.forkScoped,
                 );
               }
@@ -1489,22 +1558,43 @@ const makeWsRpcLayer = (
               // catch-up followed by the buffered/ongoing live events. Overlapping
               // events are deduped by sequence on the client.
               //
-              // The replay is bounded to the projection head captured below. The
-              // catch-up range is normally tiny (a fresh HTTP snapshot sequence),
-              // but a stale cached cursor can sit hundreds of thousands of global
-              // events behind — replaying that decodes every intervening event
-              // (including every other thread's tool payloads) only to discard
-              // almost all of them, which has OOM-killed servers on large
-              // databases. A truncated replay would silently drop this thread's
-              // events, so past the gap cap we reset the client with a fresh
-              // thread snapshot instead, exactly like subscribeShell above.
+              // Measure only this thread's rows. Global sequence gaps can
+              // contain unrelated or pruned streams, so a busy app no longer
+              // forces a full thread snapshot on every reconnect. Keep an
+              // explicit upper bound so events after the captured head stay in
+              // the live tail.
               if (input.afterSequence !== undefined) {
                 const afterSequence = input.afterSequence;
                 const headSequence = yield* orchestrationEngine.latestSequence;
-                const replayGap = headSequence - afterSequence;
-                if (replayGap >= 0 && replayGap <= THREAD_RESUME_MAX_GAP) {
+                const range = {
+                  threadId: input.threadId,
+                  fromSequenceExclusive: afterSequence,
+                  toSequenceInclusive: headSequence,
+                };
+                const replayStats =
+                  afterSequence > headSequence
+                    ? null
+                    : yield* orchestrationEngine
+                        .getThreadReplayStats({
+                          ...range,
+                          maxEvents: THREAD_RESUME_MAX_EVENTS,
+                        })
+                        .pipe(
+                          Effect.mapError(
+                            (cause) =>
+                              new OrchestrationGetSnapshotError({
+                                message: `Failed to measure thread ${input.threadId} replay range`,
+                                cause,
+                              }),
+                          ),
+                        );
+                if (
+                  replayStats !== null &&
+                  replayStats.eventCount <= THREAD_RESUME_MAX_EVENTS &&
+                  replayStats.payloadBytes <= ORCHESTRATION_REPLAY_PAYLOAD_BUDGET_BYTES
+                ) {
                   const catchUpStream = orchestrationEngine
-                    .readEvents(afterSequence, replayGap)
+                    .readThreadEvents({ ...range, limit: THREAD_RESUME_MAX_EVENTS })
                     .pipe(
                       Stream.filter(isThisThreadDetailEvent),
                       Stream.map((event) => ({
@@ -1521,18 +1611,20 @@ const makeWsRpcLayer = (
                     );
                   const afterCatchUp =
                     input.requestCompletionMarker === true
-                      ? Stream.concat(
-                          Stream.fromEffect(
-                            Queue.offer(liveBuffer, { kind: "synchronized" as const }),
-                          ).pipe(Stream.drain),
-                          bufferedLiveStream,
+                      ? Stream.unwrap(
+                          liveBuffer
+                            .offer({ kind: "synchronized" as const })
+                            .pipe(Effect.as(bufferedLiveStream)),
                         )
                       : bufferedLiveStream;
-                  return Stream.concat(catchUpStream, afterCatchUp);
+                  const replay = Stream.concat(catchUpStream, afterCatchUp);
+                  if (!replayStats.hasCreateEvent) {
+                    return replay;
+                  }
+                  replayOnMissingSnapshot = replay;
                 }
-                // Gap too large (or cursor ahead of authoritative state): fall
-                // through to the snapshot path so the client converges from a
-                // fresh thread detail instead of an unbounded replay.
+                // A recreated thread needs a fresh snapshot if it still exists.
+                // Oversized replays and invalid cursors also use the snapshot path.
               }
 
               const snapshot = yield* projectionSnapshotQuery
@@ -1555,6 +1647,12 @@ const makeWsRpcLayer = (
                 );
 
               if (Option.isNone(snapshot)) {
+                // The recreated thread can already be deleted. Preserve the
+                // bounded replay and shell removal instead of retrying a
+                // snapshot that cannot exist. Oversized ranges still fail.
+                if (replayOnMissingSnapshot !== undefined) {
+                  return replayOnMissingSnapshot;
+                }
                 return yield* new OrchestrationGetSnapshotError({
                   message: `Thread ${input.threadId} was not found`,
                   cause: input.threadId,
@@ -1563,11 +1661,10 @@ const makeWsRpcLayer = (
 
               const afterSnapshot =
                 input.requestCompletionMarker === true
-                  ? Stream.concat(
-                      Stream.fromEffect(
-                        Queue.offer(liveBuffer, { kind: "synchronized" as const }),
-                      ).pipe(Stream.drain),
-                      bufferedLiveStream,
+                  ? Stream.unwrap(
+                      liveBuffer
+                        .offer({ kind: "synchronized" as const })
+                        .pipe(Effect.as(bufferedLiveStream)),
                     )
                   : bufferedLiveStream;
               return Stream.concat(
