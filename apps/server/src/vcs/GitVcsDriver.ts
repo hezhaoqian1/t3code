@@ -758,16 +758,61 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         return false;
       }
 
-      yield* execute({
+      const tracked = yield* execute({
         operation,
         cwd: input.cwd,
-        args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
+        args: ["ls-files", "--cached", `--with-tree=${commitOid}`, "-z", "--", "."],
       });
-      yield* execute({
+      // An empty index and checkpoint have nothing for git restore's pathspec to match.
+      if (tracked.stdout.length > 0) {
+        yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
+        });
+      }
+      // Restoring away the last tracked file can remove a nested workspace
+      // directory, and on Windows git clean can remove the emptied workspace
+      // itself. The workspace must survive the restore.
+      const recreateWorkspace = (command: string) =>
+        fileSystem.makeDirectory(input.cwd, { recursive: true }).pipe(
+          Effect.mapError(
+            (cause) =>
+              new VcsProcessExitError({
+                operation,
+                command,
+                cwd: input.cwd,
+                exitCode: 0,
+                detail: `Could not recreate the checkpoint workspace: ${cause.message}`,
+              }),
+          ),
+        );
+      yield* recreateWorkspace("git restore");
+      const cleaned = yield* execute({
         operation,
         cwd: input.cwd,
         args: ["clean", "-fd", "--", "."],
+        allowNonZeroExit: true,
       });
+      if (cleaned.exitCode !== 0) {
+        // Git can remove every child, then fail trying to remove './' itself.
+        const emptiedWorkspace =
+          cleaned.exitCode === 1 &&
+          /^warning: failed to remove \.\/: [^\n]+$/.test(cleaned.stderr.trim()) &&
+          (yield* fileSystem.readDirectory(input.cwd).pipe(
+            Effect.map((entries) => entries.length === 0),
+            Effect.orElseSucceed(() => false),
+          ));
+        if (!emptiedWorkspace)
+          return yield* new VcsProcessExitError({
+            operation,
+            command: "git clean",
+            cwd: input.cwd,
+            exitCode: cleaned.exitCode,
+            detail: cleaned.stderr.trim() || "Could not clean the checkpoint workspace.",
+          });
+      }
+      yield* recreateWorkspace("git clean");
 
       const headExists = yield* hasHeadCommit(input.cwd);
       if (headExists) {

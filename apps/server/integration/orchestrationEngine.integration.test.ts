@@ -781,41 +781,157 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
   ),
 );
 
-it.live(
-  "appends checkpoint.revert.failed activity when revert is requested without an active session",
-  () =>
-    withHarness((harness) =>
-      Effect.gen(function* () {
-        yield* seedProjectAndThread(harness);
+it.live("rewinds the conversation to a message, keeps files and rolls back provider history", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
 
-        yield* harness.engine.dispatch({
-          type: "thread.checkpoint.revert",
-          commandId: CommandId.make("cmd-checkpoint-revert-no-session"),
-          threadId: THREAD_ID,
-          turnCount: 0,
-          createdAt: nowIso(),
-        });
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
+        events: [
+          {
+            type: "turn.started",
+            ...runtimeBase("evt-rewind-1", "2026-02-24T10:05:00.000Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+          },
+          {
+            type: "message.delta",
+            ...runtimeBase("evt-rewind-1a", "2026-02-24T10:05:00.050Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            delta: "Drafted the outline.\n",
+          },
+          {
+            type: "turn.completed",
+            ...runtimeBase("evt-rewind-2", "2026-02-24T10:05:00.100Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            status: "completed",
+          },
+        ],
+        mutateWorkspace: ({ cwd }) =>
+          Effect.sync(() => {
+            NodeFS.writeFileSync(NodePath.join(cwd, "outline.md"), "outline\n", "utf8");
+          }),
+      });
+      yield* startTurn({
+        harness,
+        commandId: "cmd-turn-start-rewind-1",
+        messageId: "msg-user-rewind-1",
+        text: "Draft an outline",
+        createdAt: "2026-02-24T10:04:59.900Z",
+      });
+      yield* harness.waitForThread(
+        THREAD_ID,
+        (entry) => entry.session?.threadId === "thread-1" && entry.checkpoints.length === 1,
+      );
 
-        const thread = yield* harness.waitForThread(THREAD_ID, (entry) =>
-          entry.activities.some(
-            (activity) =>
-              activity.kind === "checkpoint.revert.failed" &&
-              typeof activity.payload === "object" &&
-              activity.payload !== null,
-          ),
-        );
-        const failureActivity = thread.activities.find(
-          (activity) => activity.kind === "checkpoint.revert.failed",
-        );
-        assert.equal(failureActivity !== undefined, true);
-        assert.equal(
-          String(
-            (failureActivity?.payload as { readonly detail?: string } | undefined)?.detail,
-          ).includes("No active provider session"),
-          true,
-        );
-      }),
-    ),
+      yield* harness.adapterHarness!.queueTurnResponse(THREAD_ID, {
+        events: [
+          {
+            type: "turn.started",
+            ...runtimeBase("evt-rewind-3", "2026-02-24T10:05:01.000Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+          },
+          {
+            type: "message.delta",
+            ...runtimeBase("evt-rewind-3a", "2026-02-24T10:05:01.050Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            delta: "Wrote the report.\n",
+          },
+          {
+            type: "turn.completed",
+            ...runtimeBase("evt-rewind-4", "2026-02-24T10:05:01.100Z"),
+            threadId: THREAD_ID,
+            turnId: FIXTURE_TURN_ID,
+            status: "completed",
+          },
+        ],
+        mutateWorkspace: ({ cwd }) =>
+          Effect.sync(() => {
+            NodeFS.writeFileSync(NodePath.join(cwd, "report.md"), "report\n", "utf8");
+          }),
+      });
+      yield* startTurn({
+        harness,
+        commandId: "cmd-turn-start-rewind-2",
+        messageId: "msg-user-rewind-2",
+        text: "Write the report",
+        createdAt: "2026-02-24T10:05:00.900Z",
+      });
+      yield* harness.waitForThread(
+        THREAD_ID,
+        (entry) => entry.latestTurn?.turnId === "turn-2" && entry.checkpoints.length === 2,
+        8000,
+      );
+
+      yield* harness.engine.dispatch({
+        type: "thread.conversation.revert",
+        commandId: CommandId.make("cmd-conversation-rewind"),
+        threadId: THREAD_ID,
+        turnCount: 0,
+        messageId: asMessageId("msg-user-rewind-2"),
+        createdAt: nowIso(),
+      });
+
+      yield* harness.waitForDomainEvent((event) => event.type === "thread.reverted");
+      const rewound = yield* harness.waitForThread(THREAD_ID, (entry) =>
+        entry.messages.every((message) => message.id !== "msg-user-rewind-2"),
+      );
+      assert.deepEqual(
+        rewound.messages.map((message) => ({ role: message.role, text: message.text })),
+        [
+          { role: "user", text: "Draft an outline" },
+          { role: "assistant", text: "Drafted the outline.\n" },
+        ],
+      );
+      assert.equal(rewound.latestTurn?.turnId, "turn-1");
+      // Files stay as the later turn left them.
+      assert.equal(
+        NodeFS.readFileSync(NodePath.join(harness.workspaceDir, "report.md"), "utf8"),
+        "report\n",
+      );
+      assert.equal(
+        gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 2)),
+        false,
+      );
+      // The provider forgets the removed turn too.
+      assert.deepEqual(harness.adapterHarness!.getRollbackCalls(THREAD_ID), [1]);
+      const providerHistory = yield* harness.adapterHarness!.adapter.readThread(THREAD_ID);
+      assert.deepEqual(
+        providerHistory.turns.map((turn) => turn.id),
+        ["turn-1"],
+      );
+    }),
+  ),
+);
+
+it.live("reverts to the start without a live provider session", () =>
+  withHarness((harness) =>
+    Effect.gen(function* () {
+      yield* seedProjectAndThread(harness);
+
+      // A rewind no longer needs a running provider session: the workspace
+      // comes from the thread and project, and there is no provider history
+      // to roll back yet.
+      yield* harness.engine.dispatch({
+        type: "thread.checkpoint.revert",
+        commandId: CommandId.make("cmd-checkpoint-revert-no-session"),
+        threadId: THREAD_ID,
+        turnCount: 0,
+        createdAt: nowIso(),
+      });
+
+      yield* harness.waitForDomainEvent((event) => event.type === "thread.reverted");
+      const thread = yield* harness.waitForThread(THREAD_ID, () => true);
+      assert.equal(
+        thread.activities.some((activity) => activity.kind === "checkpoint.revert.failed"),
+        false,
+      );
+    }),
+  ),
 );
 
 it.live("starts a fd-deepseek session on first turn when provider is requested", () =>

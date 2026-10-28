@@ -677,7 +677,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }
     return (
       <div className="flex h-full items-center justify-center">
-        <p className="text-placeholder text-sm">Send a message to start the conversation.</p>
+        <p className="text-placeholder text-sm">发送一条消息开始对话。</p>
       </div>
     );
   }
@@ -1238,13 +1238,13 @@ function RevertUserMessageButton({ messageId }: { messageId: MessageId }) {
             variant="ghost"
             disabled={activity.isRevertingCheckpoint || activity.isWorking}
             onClick={() => ctx.onRevertUserMessage(messageId)}
-            aria-label="回退到此消息"
+            aria-label="从这里重来"
           />
         }
       >
         <Undo2Icon className="size-3" />
       </TooltipTrigger>
-      <TooltipPopup side="top">回退到此消息</TooltipPopup>
+      <TooltipPopup side="top">从这里重来（保留文件）</TooltipPopup>
     </Tooltip>
   );
 }

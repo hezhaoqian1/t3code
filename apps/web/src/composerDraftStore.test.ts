@@ -133,6 +133,7 @@ function makeTerminalContext(input: {
 
 function resetComposerDraftStore() {
   useComposerDraftStore.setState({
+    rewindingThreadKeys: new Set(),
     draftsByThreadKey: {},
     draftThreadsByThreadKey: {},
     logicalProjectDraftThreadKeyByLogicalProjectKey: {},
@@ -193,6 +194,48 @@ describe("composerDraftStore addImages", () => {
 
   afterEach(() => {
     URL.revokeObjectURL = originalRevokeObjectUrl;
+  });
+
+  it("restores images with matching metadata without replacing unsent bytes", () => {
+    const store = useComposerDraftStore.getState();
+    const unsent = makeImage({ id: "unsent", previewUrl: "blob:unsent" });
+    const restored = {
+      ...unsent,
+      id: "restored",
+      previewUrl: "blob:restored",
+      file: new File([new Uint8Array(unsent.sizeBytes).fill(2)], unsent.name, {
+        type: unsent.mimeType,
+        lastModified: unsent.file.lastModified,
+      }),
+    };
+    store.addImages(threadRef, [unsent]);
+    store.addImages(threadRef, [restored, restored], { allowDuplicates: true });
+
+    const images = draftFor(threadId, TEST_ENVIRONMENT_ID)?.images;
+    expect(images?.map((image) => image.id)).toEqual(["unsent", "restored"]);
+    expect(images?.[0]?.file).toBe(unsent.file);
+    expect(images?.[1]?.file).toBe(restored.file);
+    expect(revokeSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not persist active rewind locks", () => {
+    const threadKey = threadKeyFor(threadId, TEST_ENVIRONMENT_ID);
+    useComposerDraftStore.setState({ rewindingThreadKeys: new Set([threadKey]) });
+
+    expect(useComposerDraftStore.getState().rewindingThreadKeys.has(threadKey)).toBe(true);
+    expect(partializeComposerDraftStoreState(useComposerDraftStore.getState())).not.toHaveProperty(
+      "rewindingThreadKeys",
+    );
+  });
+
+  it("drops rewind locks of a removed environment only", () => {
+    const local = threadKeyFor(threadId, TEST_ENVIRONMENT_ID);
+    const remote = threadKeyFor(threadId, OTHER_TEST_ENVIRONMENT_ID);
+    useComposerDraftStore.setState({ rewindingThreadKeys: new Set([local, remote]) });
+
+    clearComposerDraftsEnvironment(TEST_ENVIRONMENT_ID);
+
+    expect([...useComposerDraftStore.getState().rewindingThreadKeys]).toEqual([remote]);
   });
 
   it("deduplicates identical images in one batch by file signature", () => {

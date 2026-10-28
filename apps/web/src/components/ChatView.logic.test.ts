@@ -1,5 +1,6 @@
 import {
   EnvironmentId,
+  EventId,
   MessageId,
   ProjectId,
   ProviderInstanceId,
@@ -7,6 +8,11 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { Atom, AsyncResult } from "effect/unstable/reactivity";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { useComposerDraftStore } from "../composerDraftStore";
+import { appAtomRegistry } from "../rpc/atomRegistry";
+import { environmentThreadDetails } from "../state/threads";
 
 import type { Thread, ThreadShell } from "../types";
 import {
@@ -15,6 +21,7 @@ import {
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
   buildRevertTurnCountByUserMessageId,
+  buildRewindTurnCountByUserMessageId,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
@@ -33,6 +40,9 @@ import {
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
+  prepareRevertedMessageAttachments,
+  restoreRewoundMessageToDraft,
+  waitForRevertedMessage,
 } from "./ChatView.logic";
 
 const environmentId = EnvironmentId.make("environment-local");
@@ -795,5 +805,358 @@ describe("buildRevertTurnCountByUserMessageId", () => {
     );
     expect(next).not.toBe(first);
     expect([...next]).toEqual([[user.id, 2]]);
+  });
+});
+
+describe("buildRewindTurnCountByUserMessageId", () => {
+  const at = (minute: number) => `2026-10-01T00:0${minute}:00.000Z`;
+  const entry = (id: string, role: "user" | "assistant", minute: number) => {
+    const message = {
+      id: MessageId.make(id),
+      role,
+      text: id,
+      turnId: role === "assistant" ? TurnId.make(`turn-${id}`) : null,
+      createdAt: at(minute),
+      updatedAt: at(minute),
+      streaming: false,
+    };
+    return { id: message.id, kind: "message" as const, createdAt: message.createdAt, message };
+  };
+
+  it("offers every sent message in a task folder without checkpoints", () => {
+    const rewindable = buildRewindTurnCountByUserMessageId({
+      timelineEntries: [
+        entry("user-1", "user", 1),
+        entry("assistant-1", "assistant", 2),
+        entry("user-2", "user", 3),
+      ],
+      checkpointTurnCountByUserMessageId: new Map(),
+    });
+    expect([...rewindable]).toEqual([
+      ["user-1", 0],
+      ["user-2", 0],
+    ]);
+  });
+
+  it("keeps the checkpoint for a files-too rewind and the previous map when unchanged", () => {
+    const input = {
+      timelineEntries: [entry("user-1", "user", 1), entry("assistant-1", "assistant", 2)],
+      checkpointTurnCountByUserMessageId: new Map([[MessageId.make("user-1"), 0]]),
+    };
+    const first = buildRewindTurnCountByUserMessageId(input);
+    expect([...first]).toEqual([["user-1", 0]]);
+    expect(buildRewindTurnCountByUserMessageId(input, first)).toBe(first);
+  });
+
+  it("does not offer FD Skill history or anything before it", () => {
+    const rewindable = buildRewindTurnCountByUserMessageId({
+      timelineEntries: [
+        entry("user-1", "user", 1),
+        entry("fd-enterprise-history:7:1", "user", 2),
+        entry("fd-enterprise-history:7:2", "assistant", 3),
+        entry("user-2", "user", 4),
+        entry("assistant-2", "assistant", 5),
+      ],
+      checkpointTurnCountByUserMessageId: new Map(),
+    });
+    expect([...rewindable.keys()]).toEqual(["user-2"]);
+  });
+});
+
+describe("rewind draft recovery", () => {
+  const message = {
+    id: MessageId.make("rewound-message"),
+    role: "user" as const,
+    text: "edit this question",
+    turnId: null,
+    createdAt: now,
+    updatedAt: now,
+    streaming: false,
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("waits past command acceptance until the exact message disappears", async () => {
+    const atom = Atom.make<Thread | null>(makeThread({ messages: [message] }));
+    vi.spyOn(environmentThreadDetails, "detailAtom").mockReturnValue(atom);
+    let accepted = false;
+    const result = waitForRevertedMessage({ environmentId, threadId }, message.id, async () => {
+      accepted = true;
+    });
+    let completed = false;
+    void result.then(() => {
+      completed = true;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(accepted).toBe(true);
+    expect(completed).toBe(false);
+    appAtomRegistry.set(atom, makeThread({ messages: [message], latestTurn: completedTurn }));
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    appAtomRegistry.set(atom, makeThread({ messages: [] }));
+    await result;
+  });
+
+  it("rejects with the server's reason and leaves the draft alone", async () => {
+    const atom = Atom.make<Thread | null>(makeThread({ messages: [message] }));
+    vi.spyOn(environmentThreadDetails, "detailAtom").mockReturnValue(atom);
+    const result = waitForRevertedMessage({ environmentId, threadId }, message.id, async () => {
+      appAtomRegistry.set(
+        atom,
+        makeThread({
+          messages: [message],
+          activities: [
+            {
+              id: EventId.make("rewind-failed"),
+              kind: "checkpoint.revert.failed",
+              tone: "error",
+              summary: "从这里重来失败",
+              payload: { detail: "AI 的对话记录没能回退", turnCount: 0 },
+              turnId: null,
+              createdAt: now,
+            },
+          ],
+        }),
+      );
+    });
+    await expect(result).rejects.toThrow("AI 的对话记录没能回退");
+  });
+
+  it("refuses a message that is no longer in the thread", async () => {
+    const atom = Atom.make<Thread | null>(makeThread({ messages: [] }));
+    vi.spyOn(environmentThreadDetails, "detailAtom").mockReturnValue(atom);
+    const revert = vi.fn(async () => {});
+    await expect(
+      waitForRevertedMessage({ environmentId, threadId }, message.id, revert),
+    ).rejects.toThrow("找不到要重来的那条消息");
+    expect(revert).not.toHaveBeenCalled();
+  });
+
+  it("bounds waits when a provider never finishes", async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+    const atom = Atom.make<Thread | null>(makeThread({ messages: [message] }));
+    vi.spyOn(environmentThreadDetails, "detailAtom").mockReturnValue(atom);
+    const result = waitForRevertedMessage(
+      { environmentId, threadId },
+      message.id,
+      async () => {},
+      20,
+    );
+    const timeoutIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 20);
+    const rewindTimeout = setTimeoutSpy.mock.results[timeoutIndex]?.value;
+    expect(rewindTimeout).toBeDefined();
+    const rejection = expect(result).rejects.toThrow("等待太久");
+    await vi.advanceTimersByTimeAsync(20);
+    await rejection;
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(rewindTimeout);
+  });
+
+  it("copies image and document bytes before the rewind removes them", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("image bytes"))
+      .mockResolvedValueOnce(new Response("report bytes"));
+    vi.stubGlobal("fetch", fetchMock);
+    const requested: string[] = [];
+    const files = await prepareRevertedMessageAttachments({
+      message: {
+        ...message,
+        attachments: [
+          {
+            type: "image",
+            id: "thread-1-image",
+            name: "chart.png",
+            mimeType: "image/png",
+            sizeBytes: 11,
+          },
+          {
+            type: "document",
+            id: "thread-1-report",
+            name: "季度报告.docx",
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            sizeBytes: 12,
+          },
+        ],
+      },
+      environmentId,
+      httpBaseUrl: "https://server.test",
+      createAssetUrl: async (target) => {
+        const resource = target.input.resource;
+        requested.push(resource._tag === "attachment" ? resource.attachmentId : resource._tag);
+        return AsyncResult.success({ relativeUrl: `/asset/${requested.length}` });
+      },
+    });
+    expect(requested).toEqual(["thread-1-image", "thread-1-report"]);
+    expect(files.map(({ attachment, file }) => [attachment.type, file.name])).toEqual([
+      ["image", "chart.png"],
+      ["document", "季度报告.docx"],
+    ]);
+    expect(await files[1]?.file.text()).toBe("report bytes");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://server.test/asset/1");
+  });
+
+  it("fails before the rewind when an attachment cannot be copied", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("gone", { status: 404 })));
+    await expect(
+      prepareRevertedMessageAttachments({
+        message: {
+          ...message,
+          attachments: [
+            {
+              type: "image",
+              id: "thread-1-image",
+              name: "chart.png",
+              mimeType: "image/png",
+              sizeBytes: 11,
+            },
+          ],
+        },
+        environmentId,
+        httpBaseUrl: "https://server.test",
+        createAssetUrl: async () => AsyncResult.success({ relativeUrl: "/asset/1" }),
+      }),
+    ).rejects.toThrow("没能取回附件“chart.png”");
+  });
+});
+
+describe("restoreRewoundMessageToDraft", () => {
+  const threadRef = scopeThreadRef(environmentId, ThreadId.make("thread-restore"));
+
+  afterEach(() => {
+    useComposerDraftStore.getState().clearComposerContent(threadRef);
+  });
+
+  it("puts the typed prompt below the unsent draft and brings attachments back", () => {
+    const store = useComposerDraftStore.getState();
+    store.setPrompt(threadRef, "还没发出去的补充");
+    const unsentImage = new File([new Uint8Array(4).fill(1)], "chart.png", {
+      type: "image/png",
+      lastModified: 1,
+    });
+    store.addImages(threadRef, [
+      {
+        type: "image",
+        id: "unsent-image",
+        name: "chart.png",
+        mimeType: "image/png",
+        sizeBytes: unsentImage.size,
+        previewUrl: "blob:unsent",
+        file: unsentImage,
+      },
+    ]);
+    const restoredImage = new File([new Uint8Array(4).fill(1)], "chart.png", {
+      type: "image/png",
+      lastModified: 1,
+    });
+    const restoredReport = new File(["report"], "季度报告.docx", {
+      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    });
+    let nextId = 0;
+
+    const restored = restoreRewoundMessageToDraft({
+      store: useComposerDraftStore.getState(),
+      target: threadRef,
+      message: {
+        id: MessageId.make("rewound"),
+        role: "user",
+        text: '把报告改成三段式\n\n<review_comment file="报告.md">旧评论</review_comment>',
+        turnId: null,
+        createdAt: now,
+        updatedAt: now,
+        streaming: false,
+        attachments: [],
+      },
+      files: [
+        {
+          attachment: {
+            type: "image",
+            id: "old-image",
+            name: "chart.png",
+            mimeType: "image/png",
+            sizeBytes: 4,
+          },
+          file: restoredImage,
+        },
+        {
+          attachment: {
+            type: "document",
+            id: "old-report",
+            name: "季度报告.docx",
+            mimeType: restoredReport.type,
+            sizeBytes: restoredReport.size,
+          },
+          file: restoredReport,
+        },
+      ],
+      createId: () => `restored-${++nextId}`,
+      createPreviewUrl: (file) => `blob:${file.name}`,
+    });
+
+    expect(restored.prompt).toBe("还没发出去的补充\n\n把报告改成三段式");
+    const draft = useComposerDraftStore.getState().getComposerDraft(threadRef);
+    expect(draft?.prompt).toBe("还没发出去的补充\n\n把报告改成三段式");
+    // The identical image already in the draft does not swallow the restored one.
+    expect(draft?.images.map((image) => image.id)).toEqual(["unsent-image", "restored-1"]);
+    expect(draft?.images[1]?.file).toBe(restoredImage);
+    expect(restored.documents).toEqual([
+      expect.objectContaining({
+        type: "document",
+        id: "restored-2",
+        name: "季度报告.docx",
+        file: restoredReport,
+      }),
+    ]);
+  });
+
+  it("never puts an answer or thinking text into the composer", () => {
+    useComposerDraftStore.getState().setPrompt(threadRef, "草稿");
+    const restored = restoreRewoundMessageToDraft({
+      store: useComposerDraftStore.getState(),
+      target: threadRef,
+      message: {
+        id: MessageId.make("thinking"),
+        role: "reasoning",
+        text: "先分析用户的需求……",
+        turnId: TurnId.make("turn-1"),
+        createdAt: now,
+        updatedAt: now,
+        streaming: false,
+      },
+      files: [],
+      createId: () => "unused",
+      createPreviewUrl: () => "blob:unused",
+    });
+    expect(restored.prompt).toBe("草稿");
+    expect(useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt).toBe("草稿");
+  });
+
+  it("fills an empty composer with just the rewound prompt", () => {
+    const restored = restoreRewoundMessageToDraft({
+      store: useComposerDraftStore.getState(),
+      target: threadRef,
+      message: {
+        id: MessageId.make("rewound"),
+        role: "user",
+        text: "  帮我整理会议纪要  ",
+        turnId: null,
+        createdAt: now,
+        updatedAt: now,
+        streaming: false,
+      },
+      files: [],
+      createId: () => "unused",
+      createPreviewUrl: () => "blob:unused",
+    });
+    expect(restored).toEqual({ prompt: "帮我整理会议纪要", documents: [] });
+    expect(useComposerDraftStore.getState().getComposerDraft(threadRef)?.prompt).toBe(
+      "帮我整理会议纪要",
+    );
   });
 });

@@ -1091,6 +1091,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.conversation.revert":
     case "thread.checkpoint.revert": {
       yield* requireThread({
         readModel,
@@ -1108,6 +1109,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.type === "thread.conversation.revert" ? { restoreFiles: false } : {}),
+          ...(command.messageId !== undefined ? { messageId: command.messageId } : {}),
           createdAt: command.createdAt,
         },
       };
@@ -1354,6 +1357,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           turnCount: command.turnCount,
+          ...(command.messageId !== undefined ? { messageId: command.messageId } : {}),
+          ...(command.messageCreatedAt !== undefined
+            ? { messageCreatedAt: command.messageCreatedAt }
+            : {}),
+          ...(command.removedTurnIds !== undefined
+            ? { removedTurnIds: command.removedTurnIds }
+            : {}),
         },
       };
     }

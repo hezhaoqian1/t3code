@@ -144,6 +144,10 @@ The patch difference between two checkpoints. Query logic lives in [CheckpointDi
 
 The file patch and changed-file summary for one turn. It is usually computed in [CheckpointDiffQuery.ts][20], represented in [the contracts][1], and recorded into thread state by [projector.ts][4].
 
+#### Conversation rewind
+
+Rewinding a thread to before one of the user's messages. `thread.conversation.revert` keeps workspace files; `thread.checkpoint.revert` also restores them from a checkpoint. When the command names the message (`messageId`), [CheckpointReactor.ts][6] plans the rewind from turn request times rather than checkpoint numbers ([conversationRewindPlan.ts][26]), so threads without checkpoints can rewind too. It rolls the provider's history back by turn id (`ProviderService.rollbackConversation` with `turnIds`) and then records `thread.reverted` with the anchor message and the removed turn ids, which every projector and client applies with the same rules ([conversationRewind.ts][27]). FD Skill history lives on the enterprise service, so rewinds that would remove it are refused.
+
 ## Practical Shortcuts
 
 - If you see `requested`, think "intent recorded".
@@ -183,3 +187,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[26]: ../../apps/server/src/orchestration/conversationRewindPlan.ts
+[27]: ../../packages/shared/src/conversationRewind.ts

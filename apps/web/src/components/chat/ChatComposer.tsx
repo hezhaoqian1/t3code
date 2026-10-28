@@ -515,6 +515,8 @@ export interface ChatComposerHandle {
   clearDocuments: () => void;
   /** Put documents back, e.g. queued messages returned to the composer. */
   addDocuments: (documents: ReadonlyArray<ComposerDocumentAttachment>) => void;
+  /** True while a pasted image is still being compressed into the draft. */
+  hasPendingAttachments: () => boolean;
   /** Clear one-turn native Skill selection after a successful dispatch. */
   clearNativeSkillSelection: () => void;
   /** Select a generated presentation as the target of the next turn. */
@@ -566,6 +568,8 @@ export interface ChatComposerProps {
   phase: SessionPhase;
   isConnecting: boolean;
   isSendBusy: boolean;
+  /** The conversation is being rewound; the rewound prompt is about to return. */
+  isRevertingCheckpoint?: boolean;
   sendDisabledReason: string | null;
   isPreparingWorktree: boolean;
   environmentUnavailable: {
@@ -684,6 +688,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase,
     isConnecting,
     isSendBusy,
+    isRevertingCheckpoint = false,
     sendDisabledReason: suppliedSendDisabledReason,
     isPreparingWorktree,
     environmentUnavailable,
@@ -2413,7 +2418,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         isComposerApprovalState ||
         pendingUserInputs.length > 0 ||
         projectSelectionRequired ||
-        activePendingProgress !== null
+        activePendingProgress !== null ||
+        isRevertingCheckpoint
       ) {
         return;
       }
@@ -2423,6 +2429,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return () => window.removeEventListener("keydown", handler, true);
   }, [
     activePendingProgress,
+    isRevertingCheckpoint,
     isComposerApprovalState,
     keybindings,
     pendingUserInputs.length,
@@ -2434,8 +2441,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   // Callbacks: images
   // ------------------------------------------------------------------
+  const isRevertingCheckpointRef = useRef(isRevertingCheckpoint);
+  isRevertingCheckpointRef.current = isRevertingCheckpoint;
   const addComposerImages = async (files: File[]) => {
-    if (!activeThreadId || files.length === 0) return;
+    // A rewind is about to put its message's attachments back.
+    if (!activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) return;
     if (pendingUserInputs.length > 0) {
       toastManager.add({
         type: "error",
@@ -2528,7 +2538,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     files: File[],
     options?: { readonly source?: ComposerDocumentAttachment["source"] },
   ) => {
-    if (!isElectron || !activeThreadId || files.length === 0) return;
+    if (!isElectron || !activeThreadId || files.length === 0 || isRevertingCheckpointRef.current) {
+      return;
+    }
     if (pendingUserInputs.length > 0) {
       toastManager.add({
         type: "error",
@@ -2936,6 +2948,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           return [...current, ...documents.filter((document) => !existingIds.has(document.id))];
         });
       },
+      hasPendingAttachments: () =>
+        activeThreadId !== null &&
+        (pendingImageCompressionsRef.current.get(activeThreadId) ?? 0) > 0,
       clearNativeSkillSelection: () => {
         setNativeSkillNames([]);
         setPresentationOperation(null);
@@ -2967,6 +2982,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }),
     [
       activeThread,
+      activeThreadId,
       composerDraftTarget,
       composerCursor,
       composerTerminalContexts,

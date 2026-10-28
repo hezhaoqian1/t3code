@@ -5,6 +5,12 @@ import {
   type OrchestrationSessionStatus,
   ThreadId,
 } from "@t3tools/contracts";
+import {
+  compareIsoTimestamps,
+  conversationRewindAnchor,
+  isMessageRemovedByRewind,
+  isTurnEntryRemovedByRewind,
+} from "@t3tools/shared/conversationRewind";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -927,6 +933,28 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             threadId: event.payload.threadId,
           });
           let latestTurnId: ProjectionTurn["turnId"] = null;
+          if (conversationRewindAnchor(event.payload) !== null) {
+            // The turns projector already dropped the rewound turns; the
+            // newest remaining turn is the latest, checkpoint or not.
+            let latestRequestedAt: string | null = null;
+            for (const turn of retainedTurns) {
+              if (turn.turnId === null) continue;
+              if (
+                latestRequestedAt === null ||
+                compareIsoTimestamps(turn.requestedAt, latestRequestedAt) >= 0
+              ) {
+                latestRequestedAt = turn.requestedAt;
+                latestTurnId = turn.turnId;
+              }
+            }
+            yield* projectionThreadRepository.upsert({
+              ...existingRow.value,
+              latestTurnId,
+              updatedAt: event.occurredAt,
+            });
+            yield* refreshThreadShellSummary(event.payload.threadId);
+            return;
+          }
           let latestCheckpointTurnCount = -1;
           for (let index = 0; index < retainedTurns.length; index += 1) {
             const turn = retainedTurns[index];
@@ -1007,14 +1035,28 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
 
-          const existingTurns = yield* projectionTurnRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const keptRows = retainProjectionMessagesAfterRevert(
-            existingRows,
-            existingTurns,
-            event.payload.turnCount,
-          );
+          const anchor = conversationRewindAnchor(event.payload);
+          const keptRows =
+            anchor !== null
+              ? existingRows.filter(
+                  (row) =>
+                    !isMessageRemovedByRewind(
+                      {
+                        id: row.messageId,
+                        role: row.role,
+                        turnId: row.turnId,
+                        createdAt: row.createdAt,
+                      },
+                      anchor,
+                    ),
+                )
+              : retainProjectionMessagesAfterRevert(
+                  existingRows,
+                  yield* projectionTurnRepository.listByThreadId({
+                    threadId: event.payload.threadId,
+                  }),
+                  event.payload.turnCount,
+                );
           if (keptRows.length === existingRows.length) {
             return;
           }
@@ -1062,14 +1104,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             return;
           }
 
-          const existingTurns = yield* projectionTurnRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const keptRows = retainProjectionProposedPlansAfterRevert(
-            existingRows,
-            existingTurns,
-            event.payload.turnCount,
-          );
+          const anchor = conversationRewindAnchor(event.payload);
+          const keptRows =
+            anchor !== null
+              ? existingRows.filter((row) => !isTurnEntryRemovedByRewind(row, anchor))
+              : retainProjectionProposedPlansAfterRevert(
+                  existingRows,
+                  yield* projectionTurnRepository.listByThreadId({
+                    threadId: event.payload.threadId,
+                  }),
+                  event.payload.turnCount,
+                );
           if (keptRows.length === existingRows.length) {
             return;
           }
@@ -1115,14 +1160,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (existingRows.length === 0) {
             return;
           }
-          const existingTurns = yield* projectionTurnRepository.listByThreadId({
-            threadId: event.payload.threadId,
-          });
-          const keptRows = retainProjectionActivitiesAfterRevert(
-            existingRows,
-            existingTurns,
-            event.payload.turnCount,
-          );
+          const anchor = conversationRewindAnchor(event.payload);
+          const keptRows =
+            anchor !== null
+              ? existingRows.filter((row) => !isTurnEntryRemovedByRewind(row, anchor))
+              : retainProjectionActivitiesAfterRevert(
+                  existingRows,
+                  yield* projectionTurnRepository.listByThreadId({
+                    threadId: event.payload.threadId,
+                  }),
+                  event.payload.turnCount,
+                );
           if (keptRows.length === existingRows.length) {
             return;
           }
@@ -1467,11 +1515,18 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           const existingTurns = yield* projectionTurnRepository.listByThreadId({
             threadId: event.payload.threadId,
           });
-          const keptTurns = existingTurns.filter(
-            (turn) =>
-              turn.turnId !== null &&
-              turn.checkpointTurnCount !== null &&
-              turn.checkpointTurnCount <= event.payload.turnCount,
+          const anchor = conversationRewindAnchor(event.payload);
+          const keptTurns = existingTurns.filter((turn) =>
+            anchor !== null
+              ? // Turns without checkpoints stay unless the rewind removed them.
+                turn.turnId !== null &&
+                !anchor.removedTurnIds.has(turn.turnId) &&
+                turn.pendingMessageId !== anchor.messageId &&
+                (turn.checkpointTurnCount === null ||
+                  turn.checkpointTurnCount <= event.payload.turnCount)
+              : turn.turnId !== null &&
+                turn.checkpointTurnCount !== null &&
+                turn.checkpointTurnCount <= event.payload.turnCount,
           );
           yield* projectionTurnRepository.deleteByThreadId({
             threadId: event.payload.threadId,

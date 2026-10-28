@@ -15,7 +15,7 @@ import {
   RuntimeRequestId,
   NonNegativeInt,
   ThreadId,
-  type TurnId,
+  TurnId,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
@@ -80,7 +80,24 @@ type ProviderServiceMethod<Name extends keyof ProviderService.ProviderService["S
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
   numTurns: NonNegativeInt,
+  turnIds: Schema.optional(Schema.Array(TurnId)),
 });
+
+/**
+ * How many of the provider's own turns a rewind removes. The provider's
+ * history can hold turns the conversation never showed (a compaction, a
+ * restart continuation) or miss turns that failed before reaching it, so a
+ * count of removed conversation turns can drop the wrong history. When the
+ * removed turn ids are known, cut the provider history at the first of them.
+ */
+export function resolveProviderRollbackTurnCount(input: {
+  readonly providerTurnIds: ReadonlyArray<string>;
+  readonly removedTurnIds: ReadonlyArray<string>;
+}): number {
+  const removed = new Set(input.removedTurnIds);
+  const firstRemoved = input.providerTurnIds.findIndex((turnId) => removed.has(turnId));
+  return firstRemoved < 0 ? 0 : input.providerTurnIds.length - firstRemoved;
+}
 
 function toValidationError(
   operation: string,
@@ -1220,7 +1237,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       schema: ProviderRollbackConversationInput,
       payload: rawInput,
     });
-    if (input.numTurns === 0) {
+    const removedTurnIds = input.turnIds ?? [];
+    if (input.numTurns === 0 && removedTurnIds.length === 0) {
       return;
     }
     let metricProvider = "unknown";
@@ -1231,16 +1249,44 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         allowRecovery: true,
       });
       metricProvider = routed.adapter.provider;
+      const numTurns =
+        removedTurnIds.length === 0
+          ? input.numTurns
+          : resolveProviderRollbackTurnCount({
+              providerTurnIds: (yield* routed.adapter.readThread(routed.threadId)).turns.map(
+                (turn) => turn.id,
+              ),
+              removedTurnIds,
+            });
       yield* Effect.annotateCurrentSpan({
         "provider.operation": "rollback-conversation",
         "provider.kind": routed.adapter.provider,
         "provider.thread_id": input.threadId,
-        "provider.rollback_turns": input.numTurns,
+        "provider.rollback_turns": numTurns,
       });
-      yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns);
+      if (numTurns === 0) {
+        // None of the removed turns reached the provider's history.
+        yield* Effect.logInfo("provider conversation rollback found no provider turns to remove", {
+          threadId: input.threadId,
+          removedTurnCount: removedTurnIds.length,
+        });
+        return;
+      }
+      yield* routed.adapter.rollbackThread(routed.threadId, numTurns);
+      // A rewind can change the provider's resume state; persist it so a later
+      // restart resumes the rewound history.
+      const session = (yield* routed.adapter.listSessions()).find(
+        (entry) => entry.threadId === routed.threadId,
+      );
+      if (session) {
+        yield* upsertSessionBinding(
+          { ...session, providerInstanceId: routed.instanceId },
+          input.threadId,
+        );
+      }
       yield* analytics.record("provider.conversation.rolled_back", {
         provider: routed.adapter.provider,
-        turns: input.numTurns,
+        turns: numTurns,
       });
     }).pipe(
       withMetrics({

@@ -1580,6 +1580,93 @@ describe("FdDeepSeekAdapter", () => {
     }),
   );
 
+  it.effect(
+    "rewinds the employee's own Codex conversation after an FD Skill turn and a restart",
+    () =>
+      Effect.gen(function* () {
+        const codexProvider = ProviderDriverKind.make("codex");
+        const startedInputs: Array<Record<string, unknown>> = [];
+        const historyCalls: Array<{ readonly method: string; readonly profile: unknown }> = [];
+        let activeResume: unknown;
+        let sessionIndex = 0;
+        const ordinaryAdapter: ProviderAdapterShape<never> = {
+          provider: codexProvider,
+          capabilities: { sessionModelSwitch: "in-session" },
+          startSession: (input) => {
+            startedInputs.push(input);
+            sessionIndex += 1;
+            activeResume = input.resumeCursor ?? { threadId: `codex-profile-${sessionIndex}` };
+            return Effect.succeed({
+              provider: codexProvider,
+              providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+              status: "ready" as const,
+              runtimeMode: input.runtimeMode,
+              model: "deepseek-v4-flash",
+              threadId: input.threadId,
+              resumeCursor: activeResume,
+              createdAt: "2026-10-29T00:00:00.000Z",
+              updatedAt: "2026-10-29T00:00:00.000Z",
+            });
+          },
+          sendTurn: (input) =>
+            Effect.succeed({
+              threadId: input.threadId,
+              turnId: TurnId.make(`codex-turn-${startedInputs.length}`),
+              resumeCursor: activeResume,
+            }),
+          interruptTurn: () => Effect.void,
+          respondToRequest: () => Effect.void,
+          respondToUserInput: () => Effect.void,
+          stopSession: () => Effect.void,
+          listSessions: () => Effect.succeed([]),
+          hasSession: () => Effect.succeed(false),
+          readThread: (requestedThreadId) =>
+            Effect.sync(() => {
+              historyCalls.push({ method: "read", profile: activeResume });
+              return { threadId: requestedThreadId, turns: [] };
+            }),
+          rollbackThread: (requestedThreadId, numTurns) =>
+            Effect.sync(() => {
+              historyCalls.push({ method: `rollback:${numTurns}`, profile: activeResume });
+              return { threadId: requestedThreadId, turns: [] };
+            }),
+          stopAll: () => Effect.void,
+          streamEvents: Stream.empty,
+        };
+        const adapter = yield* makeFdDeepSeekAdapter({
+          kernel: new FdAgentKernel(streamer([])),
+          ordinaryAdapter,
+        });
+
+        yield* adapter.startSession(startInput);
+        yield* adapter.sendTurn({ threadId, input: "draft the report" });
+        yield* adapter.sendTurn({ threadId, input: "look up the fund", fdSkillVersionId: 10004 });
+        // The FD Skill profile is active, but a rewind addresses the employee's
+        // own conversation in the local profile's Codex thread.
+        yield* adapter.rollbackThread(threadId, 1);
+        expect(historyCalls).toEqual([
+          { method: "rollback:1", profile: { threadId: "codex-profile-1" } },
+        ]);
+        expect(startedInputs[2]).toMatchObject({ resumeCursor: { threadId: "codex-profile-1" } });
+        expect(startedInputs[2]).not.toHaveProperty("fdSkillVersionId");
+
+        // After a restart no Codex thread is running yet; history reads and
+        // rewinds start the local one from its saved cursor instead of reading
+        // the empty in-process history.
+        const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+        yield* adapter.stopSession(threadId);
+        yield* adapter.startSession({ ...startInput, resumeCursor: structuredClone(cursor) });
+        yield* adapter.readThread(threadId);
+        yield* adapter.rollbackThread(threadId, 2);
+        expect(historyCalls.slice(1)).toEqual([
+          { method: "read", profile: { threadId: "codex-profile-1" } },
+          { method: "rollback:2", profile: { threadId: "codex-profile-1" } },
+        ]);
+        expect(startedInputs).toHaveLength(4);
+        expect(startedInputs[3]).toMatchObject({ resumeCursor: { threadId: "codex-profile-1" } });
+      }),
+  );
+
   it.effect("resumes a cut-off turn in the FD Skill conversation it ran in", () =>
     Effect.gen(function* () {
       const codexProvider = ProviderDriverKind.make("codex");

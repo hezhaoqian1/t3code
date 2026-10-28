@@ -38,8 +38,28 @@ import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+import { FdEnterpriseThreadRuntime } from "../../fd-skills/FdEnterpriseThreadRuntime.ts";
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
+import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { compareIsoTimestamps } from "@t3tools/shared/conversationRewind";
+import {
+  planConversationRewind,
+  type ConversationRewindRejection,
+} from "../conversationRewindPlan.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+// Rewind failures are shown to the employee as-is, so they are written in
+// plain Chinese and say what did and did not change.
+const REWIND_WHILE_RUNNING_DETAIL = "AI 还在处理这个任务，请先停止或等它完成，再从之前的消息重来。";
+const REWIND_REJECTION_DETAIL: Record<ConversationRewindRejection, string> = {
+  "message-not-found": "找不到要重来的那条消息，它可能已经被移除。请刷新后再试。",
+  "not-user-message": "只能从你发出的消息重新开始。",
+  "fd-skill":
+    "这段对话用过 FD Skill，那部分记录保存在企业服务上，不能从这里重来。可以新建任务继续，任务文件夹里的文件不受影响。",
+};
+const NO_FILE_SNAPSHOT_DETAIL =
+  "这个任务文件夹没有文件快照，无法把文件恢复到之前的状态。可以选择“从这里重来”，只移除之后的对话，文件保持不变。";
 
 type ReactorInput =
   | {
@@ -88,6 +108,8 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  const projectionTurnRepository = yield* ProjectionTurnRepository;
+  const enterpriseRuntime = yield* Effect.serviceOption(FdEnterpriseThreadRuntime);
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -108,7 +130,8 @@ const make = Effect.gen(function* () {
             id: activityId,
             tone: "error",
             kind: "checkpoint.revert.failed",
-            summary: "Checkpoint revert failed",
+            // Shown in the employee's timeline next to the detail.
+            summary: "从这里重来失败",
             payload: {
               turnCount: input.turnCount,
               detail: input.detail,
@@ -694,108 +717,160 @@ const make = Effect.gen(function* () {
     event: Extract<OrchestrationEvent, { type: "thread.checkpoint-revert-requested" }>,
   ) {
     const now = DateTime.formatIso(yield* DateTime.now);
+    const { threadId, turnCount, messageId } = event.payload;
+    // Keep-files rewinds edit only the conversation; they need no checkpoint
+    // and work in task folders that are not Git repositories.
+    const restoreFiles = event.payload.restoreFiles !== false;
+    const fail = (detail: string) =>
+      appendRevertFailureActivity({ threadId, turnCount, detail, createdAt: now }).pipe(
+        Effect.catch(() => Effect.void),
+      );
 
-    const thread = yield* resolveThreadDetail(event.payload.threadId);
+    const thread = yield* resolveThreadDetail(threadId);
     if (!thread) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: "Thread was not found in read model.",
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
+      yield* fail("Thread was not found in read model.");
+      return;
+    }
+    if (thread.session?.status === "running") {
+      yield* fail(REWIND_WHILE_RUNNING_DETAIL);
       return;
     }
 
-    const sessionRuntime = yield* resolveSessionRuntimeForThread(event.payload.threadId);
-    if (Option.isNone(sessionRuntime)) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: "No active provider session with workspace cwd is bound to this thread.",
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
-    }
-    if (!isGitWorkspace(sessionRuntime.value.cwd)) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: "Checkpoints are unavailable because this project is not a git repository.",
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
-    }
+    // A rewind needs no live provider session: after a restart the thread's
+    // folder comes from the thread and project instead.
+    const checkpointCwd = yield* resolveCheckpointCwd({
+      threadId,
+      thread,
+      projects: yield* resolveThreadProjects(thread.projectId),
+      preferSessionRuntime: true,
+    });
 
     const currentTurnCount = thread.checkpoints.reduce(
       (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
       0,
     );
 
-    if (event.payload.turnCount > currentTurnCount) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: `Checkpoint turn count ${event.payload.turnCount} exceeds current turn count ${currentTurnCount}.`,
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
+    if ((restoreFiles || messageId === undefined) && turnCount > currentTurnCount) {
+      yield* fail(
+        `Checkpoint turn count ${turnCount} exceeds current turn count ${currentTurnCount}.`,
+      );
       return;
     }
 
-    const targetCheckpointRef =
-      event.payload.turnCount === 0
-        ? checkpointRefForThreadTurn(event.payload.threadId, 0)
-        : thread.checkpoints.find(
-            (checkpoint) => checkpoint.checkpointTurnCount === event.payload.turnCount,
-          )?.checkpointRef;
-
-    if (!targetCheckpointRef) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: `Checkpoint ref for turn ${event.payload.turnCount} is unavailable in read model.`,
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
-    }
-
-    const restored = yield* checkpointStore.restoreCheckpoint({
-      cwd: sessionRuntime.value.cwd,
-      checkpointRef: targetCheckpointRef,
-      fallbackToHead: event.payload.turnCount === 0,
-    });
-    if (!restored) {
-      yield* appendRevertFailureActivity({
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
-        detail: `Filesystem checkpoint is unavailable for turn ${event.payload.turnCount}.`,
-        createdAt: now,
-      }).pipe(Effect.catch(() => Effect.void));
-      return;
-    }
-
-    // Refresh the workspace entry index so the @-mention file picker
-    // reflects the reverted filesystem state.
-    yield* workspaceEntries.refresh(sessionRuntime.value.cwd);
-
-    const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
-    if (rolledBackTurns > 0) {
-      yield* providerService.rollbackConversation({
-        threadId: sessionRuntime.value.threadId,
-        numTurns: rolledBackTurns,
+    let rewind: {
+      readonly retainedTurnCount: number;
+      readonly removedTurnIds: ReadonlyArray<TurnId>;
+      readonly staleCheckpointRefs: ReadonlyArray<CheckpointRef>;
+      readonly anchor?: { readonly messageId: MessageId; readonly messageCreatedAt: string };
+    };
+    if (messageId !== undefined) {
+      const plan = planConversationRewind({
+        thread,
+        turns: yield* projectionTurnRepository.listByThreadId({ threadId }),
+        messageId,
+        ...(restoreFiles ? { maxCheckpointTurnCount: turnCount } : {}),
       });
-    }
-
-    const staleCheckpointRefs: Array<CheckpointRef> = [];
-    for (const checkpoint of thread.checkpoints) {
-      if (checkpoint.checkpointTurnCount > event.payload.turnCount) {
-        staleCheckpointRefs.push(checkpoint.checkpointRef);
+      const overlay = Option.isSome(enterpriseRuntime)
+        ? yield* enterpriseRuntime.value.getSnapshot(threadId)
+        : undefined;
+      if (plan._tag === "Rejected") {
+        // FD Skill messages live in the enterprise overlay, not the thread.
+        const anchorIsFdSkill =
+          plan.reason === "message-not-found" &&
+          overlay?.messages.some((message) => message.id === messageId) === true;
+        yield* fail(REWIND_REJECTION_DETAIL[anchorIsFdSkill ? "fd-skill" : plan.reason]);
+        return;
       }
+      if (
+        overlay?.messages.some(
+          (message) => compareIsoTimestamps(message.createdAt, plan.messageCreatedAt) > 0,
+        ) === true
+      ) {
+        yield* fail(REWIND_REJECTION_DETAIL["fd-skill"]);
+        return;
+      }
+      rewind = {
+        retainedTurnCount: restoreFiles ? turnCount : plan.retainedCheckpointTurnCount,
+        removedTurnIds: plan.removedTurnIds,
+        staleCheckpointRefs: plan.staleCheckpointRefs,
+        anchor: { messageId: plan.messageId, messageCreatedAt: plan.messageCreatedAt },
+      };
+    } else {
+      rewind = {
+        retainedTurnCount: turnCount,
+        removedTurnIds: [],
+        staleCheckpointRefs: thread.checkpoints
+          .filter((checkpoint) => checkpoint.checkpointTurnCount > turnCount)
+          .map((checkpoint) => checkpoint.checkpointRef),
+      };
     }
 
-    if (staleCheckpointRefs.length > 0) {
+    if (restoreFiles) {
+      if (!checkpointCwd) {
+        yield* fail(NO_FILE_SNAPSHOT_DETAIL);
+        return;
+      }
+
+      const targetCheckpointRef =
+        turnCount === 0
+          ? checkpointRefForThreadTurn(threadId, 0)
+          : thread.checkpoints.find((checkpoint) => checkpoint.checkpointTurnCount === turnCount)
+              ?.checkpointRef;
+
+      if (!targetCheckpointRef) {
+        yield* fail(`Checkpoint ref for turn ${turnCount} is unavailable in read model.`);
+        return;
+      }
+
+      const restored = yield* checkpointStore.restoreCheckpoint({
+        cwd: checkpointCwd,
+        checkpointRef: targetCheckpointRef,
+        fallbackToHead: turnCount === 0,
+      });
+      if (!restored) {
+        yield* fail(`Filesystem checkpoint is unavailable for turn ${turnCount}.`);
+        return;
+      }
+
+      // Refresh the workspace entry index so the @-mention file picker
+      // reflects the reverted filesystem state.
+      yield* workspaceEntries.refresh(checkpointCwd);
+    }
+
+    // Roll the provider's own history back too, so the model no longer sees
+    // the removed messages. Without this the next answer would still draw on
+    // the conversation the employee just discarded.
+    const providerRollback =
+      rewind.anchor === undefined
+        ? providerService.rollbackConversation({
+            threadId,
+            numTurns: Math.max(0, currentTurnCount - turnCount),
+          })
+        : rewind.removedTurnIds.length > 0
+          ? providerService.rollbackConversation({
+              threadId,
+              numTurns: rewind.removedTurnIds.length,
+              turnIds: rewind.removedTurnIds,
+            })
+          : Effect.void;
+    const rolledBack = yield* providerRollback.pipe(
+      Effect.as(true),
+      Effect.catch((error) =>
+        fail(
+          restoreFiles
+            ? `文件已恢复，但 AI 的对话记录没能回退：${error.message}`
+            : `AI 的对话记录没能回退，这次没有做任何改动，请稍后重试。（${error.message}）`,
+        ).pipe(Effect.as(false)),
+      ),
+    );
+    if (!rolledBack) {
+      return;
+    }
+
+    if (checkpointCwd && rewind.staleCheckpointRefs.length > 0) {
       yield* checkpointStore.deleteCheckpointRefs({
-        cwd: sessionRuntime.value.cwd,
-        checkpointRefs: staleCheckpointRefs,
+        cwd: checkpointCwd,
+        checkpointRefs: rewind.staleCheckpointRefs,
       });
     }
 
@@ -803,19 +878,19 @@ const make = Effect.gen(function* () {
       .dispatch({
         type: "thread.revert.complete",
         commandId: yield* serverCommandId("checkpoint-revert-complete"),
-        threadId: event.payload.threadId,
-        turnCount: event.payload.turnCount,
+        threadId,
+        turnCount: rewind.retainedTurnCount,
+        ...(rewind.anchor !== undefined
+          ? {
+              messageId: rewind.anchor.messageId,
+              messageCreatedAt: rewind.anchor.messageCreatedAt,
+              removedTurnIds: rewind.removedTurnIds,
+            }
+          : {}),
         createdAt: now,
       })
       .pipe(
-        Effect.catch((error) =>
-          appendRevertFailureActivity({
-            threadId: event.payload.threadId,
-            turnCount: event.payload.turnCount,
-            detail: error.message,
-            createdAt: now,
-          }),
-        ),
+        Effect.catch((error) => fail(error.message)),
         Effect.asVoid,
       );
   });
@@ -946,4 +1021,6 @@ const make = Effect.gen(function* () {
   } satisfies CheckpointReactorShape;
 });
 
-export const CheckpointReactorLive = Layer.effect(CheckpointReactor, make);
+export const CheckpointReactorLive = Layer.effect(CheckpointReactor, make).pipe(
+  Layer.provide(ProjectionTurnRepositoryLive),
+);
