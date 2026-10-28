@@ -18,7 +18,7 @@
     "@t3tools/contracts": "workspace:*",
     "@t3tools/shared": "workspace:*",
     "effect": "catalog:",
-    "electron": "44.7.0",
+    "electron": "44.9.3",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.6.2",
     "playwright-core": "1.60.0",
