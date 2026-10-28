@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { afterEach, vi } from "vite-plus/test";
 
-import { discardLegacyCatalog } from "./storage";
+import { discardLegacyCatalog, writeDatabaseValue } from "./storage";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -59,6 +59,58 @@ describe("discardLegacyCatalog", () => {
       });
 
       expect(remove).toHaveBeenCalledOnce();
+    }),
+  );
+});
+
+describe("writeDatabaseValue", () => {
+  it.effect("fails IndexedDB writes whose commit aborts", () =>
+    Effect.gen(function* () {
+      const transaction = Object.assign(new EventTarget(), {
+        error: null as DOMException | null,
+        objectStore: () => ({
+          put: () => {
+            // A failed commit aborts the transaction without an "error" event.
+            queueMicrotask(() => {
+              transaction.error = new DOMException("Quota exceeded", "QuotaExceededError");
+              transaction.dispatchEvent(new Event("abort"));
+            });
+          },
+        }),
+      });
+
+      const error = yield* writeDatabaseValue(
+        { transaction: () => transaction } as never,
+        "shell",
+        "environment-1",
+        "{}",
+      ).pipe(Effect.flip);
+
+      expect(error.message).toContain("QuotaExceededError");
+    }),
+  );
+
+  it.effect("succeeds when the transaction completes", () =>
+    Effect.gen(function* () {
+      const put = vi.fn();
+      const transaction = Object.assign(new EventTarget(), {
+        error: null,
+        objectStore: () => ({
+          put: (value: unknown, key: unknown) => {
+            put(value, key);
+            queueMicrotask(() => transaction.dispatchEvent(new Event("complete")));
+          },
+        }),
+      });
+
+      yield* writeDatabaseValue(
+        { transaction: () => transaction } as never,
+        "shell",
+        "environment-1",
+        "{}",
+      );
+
+      expect(put).toHaveBeenCalledWith("{}", "environment-1");
     }),
   );
 });
