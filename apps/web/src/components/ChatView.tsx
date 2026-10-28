@@ -6300,8 +6300,9 @@ function ChatViewContent(props: ChatViewProps) {
                 loadEarlier={loadEarlierTurns}
               />
 
-              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && (
+              {/* scroll to end pill — shown when user has scrolled away from the live edge.
+                  A rewind to the first message empties the list without a scroll event. */}
+              {showScrollToBottom && timelineEntries.length > 0 && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
                   style={{ bottom: composerOverlayHeight + 4 }}
@@ -6314,7 +6315,7 @@ function ChatViewContent(props: ChatViewProps) {
                     className="chat-composer-glass pointer-events-auto flex items-center gap-1.5 rounded-full border border-border/60 px-3 py-1 text-muted-foreground text-xs shadow-sm transition-colors hover:border-border hover:text-foreground hover:cursor-pointer"
                   >
                     <ChevronDownIcon className="size-3.5" />
-                    Scroll to end
+                    回到底部
                   </button>
                 </div>
               )}
