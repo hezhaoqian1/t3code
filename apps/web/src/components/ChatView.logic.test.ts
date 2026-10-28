@@ -14,6 +14,7 @@ import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   branchMismatchKey,
   buildExpiredTerminalContextToastCopy,
+  buildRevertTurnCountByUserMessageId,
   buildLoadingThreadFromShell,
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
@@ -715,5 +716,84 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true);
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: "failed" })).toBe(true);
+  });
+});
+
+describe("buildRevertTurnCountByUserMessageId", () => {
+  const time = "2026-09-05T00:00:00.000Z";
+  const user = {
+    id: MessageId.make("user-1"),
+    role: "user" as const,
+    text: "改一下",
+    turnId: null,
+    createdAt: time,
+    updatedAt: time,
+    streaming: false,
+  };
+  const assistant = {
+    id: MessageId.make("assistant-1"),
+    role: "assistant" as const,
+    text: "",
+    turnId: TurnId.make("turn-1"),
+    createdAt: time,
+    updatedAt: time,
+    streaming: true,
+  };
+  const summaries = new Map([
+    [
+      assistant.id,
+      {
+        turnId: TurnId.make("turn-1"),
+        checkpointTurnCount: 3,
+        checkpointRef: "refs/t3/checkpoints/1",
+        status: "ready",
+        files: [],
+        assistantMessageId: assistant.id,
+        completedAt: time,
+      } as never,
+    ],
+  ]);
+  const entries = (text: string) =>
+    [user, { ...assistant, text }].map((message) => ({
+      id: message.id,
+      kind: "message" as const,
+      createdAt: message.createdAt,
+      message,
+    }));
+
+  it("keeps the previous map while streamed text leaves the result unchanged", () => {
+    const first = buildRevertTurnCountByUserMessageId({
+      timelineEntries: entries(""),
+      turnDiffSummaryByAssistantMessageId: summaries,
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+    expect([...first]).toEqual([[user.id, 2]]);
+    const next = buildRevertTurnCountByUserMessageId(
+      {
+        timelineEntries: entries("第一段"),
+        turnDiffSummaryByAssistantMessageId: summaries,
+        inferredCheckpointTurnCountByTurnId: {},
+      },
+      first,
+    );
+    expect(next).toBe(first);
+  });
+
+  it("returns a new map when a revert target changes", () => {
+    const first = buildRevertTurnCountByUserMessageId({
+      timelineEntries: entries(""),
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      inferredCheckpointTurnCountByTurnId: {},
+    });
+    const next = buildRevertTurnCountByUserMessageId(
+      {
+        timelineEntries: entries(""),
+        turnDiffSummaryByAssistantMessageId: summaries,
+        inferredCheckpointTurnCountByTurnId: {},
+      },
+      first,
+    );
+    expect(next).not.toBe(first);
+    expect([...next]).toEqual([[user.id, 2]]);
   });
 });

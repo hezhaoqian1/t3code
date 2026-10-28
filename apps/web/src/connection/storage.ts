@@ -2,6 +2,7 @@ import {
   ConnectionPersistenceError,
   decodeAndDiscardLegacyConnectionCatalog,
   EnvironmentCacheStore,
+  encodeShellSnapshotForCache,
 } from "@t3tools/client-runtime/platform";
 import { ConnectionTransientError } from "@t3tools/client-runtime/connection";
 import {
@@ -61,7 +62,6 @@ const StoredVcsRefs = Schema.Struct({
 });
 const StoredVcsRefsJson = Schema.fromJsonString(StoredVcsRefs);
 const decodeStoredShellSnapshot = Schema.decodeUnknownEffect(StoredShellSnapshotJson);
-const encodeStoredShellSnapshot = Schema.encodeEffect(StoredShellSnapshotJson);
 const decodeStoredThreadSnapshot = Schema.decodeUnknownEffect(StoredThreadSnapshotJson);
 const encodeStoredThreadSnapshot = Schema.encodeEffect(StoredThreadSnapshotJson);
 const decodeStoredServerConfig = Schema.decodeUnknownEffect(StoredServerConfigJson);
@@ -145,15 +145,19 @@ function readDatabaseValue(database: IDBDatabase, storeName: string, key: IDBVal
   }).pipe(Effect.withSpan("web.connectionStorage.readDatabaseValue"));
 }
 
-function writeDatabaseValue(
-  database: IDBDatabase,
+/** @internal Exported for tests. */
+export function writeDatabaseValue(
+  database: Pick<IDBDatabase, "transaction">,
   storeName: string,
   key: IDBValidKey,
   value: unknown,
 ) {
   return Effect.callback<void, ConnectionTransientError>((resume) => {
     const transaction = database.transaction(storeName, "readwrite");
-    transaction.addEventListener("error", () => {
+    // Every failed write fires "abort". A failed commit, such as
+    // QuotaExceededError, fires only "abort" and no "error", which left the
+    // save waiting forever.
+    transaction.addEventListener("abort", () => {
       resume(
         Effect.fail(catalogError("write", transaction.error ?? "Unknown IndexedDB write error")),
       );
@@ -277,11 +281,21 @@ export const connectionStorageLayer = Layer.effectContext(
         ),
       saveShell: (environmentId, snapshot) =>
         Effect.gen(function* () {
-          const encoded = yield* encodeStoredShellSnapshot({
-            schemaVersion: SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION,
-            environmentId,
-            snapshot,
-          }).pipe(Effect.mapError((cause) => persistenceError("save-shell", cause)));
+          // Encoding every thread shell through Schema froze the UI on large
+          // thread lists; thread shells are already in their encoded form.
+          const encodedSnapshot = yield* encodeShellSnapshotForCache(snapshot).pipe(
+            Effect.mapError((cause) => persistenceError("save-shell", cause)),
+          );
+          const encoded = yield* Effect.try({
+            try: () =>
+              // @effect-diagnostics-next-line preferSchemaOverJson:off - the snapshot is already encoded.
+              JSON.stringify({
+                schemaVersion: SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION,
+                environmentId,
+                snapshot: encodedSnapshot,
+              } satisfies typeof StoredShellSnapshot.Encoded),
+            catch: (cause) => persistenceError("save-shell", cause),
+          });
           yield* writeDatabaseValue(database, SHELL_STORE_NAME, environmentId, encoded);
         }).pipe(
           Effect.mapError((cause) =>

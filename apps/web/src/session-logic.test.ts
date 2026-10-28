@@ -9,16 +9,21 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  createMessageAttachmentPreviewProjector,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
   deriveTurnPlans,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
+  deriveTimelineEntriesWithState,
   deriveWorkLogEntries,
   findLatestProposedPlan,
   hasActionableProposedPlan,
   isLatestTurnSettled,
+  selectHandoffImageResources,
+  selectMessageImageResources,
+  type TurnPlanEntry,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
@@ -1926,5 +1931,402 @@ describe("rerun workflows", () => {
     const spawnRows = entries.filter((entry) => entry.agentSpawn !== undefined);
     expect(spawnRows.map((row) => row.agentSpawn!.workflowId)).toEqual(["wf-run1", "wf-run2"]);
     expect(spawnRows.map((row) => row.turnId)).toEqual(["turn-1", "turn-2"]);
+  });
+});
+
+describe("deriveTimelineEntriesWithState", () => {
+  const streamingMessage = {
+    id: MessageId.make("streaming-message"),
+    role: "assistant" as const,
+    text: "",
+    turnId: TurnId.make("streaming-turn"),
+    createdAt: "2026-02-23T00:00:03.000Z",
+    updatedAt: "2026-02-23T00:00:03.000Z",
+    streaming: true,
+  };
+
+  it("reuses preview objects while preserving URL and attachment metadata changes", () => {
+    const image = {
+      type: "image" as const,
+      id: "image",
+      name: "image.png",
+      mimeType: "image/png",
+      sizeBytes: 42,
+    };
+    const document = {
+      type: "document" as const,
+      id: "document",
+      name: "合同.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 8,
+    };
+    const message = { ...streamingMessage, attachments: Object.freeze([image, document]) };
+    const project = createMessageAttachmentPreviewProjector();
+    const urls = new Map([[image.id, "https://first.test/image"]]);
+    const first = project(message, (attachment) => urls.get(attachment.id));
+    Object.freeze(first.attachments);
+    expect(project(message, (attachment) => new Map(urls).get(attachment.id))).toBe(first);
+    const streamed = project({ ...message, text: "Next" }, (attachment) => urls.get(attachment.id));
+    expect(streamed.attachments).toBe(first.attachments);
+    expect(streamed.text).toBe("Next");
+    expect(first.text).toBe("");
+    expect(first.attachments?.[1]).toBe(document);
+
+    urls.set(image.id, "https://second.test/image");
+    const renewed = project(message, (attachment) => urls.get(attachment.id));
+    expect(renewed.attachments?.[0]).toMatchObject({ previewUrl: "https://second.test/image" });
+    expect(first.attachments?.[0]).toMatchObject({ previewUrl: "https://first.test/image" });
+    const renamed = project(
+      { ...message, attachments: [{ ...image, name: "renamed.png" }, document] },
+      (attachment) => urls.get(attachment.id),
+    );
+    expect(renamed.attachments?.[0]).toMatchObject({
+      name: "renamed.png",
+      previewUrl: "https://second.test/image",
+    });
+    expect(project(message, () => undefined)).toBe(message);
+  });
+
+  it("keeps pending preview handoffs stable and restores the current server URL", () => {
+    const message = {
+      ...streamingMessage,
+      role: "user" as const,
+      streaming: false,
+      attachments: [
+        {
+          type: "image" as const,
+          id: "image",
+          name: "image.png",
+          mimeType: "image/png",
+          sizeBytes: 42,
+        },
+      ],
+    };
+    const server = createMessageAttachmentPreviewProjector();
+    const handoff = createMessageAttachmentPreviewProjector();
+    const first = handoff(
+      server(message, () => undefined),
+      () => "blob:handoff",
+    );
+    expect(
+      handoff(
+        server(message, () => undefined),
+        () => "blob:handoff",
+      ),
+    ).toBe(first);
+    const ready = server(message, () => "https://server.test/image");
+    expect(handoff(ready, () => "blob:handoff").attachments?.[0]).toMatchObject({
+      previewUrl: "blob:handoff",
+    });
+    expect(handoff(ready, () => undefined)).toBe(ready);
+    expect(ready.attachments?.[0]).toMatchObject({ previewUrl: "https://server.test/image" });
+    expect(first.attachments?.[0]).toMatchObject({ previewUrl: "blob:handoff" });
+  });
+
+  it("swaps only the streaming message and leaves an earlier projection unchanged", () => {
+    const history = { ...streamingMessage, id: MessageId.make("history"), streaming: false };
+    const work = [
+      { id: "work", createdAt: history.createdAt, label: "Ran tests", tone: "tool" as const },
+    ];
+    const first = deriveTimelineEntriesWithState([history, streamingMessage], [], work);
+    Object.freeze(first.entries);
+    for (const entry of first.entries) Object.freeze(entry);
+
+    const firstMessage = {
+      ...streamingMessage,
+      text: "第一段",
+      updatedAt: "2026-02-23T00:00:04.000Z",
+    };
+    const secondMessage = {
+      ...streamingMessage,
+      text: "第一段\n\n第二段",
+      updatedAt: "2026-02-23T00:00:05.000Z",
+    };
+    const firstBranch = deriveTimelineEntriesWithState(
+      [history, firstMessage],
+      [],
+      work,
+      [],
+      first,
+    );
+    const secondBranch = deriveTimelineEntriesWithState(
+      [history, secondMessage],
+      [],
+      work,
+      [],
+      first,
+    );
+
+    expect(firstBranch.entries).toEqual(deriveTimelineEntries([history, firstMessage], [], work));
+    expect(secondBranch.entries).toEqual(deriveTimelineEntries([history, secondMessage], [], work));
+    expect(firstBranch.entries[0]).toBe(first.entries[0]);
+    expect(firstBranch.entries[2]).toBe(first.entries[2]);
+    expect(first.entries[1]).toMatchObject({ message: { text: "" } });
+    expect(firstBranch.entries[1]).toMatchObject({ message: { text: "第一段" } });
+  });
+
+  it("re-sorts when a message changes more than its streamed text", () => {
+    const first = deriveTimelineEntriesWithState([streamingMessage], [], []);
+    const completed = { ...streamingMessage, text: "done", streaming: false };
+    const next = deriveTimelineEntriesWithState([completed], [], [], [], first);
+    expect(next.entries).toEqual(deriveTimelineEntries([completed], [], []));
+    expect(next.entries[0]).not.toBe(first.entries[0]);
+  });
+
+  it("preserves stable source ordering for ties, turn plans, append, and older pages", () => {
+    const plan = {
+      id: "plan:thread:turn",
+      turnId: streamingMessage.turnId,
+      planMarkdown: "Plan",
+      implementedAt: null,
+      implementationThreadId: null,
+      createdAt: streamingMessage.createdAt,
+      updatedAt: streamingMessage.createdAt,
+    };
+    const turnPlan = {
+      id: "turn-plan:streaming-turn",
+      createdAt: streamingMessage.createdAt,
+      turnId: streamingMessage.turnId,
+      plan: { createdAt: streamingMessage.createdAt, turnId: streamingMessage.turnId, steps: [] },
+    } as unknown as TurnPlanEntry;
+    const firstWork = {
+      id: "work-1",
+      createdAt: streamingMessage.createdAt,
+      label: "Ran tests",
+      tone: "tool" as const,
+    };
+    const first = deriveTimelineEntriesWithState(
+      [streamingMessage],
+      [plan],
+      [firstWork],
+      [turnPlan],
+    );
+    expect(first.entries.map((entry) => entry.kind)).toEqual([
+      "message",
+      "proposed-plan",
+      "turn-plan",
+      "work",
+    ]);
+    const appendedMessage = { ...streamingMessage, id: MessageId.make("appended") };
+    const appendedWork = { ...firstWork, id: "work-2" };
+    const messages = [streamingMessage, appendedMessage];
+    const work = [firstWork, appendedWork];
+    const appended = deriveTimelineEntriesWithState(messages, [plan], work, [turnPlan], first);
+    expect(appended.entries.map((entry) => entry.id)).toEqual([
+      streamingMessage.id,
+      appendedMessage.id,
+      plan.id,
+      turnPlan.id,
+      firstWork.id,
+      appendedWork.id,
+    ]);
+    expect(appended.entries).toEqual(deriveTimelineEntries(messages, [plan], work, [turnPlan]));
+    expect(appended.entries[0]).toBe(first.entries[0]);
+
+    const older = {
+      ...streamingMessage,
+      id: MessageId.make("older"),
+      createdAt: "2026-02-22T00:00:00.000Z",
+    };
+    const prepended = deriveTimelineEntriesWithState(
+      [older, ...messages],
+      [plan],
+      work,
+      [turnPlan],
+      appended,
+    );
+    expect(prepended.entries).toEqual(
+      deriveTimelineEntries([older, ...messages], [plan], work, [turnPlan]),
+    );
+    const corrected = {
+      ...streamingMessage,
+      createdAt: "2026-02-24T00:00:00.000Z",
+      streaming: false,
+    };
+    expect(
+      deriveTimelineEntriesWithState(
+        [corrected, appendedMessage],
+        [plan],
+        work,
+        [turnPlan],
+        appended,
+      ).entries,
+    ).toEqual(deriveTimelineEntries([corrected, appendedMessage], [plan], work, [turnPlan]));
+  });
+});
+
+describe("image asset requests", () => {
+  const image = {
+    type: "image" as const,
+    id: "image",
+    name: "image.png",
+    mimeType: "image/png",
+    sizeBytes: 42,
+  };
+  const message = {
+    id: MessageId.make("image-message"),
+    role: "user" as const,
+    text: "Inspect these images",
+    turnId: null,
+    createdAt: "2026-09-04T00:00:00.000Z",
+    updatedAt: "2026-09-04T00:00:00.000Z",
+    streaming: false,
+    attachments: [image],
+  };
+
+  it("requests the whole row's gallery and crops without signing local previews or documents", () => {
+    const attachments = Object.freeze([
+      image,
+      { ...image, id: "second" },
+      { ...image, id: "crop", name: "preview-annotation-1.png" },
+      { ...image, id: "local", previewUrl: "blob:local" },
+      { ...image, id: "inline", previewUrl: "data:image/png;base64,AA==" },
+      { ...image, id: "provided", previewUrl: "https://preview.test/image" },
+      { ...image, type: "document" as const, id: "document", mimeType: "application/pdf" },
+      image,
+    ]);
+
+    expect(selectMessageImageResources(attachments)).toEqual([
+      { _tag: "attachment", attachmentId: "image" },
+      { _tag: "attachment", attachmentId: "second" },
+      { _tag: "attachment", attachmentId: "crop" },
+      { _tag: "attachment", attachmentId: "provided" },
+    ]);
+  });
+
+  it("requests offscreen handoffs without signing the rest of the loaded history", () => {
+    const history = {
+      ...message,
+      id: MessageId.make("history"),
+      attachments: [{ ...image, id: "history-image" }],
+    };
+    const offscreen = {
+      ...message,
+      id: MessageId.make("offscreen"),
+      attachments: [image, { ...image, id: "crop", name: "preview-annotation-1.png" }],
+    };
+    const empty = {
+      ...message,
+      id: MessageId.make("empty"),
+      attachments: [{ ...image, id: "empty" }],
+    };
+    const assistant = {
+      ...message,
+      id: MessageId.make("assistant"),
+      role: "assistant" as const,
+      attachments: [{ ...image, id: "assistant-image" }],
+    };
+    expect(
+      selectHandoffImageResources([history, message, offscreen, empty, assistant], {
+        [message.id]: ["blob:message"],
+        [offscreen.id]: ["blob:offscreen", "blob:crop"],
+        [empty.id]: [],
+        [assistant.id]: ["blob:unused"],
+      }),
+    ).toEqual([
+      { _tag: "attachment", attachmentId: "image" },
+      { _tag: "attachment", attachmentId: "crop" },
+    ]);
+  });
+
+  it("does not scan history when no handoff is pending", () => {
+    let reads = 0;
+    const messages = new Proxy([message], {
+      get(target, property, receiver) {
+        if (property === "0") reads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const empty = selectHandoffImageResources(messages, {});
+    expect(reads).toBe(0);
+    expect(empty).toHaveLength(0);
+    expect(selectHandoffImageResources(undefined, { missing: ["blob:missing"] })).toBe(empty);
+    expect(selectMessageImageResources(undefined)).toBe(empty);
+  });
+
+  it("hands signed URLs to a mounted row only after the local preview is released", () => {
+    const server = createMessageAttachmentPreviewProjector();
+    const handoff = createMessageAttachmentPreviewProjector();
+    const row = createMessageAttachmentPreviewProjector();
+    const pending = handoff(
+      server(message, () => undefined),
+      () => "blob:pending",
+    );
+    expect(selectMessageImageResources(pending.attachments)).toEqual([]);
+    expect(selectHandoffImageResources([message], { [message.id]: ["blob:pending"] })).toEqual([
+      { _tag: "attachment", attachmentId: image.id },
+    ]);
+
+    const ready = server(message, () => "https://server.test/image");
+    expect(selectMessageImageResources(handoff(ready, () => "blob:pending").attachments)).toEqual(
+      [],
+    );
+    const released = server(message, () => undefined);
+    expect(selectMessageImageResources(released.attachments)).toEqual([
+      { _tag: "attachment", attachmentId: image.id },
+    ]);
+    const displayed = row(released, () => "https://server.test/image");
+    expect(displayed).toEqual(ready);
+    expect(pending.attachments?.[0]).toMatchObject({ previewUrl: "blob:pending" });
+    expect(row(released, () => "https://server.test/renewed").attachments?.[0]).toMatchObject({
+      previewUrl: "https://server.test/renewed",
+    });
+  });
+});
+
+describe("session activity performance", () => {
+  it("reuses entries for unchanged activities", () => {
+    const activities = ["status", "diff", "log"].map((command, index) =>
+      makeActivity({
+        id: `stable-tool-${index}`,
+        kind: "tool.completed",
+        sequence: index,
+        payload: {
+          itemType: "command_execution",
+          data: { toolCallId: `stable-tool-${index}`, item: { command: ["git", command] } },
+        },
+      }),
+    );
+
+    const initialEntries = deriveWorkLogEntries(activities.slice(0, 2));
+    const appendedEntries = deriveWorkLogEntries(activities);
+    expect(appendedEntries[0]).toBe(initialEntries[0]);
+    expect(appendedEntries[1]).toBe(initialEntries[1]);
+    expect(appendedEntries[2]?.sourceActivityKind).toBe("tool.completed");
+  });
+
+  it("reuses every unchanged row when one activity is appended to a long thread", () => {
+    const activities = Array.from({ length: 5_000 }, (_, index) =>
+      makeActivity({
+        id: `long-tool-${index}`,
+        createdAt: new Date(1_700_000_000_000 + index).toISOString(),
+        kind: "tool.completed",
+        summary: "Ran command",
+        sequence: index,
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: { toolCallId: `long-tool-${index}`, item: { command: ["git", "status"] } },
+        },
+      }),
+    );
+    const initial = deriveWorkLogEntries(activities);
+    const updated = deriveWorkLogEntries([
+      ...activities,
+      makeActivity({
+        id: "long-tool-appended",
+        createdAt: new Date(1_700_000_000_000 + activities.length).toISOString(),
+        kind: "tool.completed",
+        summary: "Ran command",
+        sequence: activities.length,
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: { toolCallId: "long-tool-appended", item: { command: ["git", "diff"] } },
+        },
+      }),
+    ]);
+    expect(updated).toHaveLength(5_001);
+    expect(updated.slice(0, 5_000).every((entry, index) => entry === initial[index])).toBe(true);
   });
 });
