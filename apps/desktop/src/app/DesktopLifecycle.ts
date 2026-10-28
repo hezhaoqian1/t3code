@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -110,6 +111,42 @@ export const quitAfterShutdown = (closeWindows: () => void) =>
     yield* electronApp.exit(0);
   });
 
+interface QuitState {
+  phase: "running" | "waiting" | "allowed";
+  waitingSinceNanos: bigint;
+}
+
+// Longer than a backend's stop budget (SIGTERM, 5s grace, SIGKILL, 1s wait),
+// so a double Quit at the start of a normal quit cannot cut the backend stop
+// short and orphan it.
+export const SHUTDOWN_STALL_THRESHOLD = Duration.seconds(10);
+
+const startWaitingForShutdown = Effect.fn("desktop.lifecycle.startWaitingForShutdown")(function* (
+  quit: QuitState,
+) {
+  quit.phase = "waiting";
+  quit.waitingSinceNanos = yield* Clock.monotonicTimeNanos;
+});
+
+// While a quit waits on shutdown, `quitting` makes activation open nothing. If
+// that shutdown stalls, a repeated Quit or SIGTERM is the user's only way out
+// short of killing the process in Task Manager.
+const exitIfShutdownStalled = Effect.fn("desktop.lifecycle.exitIfShutdownStalled")(function* (
+  quit: QuitState,
+  source: string,
+) {
+  const pendingMs = Number(
+    ((yield* Clock.monotonicTimeNanos) - quit.waitingSinceNanos) / 1_000_000n,
+  );
+  if (pendingMs < Duration.toMillis(SHUTDOWN_STALL_THRESHOLD)) {
+    yield* logLifecycleInfo("quit already in progress", { source, pendingMs });
+    return;
+  }
+  yield* logLifecycleError("desktop shutdown stalled; exiting without it", { source, pendingMs });
+  const electronApp = yield* ElectronApp.ElectronApp;
+  yield* electronApp.exit(0);
+});
+
 const closeAllWindows = () => {
   for (const window of Electron.BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) window.close();
@@ -119,10 +156,9 @@ const closeAllWindows = () => {
 function handleBeforeQuit(
   event: Electron.Event,
   runEffect: <A, E>(effect: Effect.Effect<A, E, DesktopLifecycleRuntimeServices>) => Promise<A>,
-  allowQuit: () => boolean,
-  markQuitAllowed: () => void,
+  quit: QuitState,
 ): void {
-  if (allowQuit()) {
+  if (quit.phase === "allowed") {
     void runEffect(
       Effect.gen(function* () {
         const state = yield* DesktopState.DesktopState;
@@ -134,15 +170,20 @@ function handleBeforeQuit(
   }
 
   event.preventDefault();
+  if (quit.phase === "waiting") {
+    void runEffect(exitIfShutdownStalled(quit, "before-quit"));
+    return;
+  }
   void runEffect(
     Effect.gen(function* () {
       const state = yield* DesktopState.DesktopState;
+      yield* startWaitingForShutdown(quit);
       yield* Ref.set(state.quitting, true);
       yield* logLifecycleInfo("before-quit received");
       yield* requestDesktopShutdownAndWait();
     }).pipe(Effect.withSpan("desktop.lifecycle.beforeQuit")),
   ).finally(() => {
-    markQuitAllowed();
+    quit.phase = "allowed";
     void runEffect(
       quitAfterShutdown(closeAllWindows).pipe(
         Effect.withSpan("desktop.lifecycle.quitAfterShutdown"),
@@ -154,7 +195,12 @@ function handleBeforeQuit(
 function quitFromSignal(
   signal: "SIGINT" | "SIGTERM",
   runEffect: <A, E>(effect: Effect.Effect<A, E, DesktopLifecycleRuntimeServices>) => Promise<A>,
+  quit: QuitState,
 ): void {
+  if (quit.phase === "waiting") {
+    void runEffect(exitIfShutdownStalled(quit, signal));
+    return;
+  }
   void runEffect(
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ signal });
@@ -162,8 +208,10 @@ function quitFromSignal(
       const state = yield* DesktopState.DesktopState;
       const wasQuitting = yield* Ref.getAndSet(state.quitting, true);
       if (wasQuitting) return;
+      yield* startWaitingForShutdown(quit);
       yield* logLifecycleInfo("process signal received", { signal });
       yield* requestDesktopShutdownAndWait();
+      quit.phase = "allowed";
       yield* electronApp.quit;
     }).pipe(Effect.withSpan("desktop.lifecycle.processSignal")),
   );
@@ -204,8 +252,7 @@ export const make = DesktopLifecycle.of({
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
     const context = yield* Effect.context<DesktopLifecycleRuntimeServices>();
     const runEffect = Effect.runPromiseWith(context);
-    let quitAllowed = false;
-    let updaterQuitAllowed = false;
+    const quit: QuitState = { phase: "running", waitingSinceNanos: 0n };
 
     // Electron scopes this lock to userData, which startup points at the real
     // product directory before lifecycle registration. A secondary launch
@@ -231,7 +278,7 @@ export const make = DesktopLifecycle.of({
       // Electron's updater owns the remaining quit/install/relaunch sequence.
       // Cancelling the following app "before-quit" event breaks that sequence,
       // most visibly on macOS where the native updater performs the relaunch.
-      updaterQuitAllowed = true;
+      quit.phase = "allowed";
       void runEffect(
         logLifecycleInfo("allowing updater-controlled quit").pipe(
           Effect.withSpan("desktop.lifecycle.beforeQuitForUpdate"),
@@ -239,14 +286,7 @@ export const make = DesktopLifecycle.of({
       );
     });
     yield* electronApp.on("before-quit", (event: Electron.Event) => {
-      handleBeforeQuit(
-        event,
-        runEffect,
-        () => quitAllowed || updaterQuitAllowed,
-        () => {
-          quitAllowed = true;
-        },
-      );
+      handleBeforeQuit(event, runEffect, quit);
     });
     yield* electronApp.on("activate", () => {
       void runEffect(desktopWindow.activate.pipe(Effect.withSpan("desktop.lifecycle.activate")));
@@ -265,10 +305,10 @@ export const make = DesktopLifecycle.of({
 
     if (environment.platform !== "win32") {
       yield* addScopedListener(process, "SIGINT", () => {
-        quitFromSignal("SIGINT", runEffect);
+        quitFromSignal("SIGINT", runEffect, quit);
       });
       yield* addScopedListener(process, "SIGTERM", () => {
-        quitFromSignal("SIGTERM", runEffect);
+        quitFromSignal("SIGTERM", runEffect, quit);
       });
     }
   }).pipe(Effect.withSpan("desktop.lifecycle.register")),
