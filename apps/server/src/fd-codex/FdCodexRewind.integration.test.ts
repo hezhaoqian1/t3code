@@ -40,111 +40,126 @@ describe.skipIf(!shouldRun)("FD Codex rewind against the real App Server", () =>
     "removes rewound turns from the model's history, also after a restart",
     () =>
       Effect.gen(function* () {
-        const binaryPath = process.env.FD_CODEX_BINARY!;
-        const gateway = yield* Effect.acquireRelease(
-          Effect.promise(() => startFakeResponsesGateway()),
-          (server) => Effect.promise(() => server.close()),
-        );
+        // Codex can still hold files in its home while it exits on Windows,
+        // so the state folder is removed with retries rather than by a
+        // scoped temp directory that fails the test.
         const root = yield* Effect.acquireRelease(
           Effect.promise(() => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "fd-codex-rewind-"))),
-          (path) => Effect.promise(() => NodeFSP.rm(path, { recursive: true, force: true })),
+          (path) =>
+            Effect.promise(() =>
+              NodeFSP.rm(path, {
+                recursive: true,
+                force: true,
+                maxRetries: 20,
+                retryDelay: 250,
+              }).catch(() => undefined),
+            ),
         );
         const taskFolder = NodePath.join(root, "Tasks", "20261029-120000");
         yield* Effect.promise(() => NodeFSP.mkdir(taskFolder, { recursive: true }));
-
-        const credentials: FdServerRuntimeCredentialProjection = {
-          userId: 1,
-          runtimeTokenId: 1,
-          newApiOrigin: gateway.origin,
-          runtimeApiKey: "fake-runtime-key",
-          accessToken: "fake-access-token",
-          accessExpiresAt: 4_102_444_800,
-          policy: {
-            version: 1,
-            capability: "general_assistant",
-            model: FD_CODEX_MODEL,
-            expiresAt: 4_102_444_800,
-          },
-          generation: 1,
-        };
-        const store = yield* makeStore();
-        yield* store.apply({ version: 1, type: "set", credentials });
-        const ordinaryAdapter = yield* makeFdCodexAdapter({ instanceId, binaryPath }).pipe(
-          Effect.provideService(FdRuntimeCredentialStore, store.service),
+        yield* rewindScenario(taskFolder).pipe(
+          Effect.provide(
+            ServerConfig.layerTest(taskFolder, NodePath.join(root, "state")).pipe(
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ),
         );
-        const adapter = yield* makeFdDeepSeekAdapter({
-          ordinaryAdapter,
-          kernel: new FdAgentKernel(new FdResponsesClient(store.service)),
-        });
-        const receipts = yield* Queue.unbounded<ProviderRuntimeEvent>();
-        yield* Stream.runForEach(adapter.streamEvents, (event) =>
-          Queue.offer(receipts, event),
-        ).pipe(Effect.forkScoped);
-
-        const threadId = ThreadId.make("fd-codex-rewind-thread");
-        const sessionInput = {
-          threadId,
-          cwd: taskFolder,
-          runtimeMode: "full-access" as const,
-          modelSelection: { instanceId, model: FD_CODEX_MODEL },
-        };
-        yield* adapter.startSession(sessionInput);
-        const send = (input: string) =>
-          Effect.gen(function* () {
-            const turn = yield* adapter.sendTurn({ threadId, input });
-            yield* waitForCompletedTurn(receipts, turn.turnId).pipe(Effect.timeout("120 seconds"));
-            return turn;
-          });
-
-        const alpha = yield* send("Remember REWIND_ALPHA.");
-        const bravo = yield* send("Remember REWIND_BRAVO.");
-        const charlie = yield* send("Remember REWIND_CHARLIE.");
-        const history = yield* adapter.readThread(threadId);
-        expect(history.turns.map((turn) => turn.id)).toEqual([
-          alpha.turnId,
-          bravo.turnId,
-          charlie.turnId,
-        ]);
-
-        // What ProviderService does for "rewind to before REWIND_BRAVO".
-        const numTurns = resolveProviderRollbackTurnCount({
-          providerTurnIds: history.turns.map((turn) => turn.id),
-          removedTurnIds: [bravo.turnId, charlie.turnId],
-        });
-        expect(numTurns).toBe(2);
-        const rewound = yield* adapter.rollbackThread(threadId, numTurns);
-        expect(rewound.turns.map((turn) => turn.id)).toEqual([alpha.turnId]);
-
-        yield* send("Which words do you remember? REWIND_DELTA");
-        const afterRewind = gateway.lastRequestBody();
-        expect(afterRewind).toContain("REWIND_ALPHA");
-        expect(afterRewind).toContain("REWIND_DELTA");
-        expect(afterRewind).not.toContain("REWIND_BRAVO");
-        expect(afterRewind).not.toContain("REWIND_CHARLIE");
-
-        // A restart resumes the rewound history, not the original one.
-        const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
-        yield* adapter.stopSession(threadId);
-        yield* adapter.startSession({ ...sessionInput, resumeCursor: cursor });
-        expect((yield* adapter.readThread(threadId)).turns).toHaveLength(2);
-        yield* send("Anything else? REWIND_ECHO");
-        const afterRestart = gateway.lastRequestBody();
-        expect(afterRestart).toContain("REWIND_ALPHA");
-        expect(afterRestart).toContain("REWIND_DELTA");
-        expect(afterRestart).not.toContain("REWIND_BRAVO");
-        expect(afterRestart).not.toContain("REWIND_CHARLIE");
-        yield* adapter.stopSession(threadId);
-      }).pipe(
-        Effect.scoped,
-        Effect.provide(
-          ServerConfig.layerTest(NodeOS.tmpdir(), {
-            prefix: "fd-codex-rewind-state-",
-          }).pipe(Layer.provideMerge(NodeServices.layer)),
-        ),
-      ),
+      }).pipe(Effect.scoped),
     300_000,
   );
 });
+
+const rewindScenario = (taskFolder: string) =>
+  Effect.gen(function* () {
+    const binaryPath = process.env.FD_CODEX_BINARY!;
+    const gateway = yield* Effect.acquireRelease(
+      Effect.promise(() => startFakeResponsesGateway()),
+      (server) => Effect.promise(() => server.close()),
+    );
+
+    const credentials: FdServerRuntimeCredentialProjection = {
+      userId: 1,
+      runtimeTokenId: 1,
+      newApiOrigin: gateway.origin,
+      runtimeApiKey: "fake-runtime-key",
+      accessToken: "fake-access-token",
+      accessExpiresAt: 4_102_444_800,
+      policy: {
+        version: 1,
+        capability: "general_assistant",
+        model: FD_CODEX_MODEL,
+        expiresAt: 4_102_444_800,
+      },
+      generation: 1,
+    };
+    const store = yield* makeStore();
+    yield* store.apply({ version: 1, type: "set", credentials });
+    const ordinaryAdapter = yield* makeFdCodexAdapter({ instanceId, binaryPath }).pipe(
+      Effect.provideService(FdRuntimeCredentialStore, store.service),
+    );
+    const adapter = yield* makeFdDeepSeekAdapter({
+      ordinaryAdapter,
+      kernel: new FdAgentKernel(new FdResponsesClient(store.service)),
+    });
+    const receipts = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    yield* Stream.runForEach(adapter.streamEvents, (event) => Queue.offer(receipts, event)).pipe(
+      Effect.forkScoped,
+    );
+
+    const threadId = ThreadId.make("fd-codex-rewind-thread");
+    const sessionInput = {
+      threadId,
+      cwd: taskFolder,
+      runtimeMode: "full-access" as const,
+      modelSelection: { instanceId, model: FD_CODEX_MODEL },
+    };
+    yield* adapter.startSession(sessionInput);
+    const send = (input: string) =>
+      Effect.gen(function* () {
+        const turn = yield* adapter.sendTurn({ threadId, input });
+        yield* waitForCompletedTurn(receipts, turn.turnId).pipe(Effect.timeout("120 seconds"));
+        return turn;
+      });
+
+    const alpha = yield* send("Remember REWIND_ALPHA.");
+    const bravo = yield* send("Remember REWIND_BRAVO.");
+    const charlie = yield* send("Remember REWIND_CHARLIE.");
+    const history = yield* adapter.readThread(threadId);
+    expect(history.turns.map((turn) => turn.id)).toEqual([
+      alpha.turnId,
+      bravo.turnId,
+      charlie.turnId,
+    ]);
+
+    // What ProviderService does for "rewind to before REWIND_BRAVO".
+    const numTurns = resolveProviderRollbackTurnCount({
+      providerTurnIds: history.turns.map((turn) => turn.id),
+      removedTurnIds: [bravo.turnId, charlie.turnId],
+    });
+    expect(numTurns).toBe(2);
+    const rewound = yield* adapter.rollbackThread(threadId, numTurns);
+    expect(rewound.turns.map((turn) => turn.id)).toEqual([alpha.turnId]);
+
+    yield* send("Which words do you remember? REWIND_DELTA");
+    const afterRewind = gateway.lastRequestBody();
+    expect(afterRewind).toContain("REWIND_ALPHA");
+    expect(afterRewind).toContain("REWIND_DELTA");
+    expect(afterRewind).not.toContain("REWIND_BRAVO");
+    expect(afterRewind).not.toContain("REWIND_CHARLIE");
+
+    // A restart resumes the rewound history, not the original one.
+    const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+    yield* adapter.stopSession(threadId);
+    yield* adapter.startSession({ ...sessionInput, resumeCursor: cursor });
+    expect((yield* adapter.readThread(threadId)).turns).toHaveLength(2);
+    yield* send("Anything else? REWIND_ECHO");
+    const afterRestart = gateway.lastRequestBody();
+    expect(afterRestart).toContain("REWIND_ALPHA");
+    expect(afterRestart).toContain("REWIND_DELTA");
+    expect(afterRestart).not.toContain("REWIND_BRAVO");
+    expect(afterRestart).not.toContain("REWIND_CHARLIE");
+    yield* adapter.stopSession(threadId);
+  }).pipe(Effect.scoped);
 
 interface FakeResponsesGateway {
   readonly origin: string;
