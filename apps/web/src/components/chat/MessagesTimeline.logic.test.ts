@@ -1614,3 +1614,268 @@ describe("computeStableMessagesTimelineRows", () => {
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]]);
   });
 });
+
+describe("thinking traces (思考过程)", () => {
+  const turnId = TurnId.make("turn-think");
+  const at = (second: number) => new Date(Date.UTC(2026, 9, 1, 0, 0, second)).toISOString();
+  const user = (second: number): ChatMessage => ({
+    id: MessageId.make(`user-${second}`),
+    role: "user",
+    text: "Review the report",
+    turnId: null,
+    createdAt: at(second),
+    updatedAt: at(second),
+    streaming: false,
+  });
+  const thought = (second: number, text: string, streaming = false): ChatMessage => ({
+    id: MessageId.make(`reasoning:raw:item-${second}`),
+    role: "reasoning",
+    text,
+    turnId,
+    createdAt: at(second),
+    updatedAt: at(second),
+    streaming,
+  });
+  const answer = (second: number, text = "Here is the review."): ChatMessage => ({
+    id: MessageId.make(`assistant-${second}`),
+    role: "assistant",
+    text,
+    turnId,
+    createdAt: at(second),
+    updatedAt: at(second),
+    streaming: false,
+  });
+  const tool = (second: number): WorkLogEntry => ({
+    id: `tool-${second}`,
+    turnId,
+    createdAt: at(second),
+    label: "Read file",
+    tone: "tool",
+    itemType: "dynamic_tool_call",
+    toolLifecycleStatus: "completed",
+    sourceActivityKind: "tool.completed",
+  });
+  const running = {
+    latestTurn: { turnId, state: "running" as const, startedAt: at(0), completedAt: null },
+    runningTurnId: turnId,
+    isWorking: true,
+    activeTurnStartedAt: at(0),
+  };
+  const settled = {
+    latestTurn: {
+      turnId,
+      state: "completed" as const,
+      startedAt: at(0),
+      completedAt: at(30),
+    },
+    runningTurnId: null,
+    isWorking: false,
+    activeTurnStartedAt: null,
+  };
+  type Rows = ReturnType<typeof deriveMessagesTimelineRows>;
+  type ReasoningRow = Extract<Rows[number], { kind: "reasoning" }>;
+  const rowsFor = (
+    messages: ChatMessage[],
+    work: WorkLogEntry[],
+    context: typeof running | typeof settled,
+    extra: Partial<Parameters<typeof deriveMessagesTimelineRows>[0]> = {},
+  ): Rows =>
+    deriveMessagesTimelineRows({
+      timelineEntries: deriveTimelineEntries(messages, [], work),
+      ...context,
+      turnDiffSummaryByAssistantMessageId: new Map<MessageId, TurnDiffSummary>(),
+      revertTurnCountByUserMessageId: new Map<MessageId, number>(),
+      ...extra,
+    });
+  const reasoningRows = (rows: Rows) =>
+    rows.filter((row): row is ReasoningRow => row.kind === "reasoning");
+
+  it("groups a run of thoughts under one collapsed row without splitting its tools", () => {
+    const rows = rowsFor(
+      [user(0), thought(1, "Open the report first."), thought(3, "Now the chart.\n\n", true)],
+      [tool(2), tool(4)],
+      running,
+    );
+
+    expect(rows.map((row) => row.kind)).toEqual(["message", "turn-fold", "reasoning", "work"]);
+    const [group] = reasoningRows(rows);
+    expect(group).toMatchObject({
+      id: "reasoning-group:reasoning:raw:item-1",
+      expanded: false,
+      live: true,
+      thinking: true,
+    });
+    expect(group?.messages.map((message) => message.text)).toEqual([
+      "Open the report first.",
+      "Now the chart.\n\n",
+    ]);
+    // Both tool calls stay one work group below the thinking row.
+    expect(rows.find((row) => row.kind === "work")).toMatchObject({
+      groupedEntries: [{ id: "tool-2" }, { id: "tool-4" }],
+    });
+  });
+
+  it("keeps the work overflow toggle when thoughts sit between tool calls", () => {
+    const messages = [user(0)];
+    const work: WorkLogEntry[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      messages.push(thought(1 + index * 2, `Step ${index}.`));
+      work.push(tool(2 + index * 2));
+    }
+    const rows = rowsFor(messages, work, running);
+
+    expect(reasoningRows(rows)).toHaveLength(1);
+    expect(rows.filter((row) => row.kind === "work")).toHaveLength(4);
+    expect(rows.find((row) => row.kind === "work-toggle")).toMatchObject({ hiddenCount: 1 });
+  });
+
+  it("starts a new thinking row after visible commentary and marks only the newest live", () => {
+    const rows = rowsFor(
+      [
+        user(0),
+        thought(1, "First idea."),
+        answer(3, "Checking the numbers."),
+        thought(5, "Found the cause."),
+      ],
+      [tool(2), tool(6)],
+      running,
+    );
+
+    const groups = reasoningRows(rows);
+    expect(groups.map((group) => [group.messages.length, group.live, group.thinking])).toEqual([
+      [1, false, false],
+      [1, true, false],
+    ]);
+  });
+
+  it("drops the live line once the model starts writing after its latest thought", () => {
+    const streamingAnswer: ChatMessage = { ...answer(5, "Here is"), streaming: true };
+    const rows = rowsFor(
+      [user(0), thought(1, "Open the report."), streamingAnswer],
+      [tool(2)],
+      running,
+    );
+    expect(reasoningRows(rows)[0]).toMatchObject({ live: false, thinking: false });
+
+    const collapsed = rowsFor(
+      [user(0), thought(1, "Open the report."), streamingAnswer],
+      [tool(2)],
+      running,
+      { collapsedTurnIds: new Set([turnId]) },
+    );
+    expect(collapsed.find((row) => row.kind === "turn-fold")).not.toHaveProperty("latestThought");
+  });
+
+  it("shows the latest thought on a running turn the user collapsed", () => {
+    const latest = thought(3, "Compare the peers next.");
+    const rows = rowsFor([user(0), thought(1, "Read it."), latest], [tool(2)], running, {
+      collapsedTurnIds: new Set([turnId]),
+    });
+
+    expect(rows.map((row) => row.kind)).toEqual(["message", "turn-fold"]);
+    expect(rows[1]).toMatchObject({ kind: "turn-fold", active: true, expanded: false });
+    expect(rows[1]?.kind === "turn-fold" ? rows[1].latestThought : undefined).toBe(latest);
+  });
+
+  it("folds thoughts away with the tool work of a settled turn", () => {
+    const messages = [user(0), thought(1, "Open the report."), answer(20)];
+    const collapsed = rowsFor(messages, [tool(2)], settled);
+    expect(collapsed.map((row) => row.kind)).toEqual(["message", "turn-fold", "message"]);
+
+    const expanded = rowsFor(messages, [tool(2)], settled, {
+      expandedTurnIds: new Set([turnId]),
+    });
+    expect(expanded.map((row) => row.kind)).toEqual([
+      "message",
+      "turn-fold",
+      "reasoning",
+      "work",
+      "message",
+    ]);
+    expect(reasoningRows(expanded)[0]).toMatchObject({ expanded: false, live: false });
+  });
+
+  it("keeps a thought-only answer's row instead of an empty progress fold", () => {
+    const rows = rowsFor([user(0), thought(1, "Simple question."), answer(5)], [], settled);
+
+    expect(rows.map((row) => row.kind)).toEqual(["message", "reasoning", "message"]);
+  });
+
+  it("does not let a stranded streaming thought hold a settled turn open", () => {
+    const messages = [user(0), thought(1, "Cut off mid-", true), answer(20)];
+    const rows = rowsFor(messages, [tool(2)], settled);
+
+    expect(rows.some((row) => row.kind === "turn-fold")).toBe(true);
+    const expanded = rowsFor(messages, [tool(2)], settled, {
+      expandedTurnIds: new Set([turnId]),
+    });
+    expect(reasoningRows(expanded)[0]).toMatchObject({ live: false, thinking: false });
+  });
+
+  it("opens a thinking row through the shared disclosure state", () => {
+    const rows = rowsFor([user(0), thought(1, "Read it.")], [], running, {
+      expandedWorkGroupIds: new Set(["reasoning-group:reasoning:raw:item-1"]),
+    });
+
+    expect(reasoningRows(rows)[0]?.expanded).toBe(true);
+  });
+
+  it("drops a thinking block that never received text once the model moved on", () => {
+    expect(reasoningRows(rowsFor([user(0), thought(1, "  "), answer(5)], [], settled))).toEqual([]);
+    const live = rowsFor([user(0), thought(1, "", true)], [], running);
+    expect(reasoningRows(live)[0]).toMatchObject({ thinking: true });
+  });
+
+  it("hides every thought when the setting is off", () => {
+    const messages = [user(0), thought(1, "Open the report."), answer(20)];
+    expect(
+      rowsFor(messages, [tool(2)], settled, {
+        showReasoning: false,
+        expandedTurnIds: new Set([turnId]),
+      }).map((row) => row.kind),
+    ).toEqual(["message", "turn-fold", "work", "message"]);
+    expect(
+      rowsFor([user(0), thought(1, "Simple question."), answer(5)], [], settled, {
+        showReasoning: false,
+      }).map((row) => row.kind),
+    ).toEqual(["message", "message"]);
+    // A running turn with only thinking so far keeps the plain working row.
+    expect(
+      rowsFor([user(0), thought(1, "Thinking...", true)], [], running, {
+        showReasoning: false,
+      }).map((row) => row.kind),
+    ).toEqual(["message", "working"]);
+  });
+
+  it("swaps only the thinking row while a thought streams a new paragraph", () => {
+    const messages = [user(0), thought(1, "First paragraph.\n\n", true)];
+    const initial = deriveTimelineEntriesWithState(messages, [], []);
+    const input = {
+      timelineEntries: initial.entries,
+      ...running,
+      turnDiffSummaryByAssistantMessageId: new Map<MessageId, TurnDiffSummary>(),
+      revertTurnCountByUserMessageId: new Map<MessageId, number>(),
+    };
+    const previous = deriveMessagesTimelineRowsWithState(input);
+    const grown = [messages[0]!, { ...messages[1]!, text: "First paragraph.\n\nSecond one.\n\n" }];
+    const timeline = deriveTimelineEntriesWithState(grown, [], [], [], initial);
+    const nextInput = { ...input, timelineEntries: timeline.entries };
+    const next = deriveMessagesTimelineRowsWithState(nextInput, previous);
+
+    expect(next.rows).toEqual(deriveMessagesTimelineRows(nextInput));
+    expect(next.rows.some((row) => row.kind === "reasoning")).toBe(true);
+    for (const [index, row] of previous.rows.entries()) {
+      if (row.kind === "reasoning") {
+        expect(next.rows[index]).toMatchObject({
+          messages: [{ text: "First paragraph.\n\nSecond one.\n\n" }],
+        });
+      } else if (row.kind === "turn-fold") {
+        expect(next.rows[index]).toMatchObject({
+          latestThought: { text: "First paragraph.\n\nSecond one.\n\n" },
+        });
+      } else {
+        expect(next.rows[index]).toBe(row);
+      }
+    }
+  });
+});

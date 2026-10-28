@@ -142,6 +142,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["宽屏 全宽 铺满 布局 消息 输入框 显示器 width"],
   },
   {
+    id: "show-reasoning",
+    title: "显示模型思考过程",
+    to: "/settings/general",
+    searchTerms: ["思考 推理 思路 思维链 thinking reasoning thought"],
+  },
+  {
     id: "hide-whitespace-changes",
     title: "隐藏空白字符变更",
     to: "/settings/general",
@@ -255,6 +261,7 @@ const LEGACY_SETTINGS_SEARCH_TITLES: Readonly<Record<SettingsSearchItemId, strin
   "auto-settle-inactive-threads": "Auto-settle inactive threads",
   "time-format": "Time format",
   "chat-width": "Chat width",
+  "show-reasoning": "Show thinking traces",
   "continue-threads-after-restart": "Continue tasks after restart",
   "follow-up-behavior": "Follow-up behavior",
   "thread-notifications": "Thread notifications",

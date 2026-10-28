@@ -197,6 +197,28 @@ export type MessagesTimelineRow =
       active: boolean;
       startedAt: string | null;
       lastWorkEntry?: WorkLogEntry;
+      /**
+       * Latest thinking trace of the running turn. The fold header shows its
+       * newest line while the user keeps the running turn collapsed.
+       */
+      latestThought?: ChatMessage;
+    }
+  | {
+      /**
+       * A run of the model's thinking traces (role `reasoning`), shown as one
+       * collapsed 「思考过程」 row. Tool rows of the same run stay rows of
+       * their own below it.
+       */
+      kind: "reasoning";
+      id: string;
+      createdAt: string;
+      turnId: TurnId | null;
+      messages: ChatMessage[];
+      expanded: boolean;
+      /** The running turn's latest thinking row: it carries the live line. */
+      live: boolean;
+      /** The model is still writing the latest thought. */
+      thinking: boolean;
     }
   | {
       kind: "message";
@@ -365,6 +387,12 @@ interface TurnFold {
   lastWorkEntry?: WorkLogEntry;
 }
 
+function isReasoningEntry(
+  entry: TimelineEntry,
+): entry is Extract<TimelineEntry, { kind: "message" }> & { message: { role: "reasoning" } } {
+  return entry.kind === "message" && entry.message.role === "reasoning";
+}
+
 /**
  * The session's running turn is authoritative when latestTurn briefly lags or
  * regresses behind it. Otherwise, the latest turn counts as unsettled while it
@@ -453,8 +481,10 @@ function deriveTurnFolds(input: {
       pendingUserBoundary = entry.message.createdAt;
       continue;
     }
+    // Thinking is work, so it folds with the rest of a settled turn.
     const turnId =
-      entry.kind === "message" && entry.message.role === "assistant"
+      entry.kind === "message" &&
+      (entry.message.role === "assistant" || entry.message.role === "reasoning")
         ? (entry.message.turnId ?? null)
         : entry.kind === "work"
           ? (entry.entry.turnId ?? null)
@@ -481,7 +511,10 @@ function deriveTurnFolds(input: {
       if (input.terminalAssistantMessageIds.has(entry.message.id)) {
         group.terminalEntry = entry;
       }
-      if (entry.message.streaming) {
+      // Only an answer still being written may hold a settled turn open. A
+      // thinking block stranded by a crashed provider keeps its streaming
+      // flag forever and must not.
+      if (entry.message.streaming && entry.message.role !== "reasoning") {
         group.hasStreamingMessage = true;
       }
     }
@@ -510,14 +543,19 @@ function deriveTurnFolds(input: {
       if (entry.kind === "work" && entry.entry.agentSpawn !== undefined) {
         continue;
       }
-      // During an active turn, concise work rows are the useful progress
-      // signal. Keep them visible and fold only redundant assistant narration.
-      if (active && entry.kind === "work") {
+      // During an active turn, concise work rows and thinking are the useful
+      // progress signal. Keep them visible and fold only redundant narration.
+      if (active && (entry.kind === "work" || isReasoningEntry(entry))) {
         continue;
       }
       hiddenEntryIds.add(entry.id);
     }
-    if (hiddenEntryIds.size === 0 && !active) {
+    // A settled turn answered by thought alone keeps its 「思考过程」 row
+    // rather than collapsing behind a progress row that hides nothing else.
+    const hidesFoldableWork = group.entries.some(
+      (entry) => hiddenEntryIds.has(entry.id) && !isReasoningEntry(entry),
+    );
+    if (!active && !hidesFoldableWork) {
       continue;
     }
 
@@ -583,23 +621,52 @@ export function deriveMessagesTimelineRows(input: {
   activeTurnStartedAt: string | null;
   turnDiffSummaryByAssistantMessageId: ReadonlyMap<MessageId, TurnDiffSummary>;
   revertTurnCountByUserMessageId: ReadonlyMap<MessageId, number>;
+  /** The 「显示模型思考过程」 setting. Off drops every thinking trace. */
+  showReasoning?: boolean;
 }): MessagesTimelineRow[] {
+  const timelineEntries =
+    input.showReasoning === false
+      ? input.timelineEntries.filter((entry) => !isReasoningEntry(entry))
+      : input.timelineEntries;
   const nextRows: MessagesTimelineRow[] = [];
   const durationStartByMessageId = computeMessageDurationStart(
-    input.timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
+    timelineEntries.flatMap((entry) => (entry.kind === "message" ? [entry.message] : [])),
   );
-  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(input.timelineEntries);
+  const terminalAssistantMessageIds = deriveTerminalAssistantMessageIds(timelineEntries);
   const unsettledTurnId = resolveUnsettledTurnId(
     input.latestTurn ?? null,
     input.runningTurnId ?? null,
   );
   const foldsByAnchorEntryId = deriveTurnFolds({
-    timelineEntries: input.timelineEntries,
+    timelineEntries: timelineEntries,
     terminalAssistantMessageIds,
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
     activeTurnStartedAt: input.activeTurnStartedAt,
   });
+  // The running turn's newest thinking trace carries the live line, until the
+  // model starts writing to the user after it.
+  const liveReasoningMessageId = (() => {
+    if (!input.isWorking || unsettledTurnId === null) return undefined;
+    for (let index = timelineEntries.length - 1; index >= 0; index -= 1) {
+      const entry = timelineEntries[index]!;
+      if (entry.kind !== "message" || entry.message.turnId !== unsettledTurnId) continue;
+      if (entry.message.role === "reasoning") return entry.id;
+      if (entry.message.role === "assistant" && entry.message.text.trim().length > 0) {
+        return undefined;
+      }
+    }
+    return undefined;
+  })();
+  const liveThought =
+    liveReasoningMessageId === undefined
+      ? undefined
+      : timelineEntries.findLast(
+          (entry): entry is Extract<TimelineEntry, { kind: "message" }> =>
+            isReasoningEntry(entry) &&
+            entry.message.turnId === unsettledTurnId &&
+            entry.message.text.trim().length > 0,
+        )?.message;
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
     const expanded =
@@ -613,11 +680,12 @@ export function deriveMessagesTimelineRows(input: {
       // concise work summaries are useful while expanded, but otherwise would
       // keep repeating beneath the collapsed "正在处理" row.
       if (fold.active) {
-        for (const entry of input.timelineEntries) {
+        for (const entry of timelineEntries) {
           if (
-            entry.kind === "work" &&
-            entry.entry.turnId === fold.turnId &&
-            entry.entry.agentSpawn === undefined
+            (entry.kind === "work" &&
+              entry.entry.turnId === fold.turnId &&
+              entry.entry.agentSpawn === undefined) ||
+            (isReasoningEntry(entry) && entry.message.turnId === fold.turnId)
           ) {
             collapsedEntryIds.add(entry.id);
           }
@@ -626,8 +694,108 @@ export function deriveMessagesTimelineRows(input: {
     }
   }
 
-  for (let index = 0; index < input.timelineEntries.length; index += 1) {
-    const timelineEntry = input.timelineEntries[index];
+  const pushWorkRows = (
+    workTimelineEntries: ReadonlyArray<Extract<TimelineEntry, { kind: "work" }>>,
+  ) => {
+    const timelineEntry = workTimelineEntries[0];
+    if (!timelineEntry) {
+      return;
+    }
+    const groupedEntries = workTimelineEntries.map((entry) => entry.entry);
+    const visibleGroupedEntries = groupedEntries.filter(
+      (entry) =>
+        (unsettledTurnId !== null && entry.turnId === unsettledTurnId) ||
+        !workEntryIndicatesToolNeutralStatus(entry),
+    );
+    const visibleEntryLimit = groupedEntries.some(
+      (entry) => unsettledTurnId !== null && entry.turnId === unsettledTurnId,
+    )
+      ? MAX_VISIBLE_ACTIVE_WORK_LOG_ENTRIES
+      : MAX_VISIBLE_WORK_LOG_ENTRIES;
+    if (visibleGroupedEntries.length > 0) {
+      if (visibleGroupedEntries.length <= visibleEntryLimit) {
+        nextRows.push({
+          kind: "work",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          groupedEntries: visibleGroupedEntries,
+        });
+      } else {
+        const groupId = `work-group:${timelineEntry.id}`;
+        const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
+        // Agent-spawn CTA rows are always visible: a running fleet must
+        // never hide behind a "+N tool calls" toggle. Selection is by
+        // membership (spawn OR recent-tail), preserving the group's
+        // chronological order in both collapsed and expanded states
+        // (review finding: concatenating two filtered lists moved a
+        // mid-group spawn row above earlier tool rows).
+        const overflowCandidates = visibleGroupedEntries.filter(
+          (entry) => entry.agentSpawn === undefined,
+        );
+        const hiddenEntries = overflowCandidates.slice(0, -visibleEntryLimit);
+        const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
+        const visibleEntries = visibleGroupedEntries.filter(
+          (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
+        );
+        const renderedEntries = expanded ? visibleGroupedEntries : visibleEntries;
+
+        for (const workEntry of renderedEntries) {
+          nextRows.push({
+            kind: "work",
+            id: workEntry.id,
+            createdAt: workEntry.createdAt,
+            groupedEntries: [workEntry],
+          });
+        }
+
+        if (hiddenEntries.length > 0) {
+          nextRows.push({
+            kind: "work-toggle",
+            id: `work-toggle:${timelineEntry.id}`,
+            createdAt: timelineEntry.createdAt,
+            groupId,
+            hiddenCount: hiddenEntries.length,
+            expanded,
+            onlyToolEntries: visibleGroupedEntries.every((entry) => workLogEntryIsToolLike(entry)),
+          });
+        }
+      }
+    }
+  };
+
+  const pushReasoningRow = (
+    reasoningEntries: ReadonlyArray<Extract<TimelineEntry, { kind: "message" }>>,
+  ) => {
+    const first = reasoningEntries[0];
+    if (!first) {
+      return;
+    }
+    const messages = reasoningEntries.map((entry) => entry.message);
+    const live =
+      liveReasoningMessageId !== undefined &&
+      reasoningEntries.some((entry) => entry.id === liveReasoningMessageId);
+    const latest = messages.at(-1)!;
+    const thinking = live && latest.streaming;
+    // A block that never received text (or a stranded empty one) has nothing
+    // to show once the model has moved on.
+    if (!thinking && messages.every((message) => message.text.trim().length === 0)) {
+      return;
+    }
+    const id = `reasoning-group:${first.id}`;
+    nextRows.push({
+      kind: "reasoning",
+      id,
+      createdAt: first.createdAt,
+      turnId: first.message.turnId ?? null,
+      messages,
+      expanded: input.expandedWorkGroupIds?.has(id) ?? false,
+      live,
+      thinking,
+    });
+  };
+
+  for (let index = 0; index < timelineEntries.length; index += 1) {
+    const timelineEntry = timelineEntries[index];
     if (!timelineEntry) {
       continue;
     }
@@ -646,6 +814,7 @@ export function deriveMessagesTimelineRows(input: {
         active: turnFold.active,
         startedAt: turnFold.startedAt,
         ...(turnFold.lastWorkEntry ? { lastWorkEntry: turnFold.lastWorkEntry } : {}),
+        ...(turnFold.active && liveThought ? { latestThought: liveThought } : {}),
       });
     }
 
@@ -653,83 +822,43 @@ export function deriveMessagesTimelineRows(input: {
       continue;
     }
 
-    if (timelineEntry.kind === "work") {
-      const groupedEntries = [timelineEntry.entry];
-      let cursor = index + 1;
-      while (cursor < input.timelineEntries.length) {
-        const nextEntry = input.timelineEntries[cursor];
+    if (timelineEntry.kind === "work" || isReasoningEntry(timelineEntry)) {
+      // A run of work rows and thinking traces. Thinking of one turn joins the
+      // run, so a trace before every tool call does not split the work rows
+      // into one-entry groups; the run's thoughts become one 「思考过程」 row
+      // where its first thought happened.
+      const runTurnId =
+        timelineEntry.kind === "work"
+          ? (timelineEntry.entry.turnId ?? null)
+          : (timelineEntry.message.turnId ?? null);
+      const leadingWork: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
+      const trailingWork: Array<Extract<TimelineEntry, { kind: "work" }>> = [];
+      const reasoningEntries: Array<Extract<TimelineEntry, { kind: "message" }>> = [];
+      let cursor = index;
+      while (cursor < timelineEntries.length) {
+        const nextEntry = timelineEntries[cursor];
         if (
           !nextEntry ||
-          nextEntry.kind !== "work" ||
-          collapsedEntryIds.has(nextEntry.id) ||
-          foldsByAnchorEntryId.has(nextEntry.id)
+          (cursor > index &&
+            (collapsedEntryIds.has(nextEntry.id) || foldsByAnchorEntryId.has(nextEntry.id)))
         ) {
           break;
         }
-        groupedEntries.push(nextEntry.entry);
+        if (nextEntry.kind === "work") {
+          (reasoningEntries.length === 0 ? leadingWork : trailingWork).push(nextEntry);
+        } else if (
+          isReasoningEntry(nextEntry) &&
+          (cursor === index || (nextEntry.message.turnId ?? null) === runTurnId)
+        ) {
+          reasoningEntries.push(nextEntry);
+        } else {
+          break;
+        }
         cursor += 1;
       }
-      const visibleGroupedEntries = groupedEntries.filter(
-        (entry) =>
-          (unsettledTurnId !== null && entry.turnId === unsettledTurnId) ||
-          !workEntryIndicatesToolNeutralStatus(entry),
-      );
-      const visibleEntryLimit = groupedEntries.some(
-        (entry) => unsettledTurnId !== null && entry.turnId === unsettledTurnId,
-      )
-        ? MAX_VISIBLE_ACTIVE_WORK_LOG_ENTRIES
-        : MAX_VISIBLE_WORK_LOG_ENTRIES;
-      if (visibleGroupedEntries.length > 0) {
-        if (visibleGroupedEntries.length <= visibleEntryLimit) {
-          nextRows.push({
-            kind: "work",
-            id: timelineEntry.id,
-            createdAt: timelineEntry.createdAt,
-            groupedEntries: visibleGroupedEntries,
-          });
-        } else {
-          const groupId = `work-group:${timelineEntry.id}`;
-          const expanded = input.expandedWorkGroupIds?.has(groupId) ?? false;
-          // Agent-spawn CTA rows are always visible: a running fleet must
-          // never hide behind a "+N tool calls" toggle. Selection is by
-          // membership (spawn OR recent-tail), preserving the group's
-          // chronological order in both collapsed and expanded states
-          // (review finding: concatenating two filtered lists moved a
-          // mid-group spawn row above earlier tool rows).
-          const overflowCandidates = visibleGroupedEntries.filter(
-            (entry) => entry.agentSpawn === undefined,
-          );
-          const hiddenEntries = overflowCandidates.slice(0, -visibleEntryLimit);
-          const hiddenIds = new Set(hiddenEntries.map((entry) => entry.id));
-          const visibleEntries = visibleGroupedEntries.filter(
-            (entry) => entry.agentSpawn !== undefined || !hiddenIds.has(entry.id),
-          );
-          const renderedEntries = expanded ? visibleGroupedEntries : visibleEntries;
-
-          for (const workEntry of renderedEntries) {
-            nextRows.push({
-              kind: "work",
-              id: workEntry.id,
-              createdAt: workEntry.createdAt,
-              groupedEntries: [workEntry],
-            });
-          }
-
-          if (hiddenEntries.length > 0) {
-            nextRows.push({
-              kind: "work-toggle",
-              id: `work-toggle:${timelineEntry.id}`,
-              createdAt: timelineEntry.createdAt,
-              groupId,
-              hiddenCount: hiddenEntries.length,
-              expanded,
-              onlyToolEntries: visibleGroupedEntries.every((entry) =>
-                workLogEntryIsToolLike(entry),
-              ),
-            });
-          }
-        }
-      }
+      pushWorkRows(leadingWork);
+      pushReasoningRow(reasoningEntries);
+      pushWorkRows(trailingWork);
       index = cursor - 1;
       continue;
     }
@@ -857,6 +986,17 @@ function replaceStreamingMessageRows(
   }
   if (replacements.size === 0) return previous.rows;
   return previous.rows.map((row) => {
+    if (row.kind === "reasoning") {
+      if (!row.messages.some((message) => replacements.has(message))) return row;
+      return {
+        ...row,
+        messages: row.messages.map((message) => replacements.get(message) ?? message),
+      };
+    }
+    if (row.kind === "turn-fold") {
+      const latestThought = row.latestThought && replacements.get(row.latestThought);
+      return latestThought ? { ...row, latestThought } : row;
+    }
     if (row.kind !== "message") return row;
     const message = replacements.get(row.message);
     return message ? { ...row, message } : row;
@@ -864,9 +1004,9 @@ function replaceStreamingMessageRows(
 }
 
 /**
- * Keep one projection per timeline. While assistant text streams, only the
- * streaming message rows are replaced; any structural, metadata, activity or
- * control change re-derives every row.
+ * Keep one projection per timeline. While assistant text or a thinking trace
+ * streams, only the rows holding that message are replaced; any structural,
+ * metadata, activity or control change re-derives every row.
  */
 export function deriveMessagesTimelineRowsWithState(
   input: MessagesTimelineRowsInput,
@@ -916,7 +1056,21 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
         a.expanded === bf.expanded &&
         a.active === bf.active &&
         a.startedAt === bf.startedAt &&
-        Equal.equals(a.lastWorkEntry, bf.lastWorkEntry)
+        Equal.equals(a.lastWorkEntry, bf.lastWorkEntry) &&
+        a.latestThought === bf.latestThought
+      );
+    }
+
+    case "reasoning": {
+      const br = b as typeof a;
+      return (
+        a.createdAt === br.createdAt &&
+        a.turnId === br.turnId &&
+        a.expanded === br.expanded &&
+        a.live === br.live &&
+        a.thinking === br.thinking &&
+        a.messages.length === br.messages.length &&
+        a.messages.every((message, index) => message === br.messages[index])
       );
     }
 

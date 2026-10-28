@@ -192,6 +192,11 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("queue" as const)),
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // Show the model's thinking trace in the conversation: the live row carries
+  // the latest thought, and finished thoughts fold under a collapsed group.
+  // Off hides every reasoning message; the server keeps storing them, so
+  // turning it back on shows earlier thoughts too.
+  showReasoningTraces: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
@@ -426,5 +431,6 @@ export const ClientSettingsPatch = Schema.Struct({
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
   followUpBehavior: Schema.optionalKey(Schema.Literals(["queue", "steer"])),
   wordWrap: Schema.optionalKey(Schema.Boolean),
+  showReasoningTraces: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;

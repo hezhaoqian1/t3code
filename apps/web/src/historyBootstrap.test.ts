@@ -41,6 +41,46 @@ describe("buildBootstrapInput", () => {
     expect(result.text).toContain("what's next?");
   });
 
+  it("never replays a thinking trace to the model", () => {
+    const result = buildBootstrapInput(
+      [
+        {
+          id: messageId("u-1"),
+          role: "user",
+          text: "hello",
+          createdAt: "2026-02-09T00:00:00.000Z",
+          turnId: null,
+          updatedAt: "2026-02-09T00:00:00.000Z",
+          streaming: false,
+        },
+        {
+          id: messageId("reasoning:raw:r-1"),
+          role: "reasoning",
+          text: "The user greets me; answer briefly.",
+          createdAt: "2026-02-09T00:00:00.500Z",
+          turnId: null,
+          updatedAt: "2026-02-09T00:00:00.500Z",
+          streaming: false,
+        },
+        {
+          id: messageId("a-1"),
+          role: "assistant",
+          text: "world",
+          createdAt: "2026-02-09T00:00:01.000Z",
+          turnId: null,
+          updatedAt: "2026-02-09T00:00:01.000Z",
+          streaming: false,
+        },
+      ],
+      "what's next?",
+      1_500,
+    );
+
+    expect(result.includedCount).toBe(2);
+    expect(result.text).not.toContain("answer briefly");
+    expect(result.text).toContain("USER:\nhello\n\nASSISTANT:\nworld");
+  });
+
   it("truncates older transcript messages when over budget", () => {
     const result = buildBootstrapInput(
       [
