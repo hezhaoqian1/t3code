@@ -32,6 +32,10 @@ interface UpdatesHarnessOptions {
   >;
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: (value: boolean) => Effect.Effect<void>;
+  readonly connectDirectly?: Effect.Effect<
+    void,
+    ElectronUpdater.ElectronUpdaterConnectDirectlyError
+  >;
   readonly stopBackend?: Effect.Effect<void>;
   readonly backendDesiredRunning?: boolean;
   readonly platform?: NodeJS.Platform;
@@ -45,6 +49,7 @@ const flushCallbacks = Effect.yieldNow;
 
 function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
+  let directConnectCount = 0;
   let allowDowngrade = false;
   let fullChangelog = false;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
@@ -96,6 +101,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       }),
     setDisableDifferentialDownload: (value) =>
       options.setDisableDifferentialDownload?.(value) ?? Effect.void,
+    connectDirectly: Effect.sync(() => {
+      directConnectCount += 1;
+    }).pipe(Effect.andThen(options.connectDirectly ?? Effect.void)),
     checkForUpdates: Effect.sync(() => {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
@@ -224,6 +232,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     layer,
     backendStartCount: () => backendStartCount,
     checkCount: () => checkCount,
+    directConnectCount: () => directConnectCount,
     feedUrls: () => feedUrls,
     fullChangelog: () => fullChangelog,
     listenerCount: () =>
@@ -384,6 +393,41 @@ describe("DesktopUpdates", () => {
         yield* updates.download;
 
         assert.deepEqual(differentialSettings, [true, true]);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("downloads updates over a direct connection instead of the system proxy", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        assert.equal(harness.directConnectCount(), 1);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("keeps updating through the system proxy when the direct switch fails", () => {
+    const harness = makeHarness({
+      connectDirectly: Effect.fail(
+        new ElectronUpdater.ElectronUpdaterConnectDirectlyError({
+          cause: new Error("session unavailable"),
+        }),
+      ),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        assert.equal(harness.directConnectCount(), 1);
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+        const state = yield* updates.getState;
+        assert.equal(state.status, "available");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

@@ -90,6 +90,16 @@ Responses configuration writer. It enforces these invariants:
 - API keys are referenced through an environment variable and never written to
   `config.toml`.
 
+The Codex child process gets a minimal environment
+(`FdCodexChildEnvironment.ts`). It also puts the gateway host on `NO_PROXY`
+(keeping any inherited entries). Codex otherwise follows the OS proxy (Windows
+Internet Settings, macOS network proxies) as well as `HTTP(S)_PROXY`. With a
+VPN in system-proxy mode, that sent model streams abroad and back to the
+domestic gateway, and long turns stalled there. The server's own gateway calls
+(Node `fetch`) already ignore the OS proxy, so both now take the same direct
+route. The desktop updater's session (`electron-updater` partition) is set to
+`direct` for the same reason; it only downloads from the FD host.
+
 `FdManagedCodexHome.ts` now uses this writer, preserving the current FD
 DeepSeek configuration and credential isolation. `ResponsesModelCatalog.ts`
 contains the initial DashScope catalog as server-side metadata, and the

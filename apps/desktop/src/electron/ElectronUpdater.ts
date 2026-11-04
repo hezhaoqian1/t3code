@@ -4,9 +4,13 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
+import * as Electron from "electron";
 import { autoUpdater } from "electron-updater";
 
 type AutoUpdater = typeof autoUpdater;
+
+/** The session partition electron-updater downloads through (its `NET_SESSION_NAME`). */
+export const ELECTRON_UPDATER_SESSION_PARTITION = "electron-updater";
 
 export type ElectronUpdaterFeedUrl = Parameters<AutoUpdater["setFeedURL"]>[0];
 
@@ -48,6 +52,17 @@ export class ElectronUpdaterQuitAndInstallError extends Schema.TaggedErrorClass<
   }
 }
 
+export class ElectronUpdaterConnectDirectlyError extends Schema.TaggedErrorClass<ElectronUpdaterConnectDirectlyError>()(
+  "ElectronUpdaterConnectDirectlyError",
+  {
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return "Electron updater could not switch its download session to a direct connection.";
+  }
+}
+
 export const ElectronUpdaterError = Schema.Union([
   ElectronUpdaterCheckForUpdatesError,
   ElectronUpdaterDownloadUpdateError,
@@ -68,6 +83,11 @@ export class ElectronUpdater extends Context.Service<
     readonly setAllowDowngrade: (value: boolean) => Effect.Effect<void>;
     readonly setFullChangelog: (value: boolean) => Effect.Effect<void>;
     readonly setDisableDifferentialDownload: (value: boolean) => Effect.Effect<void>;
+    /**
+     * Downloads updates without the OS/VPN proxy. Updates only come from the FD
+     * download host, which the desktop's other gateway calls already reach directly.
+     */
+    readonly connectDirectly: Effect.Effect<void, ElectronUpdaterConnectDirectlyError>;
     readonly checkForUpdates: Effect.Effect<void, ElectronUpdaterCheckForUpdatesError>;
     readonly downloadUpdate: Effect.Effect<
       ReadonlyArray<string>,
@@ -126,6 +146,15 @@ export const make = ElectronUpdater.of({
       autoUpdater.disableDifferentialDownload = value;
       return Effect.void;
     }),
+  connectDirectly: Effect.tryPromise({
+    // Same options electron-updater uses, so whichever side creates the partition first,
+    // both get the same session.
+    try: () =>
+      Electron.session
+        .fromPartition(ELECTRON_UPDATER_SESSION_PARTITION, { cache: false })
+        .setProxy({ mode: "direct" }),
+    catch: (cause) => new ElectronUpdaterConnectDirectlyError({ cause }),
+  }),
   checkForUpdates: Effect.suspend(() => {
     const channel = autoUpdater.channel;
     return Effect.tryPromise({
