@@ -21,6 +21,8 @@ const INHERITED_ENV_KEYS = [
 export function makeFdCodexChildEnvironment(input: {
   readonly codexHome: string;
   readonly runtimeApiKey: string;
+  /** FD gateway origin; Codex reaches it directly, never through a system/VPN proxy. */
+  readonly gatewayOrigin: string;
   readonly connectorBinPath?: string | undefined;
   readonly connectorConfigDir?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -41,6 +43,8 @@ export function makeResponsesCodexChildEnvironment(input: {
   readonly codexHome: string;
   readonly apiKeyEnv: string;
   readonly apiKey: string;
+  /** Responses endpoint origin; Codex reaches it directly, never through a system/VPN proxy. */
+  readonly gatewayOrigin: string;
   readonly connectorBinPath?: string | undefined;
   readonly connectorConfigDir?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -58,6 +62,7 @@ export function makeResponsesCodexChildEnvironment(input: {
 
 function makeBaseCodexChildEnvironment(input: {
   readonly codexHome: string;
+  readonly gatewayOrigin: string;
   readonly connectorBinPath?: string | undefined;
   readonly connectorConfigDir?: string | undefined;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
@@ -71,6 +76,12 @@ function makeBaseCodexChildEnvironment(input: {
     const value = source[key];
     if (value !== undefined) environment[key] = value;
   }
+  // Codex follows the OS proxy (Windows Internet Settings, macOS network proxies) and
+  // HTTP(S)_PROXY. A VPN in system-proxy mode would then send every model request
+  // abroad and back to the domestic gateway, where long streams stall. The desktop's
+  // own gateway calls already go direct; NO_PROXY keeps the model traffic on the same
+  // path while other hosts still use the employee's proxy.
+  environment.NO_PROXY = withDirectHost(environment.NO_PROXY, gatewayHost(input.gatewayOrigin));
   if (input.connectorBinPath) {
     const inheritedPath = environment.PATH ?? "";
     environment.PATH = inheritedPath
@@ -84,4 +95,23 @@ function makeBaseCodexChildEnvironment(input: {
     environment.LARKSUITE_CLI_CONFIG_DIR = input.connectorConfigDir;
   }
   return environment;
+}
+
+function gatewayHost(origin: string): string {
+  const hostname = new URL(origin).hostname;
+  return hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
+}
+
+/** Adds `host` to a comma-separated NO_PROXY list, keeping the employee's own entries. */
+export function withDirectHost(noProxy: string | undefined, host: string): string {
+  const entries = (noProxy ?? "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  const normalizedHost = host.toLowerCase();
+  const covered = entries.some((entry) => {
+    const normalized = entry.toLowerCase();
+    return normalized === "*" || normalized === normalizedHost;
+  });
+  return (covered ? entries : [...entries, host]).join(",");
 }

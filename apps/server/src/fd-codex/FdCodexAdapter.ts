@@ -85,6 +85,7 @@ export async function prepareFdCodexRuntime(input: {
     environment: makeFdCodexChildEnvironment({
       codexHome,
       runtimeApiKey: input.credentials.runtimeApiKey,
+      gatewayOrigin: input.credentials.newApiOrigin,
       connectorBinPath: connectorEnabled ? input.connectorBinPath : undefined,
       connectorConfigDir: connectorEnabled ? input.connectorConfigDir : undefined,
       ...(input.inheritedEnvironment ? { inheritedEnvironment: input.inheritedEnvironment } : {}),

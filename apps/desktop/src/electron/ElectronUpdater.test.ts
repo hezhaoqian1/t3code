@@ -1,6 +1,21 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as NodeModule from "node:module";
 import { beforeEach, vi } from "vite-plus/test";
+
+const { setProxyMock, fromPartitionMock } = vi.hoisted(() => {
+  const setProxyMock = vi.fn((_config: unknown) => Promise.resolve());
+  return {
+    setProxyMock,
+    fromPartitionMock: vi.fn((_partition: string, _options?: unknown) => ({
+      setProxy: setProxyMock,
+    })),
+  };
+});
+
+vi.mock("electron", () => ({
+  session: { fromPartition: fromPartitionMock },
+}));
 
 const { autoUpdaterMock } = vi.hoisted(() => ({
   autoUpdaterMock: {
@@ -43,7 +58,41 @@ describe("ElectronUpdater", () => {
     autoUpdaterMock.quitAndInstall.mockClear();
     autoUpdaterMock.removeListener.mockClear();
     autoUpdaterMock.setFeedURL.mockClear();
+    fromPartitionMock.mockClear();
+    setProxyMock.mockClear();
+    setProxyMock.mockImplementation(() => Promise.resolve());
   });
+
+  it("targets the same session partition electron-updater downloads through", () => {
+    const executor = NodeModule.createRequire(import.meta.url)(
+      "electron-updater/out/electronHttpExecutor.js",
+    ) as { readonly NET_SESSION_NAME: string };
+    assert.equal(ElectronUpdater.ELECTRON_UPDATER_SESSION_PARTITION, executor.NET_SESSION_NAME);
+  });
+
+  it.effect("switches the updater download session to a direct connection", () =>
+    Effect.gen(function* () {
+      const updater = yield* ElectronUpdater.ElectronUpdater;
+      yield* updater.connectDirectly;
+
+      assert.deepEqual(fromPartitionMock.mock.calls, [["electron-updater", { cache: false }]]);
+      assert.deepEqual(setProxyMock.mock.calls, [[{ mode: "direct" }]]);
+    }).pipe(Effect.provide(ElectronUpdater.layer)),
+  );
+
+  it.effect("reports a failed direct-connection switch as a typed error", () =>
+    Effect.gen(function* () {
+      const cause = new Error("session unavailable");
+      setProxyMock.mockImplementationOnce(() => Promise.reject(cause));
+      const updater = yield* ElectronUpdater.ElectronUpdater;
+
+      const error = yield* updater.connectDirectly.pipe(Effect.flip);
+
+      assert.instanceOf(error, ElectronUpdater.ElectronUpdaterConnectDirectlyError);
+      assert.strictEqual(error.cause, cause);
+      assert.notInclude(error.message, cause.message);
+    }).pipe(Effect.provide(ElectronUpdater.layer)),
+  );
 
   it.effect("scopes updater event listeners", () =>
     Effect.gen(function* () {

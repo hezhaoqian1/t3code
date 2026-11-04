@@ -24,7 +24,7 @@ macOS 内部包在安装前会校验版本、应用标识、Apple Silicon 架构
 取消授权不会替换当前版本。
 
 更新包来自 `https://ai-api.fdsure.com/downloads/desktop/latest`，并由桌面端校验
-`electron-updater` 清单。当前内部试用包尚未完成 macOS Developer ID 签名、公证和
+`electron-updater` 清单。下载更新时直接连接方德服务，不经过电脑上的 VPN 或系统代理。当前内部试用包尚未完成 macOS Developer ID 签名、公证和
 Windows Authenticode 签名，首次安装时系统仍可能显示 Gatekeeper 或 SmartScreen 提示。
 
 如果应用内更新校验失败、管理员授权被取消或替换自动回滚，可从

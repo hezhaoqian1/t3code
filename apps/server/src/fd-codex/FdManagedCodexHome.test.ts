@@ -8,7 +8,11 @@ import * as NodePath from "node:path";
 
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { makeFdCodexChildEnvironment } from "./FdCodexChildEnvironment.ts";
+import {
+  makeFdCodexChildEnvironment,
+  makeResponsesCodexChildEnvironment,
+  withDirectHost,
+} from "./FdCodexChildEnvironment.ts";
 import {
   fdEnterpriseToolFailureMessage,
   prepareFdCodexRuntime,
@@ -88,6 +92,7 @@ describe("FD managed Codex runtime boundary", () => {
     const environment = makeFdCodexChildEnvironment({
       codexHome: "/managed/fd-codex",
       runtimeApiKey: "runtime-secret-marker",
+      gatewayOrigin: "https://ai-api.fdsure.com",
       inheritedEnvironment: {
         HOME: "/employee",
         PATH: "/usr/bin",
@@ -100,14 +105,62 @@ describe("FD managed Codex runtime boundary", () => {
       CODEX_HOME: "/managed/fd-codex",
       HOME: "/employee",
       PATH: "/usr/bin",
+      NO_PROXY: "ai-api.fdsure.com",
       [FD_CODEX_API_KEY_ENV]: "runtime-secret-marker",
     });
+  });
+
+  it("sends model traffic straight to the gateway even when a system or VPN proxy is set", () => {
+    const environment = makeFdCodexChildEnvironment({
+      codexHome: "/managed/fd-codex",
+      runtimeApiKey: "runtime-secret-marker",
+      gatewayOrigin: "https://ai-api.fdsure.com",
+      inheritedEnvironment: {
+        HTTPS_PROXY: "http://127.0.0.1:7890",
+        NO_PROXY: "localhost, .corp.example ,",
+      },
+    });
+
+    // The employee's proxy stays in place for every other host.
+    expect(environment.HTTPS_PROXY).toBe("http://127.0.0.1:7890");
+    expect(environment.NO_PROXY).toBe("localhost,.corp.example,ai-api.fdsure.com");
+  });
+
+  it("keeps an existing NO_PROXY entry for the gateway or a wildcard unchanged", () => {
+    expect(withDirectHost("AI-API.fdsure.com", "ai-api.fdsure.com")).toBe("AI-API.fdsure.com");
+    expect(withDirectHost("*", "ai-api.fdsure.com")).toBe("*");
+    expect(withDirectHost(undefined, "ai-api.fdsure.com")).toBe("ai-api.fdsure.com");
+    expect(withDirectHost("", "ai-api.fdsure.com")).toBe("ai-api.fdsure.com");
+  });
+
+  it("bypasses the proxy for loopback development gateways too", () => {
+    const local = (gatewayOrigin: string) =>
+      makeFdCodexChildEnvironment({
+        codexHome: "/managed/fd-codex",
+        runtimeApiKey: "runtime-secret-marker",
+        gatewayOrigin,
+        inheritedEnvironment: {},
+      }).NO_PROXY;
+    expect(local("http://127.0.0.1:3001")).toBe("127.0.0.1");
+    expect(local("http://[::1]:3001")).toBe("::1");
+  });
+
+  it("applies the same direct gateway route to Responses-backed Codex children", () => {
+    const environment = makeResponsesCodexChildEnvironment({
+      codexHome: "/managed/fd-codex",
+      apiKeyEnv: "FD_NEW_API_KEY",
+      apiKey: "runtime-secret-marker",
+      gatewayOrigin: "https://ai-api.fdsure.com",
+      inheritedEnvironment: { NO_PROXY: "localhost" },
+    });
+    expect(environment.NO_PROXY).toBe("localhost,ai-api.fdsure.com");
   });
 
   it("prepends connector binaries to the managed Codex child PATH", () => {
     const environment = makeFdCodexChildEnvironment({
       codexHome: "/managed/fd-codex",
       runtimeApiKey: "runtime-secret-marker",
+      gatewayOrigin: "https://ai-api.fdsure.com",
       connectorBinPath: "/managed/connectors/feishu/bin",
       connectorConfigDir: "/managed/connectors/feishu/config",
       inheritedEnvironment: { PATH: "/usr/bin" },
@@ -118,11 +171,20 @@ describe("FD managed Codex runtime boundary", () => {
   });
 
   it("rejects invalid managed paths and credentials", () => {
+    const gatewayOrigin = "https://ai-api.fdsure.com";
     expect(() =>
-      makeFdCodexChildEnvironment({ codexHome: "relative", runtimeApiKey: "secret" }),
+      makeFdCodexChildEnvironment({
+        codexHome: "relative",
+        runtimeApiKey: "secret",
+        gatewayOrigin,
+      }),
     ).toThrow("absolute");
     expect(() =>
-      makeFdCodexChildEnvironment({ codexHome: "/managed/fd-codex", runtimeApiKey: "bad\nkey" }),
+      makeFdCodexChildEnvironment({
+        codexHome: "/managed/fd-codex",
+        runtimeApiKey: "bad\nkey",
+        gatewayOrigin,
+      }),
     ).toThrow("invalid");
   });
 
@@ -160,6 +222,8 @@ describe("FD managed Codex runtime boundary", () => {
     expect(first.environment.FD_NEW_API_KEY).toBe("runtime-key-one");
     expect(second.environment.FD_NEW_API_KEY).toBe("runtime-key-two");
     expect(second.environment).not.toHaveProperty("FD_ACCESS_TOKEN");
+    // The proxy bypass follows the signed-in gateway origin.
+    expect(second.environment.NO_PROXY).toBe("127.0.0.1");
     expect(
       await NodeFSP.readFile(NodePath.join(second.homePath, "config.toml"), "utf8"),
     ).not.toContain("runtime-key");

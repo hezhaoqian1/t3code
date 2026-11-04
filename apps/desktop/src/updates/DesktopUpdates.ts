@@ -797,6 +797,13 @@ export const make = Effect.gen(function* () {
       yield* electronUpdater.setAutoInstallOnAppQuit(false);
       yield* applyAutoUpdaterChannel(settings.updateChannel);
       yield* electronUpdater.setDisableDifferentialDownload(DISABLE_DIFFERENTIAL_DOWNLOAD);
+      // A VPN in system-proxy mode would otherwise route the installer download abroad
+      // and back. If the switch fails, updates still work through the system proxy.
+      yield* electronUpdater.connectDirectly.pipe(
+        Effect.catch((error) =>
+          logUpdaterWarning(error.message, { errorTag: error._tag, cause: String(error.cause) }),
+        ),
+      );
 
       if (isArm64HostRunningIntelBuild(environment.runtimeInfo)) {
         yield* logUpdaterInfo(
