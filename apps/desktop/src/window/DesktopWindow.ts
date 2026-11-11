@@ -19,6 +19,7 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import { MENU_ACTION_CHANNEL, WINDOW_FULLSCREEN_STATE_CHANNEL } from "../ipc/channels.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
+import { STARTUP_DOCUMENT_URL } from "./startupDocument.ts";
 
 const TITLEBAR_HEIGHT = 40;
 const TITLEBAR_COLOR = "#01000000"; // #00000000 does not work correctly on Linux
@@ -32,12 +33,6 @@ const DEVELOPMENT_LOAD_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 const RENDERER_RECOVERY_RELOAD_DELAY_MS = 500;
 const RENDERER_RECOVERY_MAX_ATTEMPTS = 3;
 const RENDERER_RECOVERY_WINDOW_MS = 60_000;
-const STARTUP_DOCUMENT_URL = `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
-<html><head><meta charset="utf-8"><title>Fangde AI</title><style>
-html,body{height:100%;margin:0;background:#fff;color:#111827;font:14px system-ui,-apple-system,"Segoe UI",sans-serif}
-body{display:grid;place-items:center}.shell{text-align:center}.mark{font-size:20px;font-weight:650}.status{margin-top:10px;color:#6b7280}
-@media(prefers-color-scheme:dark){html,body{background:#0a0a0a;color:#f8fafc}.status{color:#9ca3af}}
-</style></head><body><main class="shell" role="status" aria-live="polite"><div class="mark">Fangde AI</div><div class="status">Starting local service...</div></main></body></html>`)}`;
 const DEVELOPMENT_RETRYABLE_LOAD_ERROR_CODES = new Set([
   -2, // ERR_FAILED
   -7, // ERR_TIMED_OUT

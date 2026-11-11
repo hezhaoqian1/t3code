@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./bootSplash": {
+      "types": "./src/bootSplash.ts",
+      "import": "./src/bootSplash.ts"
+    },
     "./favicon": {
       "types": "./src/favicon.ts",
       "import": "./src/favicon.ts"

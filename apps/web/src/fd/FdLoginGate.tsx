@@ -1,9 +1,10 @@
 import { EyeIcon, EyeOffIcon, LoaderCircleIcon, LogInIcon, RotateCcwIcon } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 
-import fdsureMark from "../assets/fdsure-mark.png";
 import fdsureWordmark from "../assets/fdsure-wordmark.png";
+import { BootSplashScreen, BrandMark } from "../components/BootSplash";
 import { Button } from "../components/ui/button";
+import { WindowDragStrip } from "../components/WindowDragStrip";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useFdAccount } from "./FdAccountProvider";
@@ -16,14 +17,14 @@ export function FdLoginGate({ children }: { readonly children: ReactNode }) {
   return <FdLoginScreen />;
 }
 
+// Same loading screen as the startup stages before it, so checking the saved
+// account doesn't flash a different screen between them.
 function FdAccountChecking() {
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background text-foreground">
-      <LoaderCircleIcon
-        className="size-5 animate-spin text-muted-foreground"
-        aria-label="正在检查账号"
-      />
-    </main>
+    <>
+      <span className="sr-only">正在检查账号</span>
+      <BootSplashScreen />
+    </>
   );
 }
 
@@ -46,10 +47,11 @@ function FdLoginScreen() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-background px-5 py-10 text-foreground">
+    <main className="relative flex min-h-screen items-center justify-center bg-background px-5 py-10 text-foreground">
+      <WindowDragStrip />
       <section className="w-full max-w-sm" aria-labelledby="fd-login-title">
         <header className="mb-8 flex items-center gap-3">
-          <img className="size-11 object-contain" src={fdsureMark} alt="" />
+          <BrandMark className="size-11" />
           <div className="min-w-0">
             <img
               className="h-5 max-w-36 object-contain object-left dark:brightness-0 dark:invert"

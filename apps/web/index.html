@@ -419,30 +419,17 @@
         color: var(--boot-foreground);
       }
 
-      #boot-shell-card {
-        position: relative;
-        z-index: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 96px;
-        height: 96px;
-      }
-
-      #boot-shell-logo {
-        width: 64px;
-        height: 64px;
-        object-fit: contain;
+      html[data-theme-selected="true"] #boot-shell .fd-boot {
+        --fd-boot-fg: var(--boot-foreground);
       }
     </style>
+    <!-- fd-boot-splash:style -->
     <title>方德 AI (Alpha)</title>
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="方德 AI splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="方德 AI" />
-        </div>
+        <!-- fd-boot-splash:markup -->
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>
