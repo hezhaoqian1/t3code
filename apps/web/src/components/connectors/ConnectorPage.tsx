@@ -15,6 +15,7 @@ import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { ScrollArea } from "../ui/scroll-area";
+import { WindowDragStrip } from "../WindowDragStrip";
 import { Switch } from "../ui/switch";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 
@@ -304,46 +305,52 @@ export function FeishuConnectorCard({ surface }: { readonly surface: ConnectorSu
 }
 
 export function ConnectorsPage() {
+  // The page has no title bar: its top padding and header drag the frameless
+  // window (buttons inside stay clickable).
   return (
-    <ScrollArea className="h-full">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-6 sm:px-8 sm:py-8">
-        <header className="flex flex-col gap-2">
-          <div className="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
-            <PlugZapIcon className="size-3.5" />
-            连接器
-          </div>
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold tracking-[-0.035em] text-foreground">
-              连接你的工作应用
-            </h1>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-              连接器负责把外部办公系统接入本地 Agent runtime。启用后，员工在普通任务里描述目标即可，
-              FD AI 会按需调用对应的官方 CLI 和 Skills。
-            </p>
-          </div>
-        </header>
+    <div className="relative h-full">
+      <WindowDragStrip className="h-6" />
+      <ScrollArea className="h-full">
+        <main className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-5 py-6 sm:px-8 sm:py-8">
+          <header className="drag-region flex flex-col gap-2">
+            <div className="inline-flex w-fit items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
+              <PlugZapIcon className="size-3.5" />
+              连接器
+            </div>
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-[-0.035em] text-foreground">
+                连接你的工作应用
+              </h1>
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                连接器负责把外部办公系统接入本地 Agent
+                runtime。启用后，员工在普通任务里描述目标即可， FD AI 会按需调用对应的官方 CLI 和
+                Skills。
+              </p>
+            </div>
+          </header>
 
-        <div className="flex max-w-md items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 shadow-sm">
-          <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-          <Input
-            nativeInput
-            unstyled
-            readOnly
-            value=""
-            placeholder="搜索连接器"
-            aria-label="搜索连接器"
-            className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:placeholder:text-muted-foreground"
-          />
-        </div>
-
-        <section className="grid gap-4">
-          <FeishuConnectorCard surface="page" />
-          <div className="rounded-lg border border-dashed border-border/80 p-6 text-sm text-muted-foreground">
-            更多连接器会按企业授权逐步出现。当前桌面端先完整支持飞书官方能力。
+          <div className="flex max-w-md items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 shadow-sm">
+            <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
+            <Input
+              nativeInput
+              unstyled
+              readOnly
+              value=""
+              placeholder="搜索连接器"
+              aria-label="搜索连接器"
+              className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:placeholder:text-muted-foreground"
+            />
           </div>
-        </section>
-      </main>
-    </ScrollArea>
+
+          <section className="grid gap-4">
+            <FeishuConnectorCard surface="page" />
+            <div className="rounded-lg border border-dashed border-border/80 p-6 text-sm text-muted-foreground">
+              更多连接器会按企业授权逐步出现。当前桌面端先完整支持飞书官方能力。
+            </div>
+          </section>
+        </main>
+      </ScrollArea>
+    </div>
   );
 }
 

@@ -1,3 +1,5 @@
+import { cn } from "~/lib/utils";
+
 /**
  * A transparent strip across the top of a page without a header (login,
  * loading, error pages). The desktop window is frameless, so without it those
@@ -5,14 +7,15 @@
  *
  * It spans the nearest positioned parent: the whole page on full-screen pages,
  * or the main area beside the sidebar, where it never covers the sidebar's own
- * buttons.
+ * buttons. Pages whose header sits right under the top edge pass a shorter
+ * height so the strip covers only the empty padding above it.
  */
-export function WindowDragStrip() {
+export function WindowDragStrip({ className }: { readonly className?: string }) {
   return (
     <div
       aria-hidden
       data-window-drag-strip="true"
-      className="drag-region absolute inset-x-0 top-0 z-40 h-10"
+      className={cn("drag-region absolute inset-x-0 top-0 z-40 h-10", className)}
     />
   );
 }
