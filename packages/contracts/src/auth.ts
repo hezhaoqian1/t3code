@@ -142,7 +142,8 @@ export const AuthAccessTokenResult = Schema.Struct({
 export type AuthAccessTokenResult = typeof AuthAccessTokenResult.Type;
 
 export const AuthWebSocketTicketResult = Schema.Struct({
-  ticket: TrimmedNonEmptyString,
+  // Rides in the WebSocket URL query and stays valid after the request; keep it out of logs.
+  ticket: Schema.RedactedFromValue(TrimmedNonEmptyString),
   expiresAt: Schema.DateTimeUtc,
 });
 export type AuthWebSocketTicketResult = typeof AuthWebSocketTicketResult.Type;

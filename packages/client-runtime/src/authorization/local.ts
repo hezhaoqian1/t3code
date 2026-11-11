@@ -4,6 +4,7 @@ import {
   AuthTokenExchangeGrantType,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import { executeEnvironmentHttpRequest, makeEnvironmentHttpApiClient } from "../rpc/http.ts";
@@ -53,6 +54,6 @@ export const resolveLocalWebSocketConnectionUrl = Effect.fn(
   if (url.pathname === "" || url.pathname === "/") {
     url.pathname = "/ws";
   }
-  url.searchParams.set("wsTicket", issued.ticket);
+  url.searchParams.set("wsTicket", Redacted.value(issued.ticket));
   return url.toString();
 });
