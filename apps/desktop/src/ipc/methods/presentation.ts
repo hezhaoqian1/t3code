@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeURL from "node:url";
 import * as NodeUtil from "node:util";
 import { BrowserWindow } from "electron";
 
@@ -28,6 +29,31 @@ export function isPathInside(root: string, candidate: string): boolean {
     normalizedCandidate === normalizedRoot ||
     normalizedCandidate.startsWith(`${normalizedRoot}${NodePath.sep}`)
   );
+}
+
+/** The channels the 方德演示 editor window calls through the desktop preload. */
+export const PRESENTATION_EDITOR_CHANNELS = [
+  IpcChannels.PRESENTATION_READ_PROJECT_CHANNEL,
+  IpcChannels.PRESENTATION_WRITE_FILE_CHANNEL,
+] as const;
+
+/** Whether `url` is the bundled editor page, ignoring its query and hash. */
+export function isPresentationEditorUrl(input: {
+  readonly editorPath: string;
+  readonly platform: NodeJS.Platform;
+  readonly url: string;
+}): boolean {
+  try {
+    const url = new URL(input.url);
+    if (url.protocol !== "file:") return false;
+    const actual = NodePath.resolve(NodeURL.fileURLToPath(url));
+    const expected = NodePath.resolve(input.editorPath);
+    return input.platform === "win32" || input.platform === "darwin"
+      ? actual.toLowerCase() === expected.toLowerCase()
+      : actual === expected;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveTaskProject(
@@ -162,6 +188,16 @@ export const openPresentation = DesktopIpc.makeIpcMethod({
       },
     });
     editorWindow.setMenuBarVisibility(false);
+    // Desktop IPC answers only the main window. The editor may additionally
+    // read and save presentation projects, and only while its top frame still
+    // shows the bundled editor page.
+    const ipc = yield* DesktopIpc.DesktopIpc;
+    yield* ipc.allowSecondaryWindow({
+      webContents: editorWindow.webContents,
+      channels: PRESENTATION_EDITOR_CHANNELS,
+      isAllowedUrl: (url) =>
+        isPresentationEditorUrl({ editorPath, platform: environment.platform, url }),
+    });
     yield* Effect.tryPromise(() =>
       editorWindow.loadFile(editorPath, {
         search: `?desktopProjectPath=${encodeURIComponent(resolvedProjectPath)}`,

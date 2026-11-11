@@ -152,6 +152,22 @@ const DefinitionOverrides: Record<string, Schema.Json> = {
   PlanType: { type: "string" },
 };
 
+// Codex sends error codes this ref does not list yet (e.g. `modelNotFound`). A closed enum
+// fails the whole notification decode, which drops a failed `turn/completed` and leaves the turn running.
+const OpenStringEnumDefinitions = new Set(["CodexErrorInfo"]);
+
+function openStringEnum(schema: Schema.Json): Schema.Json {
+  if (!isJsonSchemaNode(schema) || !Array.isArray(schema.oneOf)) return schema;
+  return {
+    ...schema,
+    oneOf: schema.oneOf.map((variant: Schema.Json) =>
+      isJsonSchemaNode(variant) && variant.type === "string" && Array.isArray(variant.enum)
+        ? { type: "string" }
+        : variant,
+    ),
+  };
+}
+
 const getGeneratedPaths = Effect.fn("getGeneratedPaths")(function* () {
   const path = yield* Path.Path;
   const generatedDir = path.join(import.meta.dirname, "..", "src", "_generated");
@@ -653,7 +669,10 @@ const generateFiles = Effect.fn("generateFiles")(function* () {
       aggregateSchemas[localDefinitionNames.get(definitionName)!] = stripNullDefaults(
         normalizeNullableTypes(
           rewriteExternalRefs(
-            DefinitionOverrides[definitionName] ?? definitionSchema,
+            DefinitionOverrides[definitionName] ??
+              (OpenStringEnumDefinitions.has(definitionName)
+                ? openStringEnum(definitionSchema)
+                : definitionSchema),
             localDefinitionNames,
             file.namespace,
             exportNameByQualifiedName,
