@@ -907,7 +907,10 @@ const makeWsRpcLayer = (
                   message: "Task project and thread bootstrap project ids must match.",
                 });
               }
-              const taskWorkspaceRoot = yield* prepareTaskWorkspace(command.createdAt).pipe(
+              const taskWorkspaceRoot = yield* prepareTaskWorkspace({
+                createdAt: command.createdAt,
+                title: taskProject.title,
+              }).pipe(
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
                 Effect.provideService(ServerConfig.ServerConfig, config),

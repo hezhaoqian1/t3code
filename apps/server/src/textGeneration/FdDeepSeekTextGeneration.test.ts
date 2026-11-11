@@ -43,7 +43,7 @@ describe("FdDeepSeekTextGeneration", () => {
             '{"subject":"Add FD support.","body":"  Body  ","branch":"Feature FD"}',
             '{"title":"Ship FD support","body":"  ## Summary\\n- FD  "}',
             '{"branch":"Fix Runtime Flow"}',
-            '{"title":"FD Runtime Flow"}',
+            '{"title":"修复 FD 运行流程"}',
           ],
           requests,
         ),
@@ -83,7 +83,7 @@ describe("FdDeepSeekTextGeneration", () => {
           message: "Fix the FD runtime flow",
           modelSelection: MODEL_SELECTION,
         }),
-      ).toEqual({ title: "FD Runtime Flow" });
+      ).toEqual({ title: "修复 FD 运行流程" });
 
       expect(requests).toHaveLength(4);
       for (const request of requests) {
@@ -140,10 +140,7 @@ describe("FdDeepSeekTextGeneration", () => {
       Effect.gen(function* () {
         const requests: FdResponsesRequest[] = [];
         const service = makeFdDeepSeekTextGeneration(
-          streamerFor(
-            ['{"branch":"fix-visual-layout"}', '{"title":"Fix Visual Layout"}'],
-            requests,
-          ),
+          streamerFor(['{"branch":"fix-visual-layout"}', '{"title":"修复界面布局"}'], requests),
         );
         const privateAttachment = {
           type: "image" as const,
@@ -230,6 +227,59 @@ describe("FdDeepSeekTextGeneration", () => {
           expect(result.failure.message).not.toContain(privateMarker);
         }
       }
+    }),
+  );
+
+  it.effect("asks for a Simplified Chinese title in every title request", () =>
+    Effect.gen(function* () {
+      const requests: FdResponsesRequest[] = [];
+      const service = makeFdDeepSeekTextGeneration(
+        streamerFor(['{"title":"季度销售报告"}'], requests),
+      );
+      yield* service.generateThreadTitle({
+        cwd: "/workspace",
+        message: "Build the Q3 sales report",
+        modelSelection: MODEL_SELECTION,
+      });
+      const content = (requests[0]!.input[0] as { readonly content: string }).content;
+      expect(content).toContain("Simplified Chinese");
+      expect(content).toContain("4 to 16 Chinese characters");
+    }),
+  );
+
+  it.effect("retries once when the title comes back in English, then keeps the Chinese one", () =>
+    Effect.gen(function* () {
+      const requests: FdResponsesRequest[] = [];
+      const service = makeFdDeepSeekTextGeneration(
+        streamerFor(['{"title":"Quarterly Sales Report"}', '{"title":"季度销售报告"}'], requests),
+      );
+      const result = yield* service.generateThreadTitle({
+        cwd: "/workspace",
+        message: "Build the Q3 sales report",
+        modelSelection: MODEL_SELECTION,
+      });
+      expect(result).toEqual({ title: "季度销售报告" });
+      expect(requests).toHaveLength(2);
+      expect((requests[1]!.input[0] as { readonly content: string }).content).toContain(
+        "was not in Chinese",
+      );
+    }),
+  );
+
+  it.effect("fails rather than return an English title, so the provisional title stays", () =>
+    Effect.gen(function* () {
+      const service = makeFdDeepSeekTextGeneration(
+        streamerFor(['{"title":"Sales Report"}', '{"title":"Sales Report Again"}'], []),
+      );
+      const result = yield* service
+        .generateThreadTitle({
+          cwd: "/workspace",
+          message: "Build the Q3 sales report",
+          modelSelection: MODEL_SELECTION,
+        })
+        .pipe(Effect.result);
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) expect(result.failure._tag).toBe("TextGenerationError");
     }),
   );
 });
