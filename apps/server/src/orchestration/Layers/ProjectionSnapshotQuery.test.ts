@@ -276,6 +276,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
+          projectPurpose: "workspace",
           repositoryIdentity: null,
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
@@ -1703,6 +1704,58 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.equal(shellSnapshot.projects.length, 0);
       assert.equal(shellSnapshot.threads.length, 0);
+    }),
+  );
+
+  // Task projects drive the desktop's office mode. A project read back as
+  // "workspace" turns a new task into a developer project the moment its
+  // first message promotes it from a draft (Git toolbar, Git header actions).
+  it.effect("reads project purpose on every project read path", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* sql`DELETE FROM projection_projects`;
+      yield* sql`DELETE FROM projection_threads`;
+      yield* sql`DELETE FROM projection_turns`;
+      yield* sql`DELETE FROM projection_state`;
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id, title, workspace_root, project_purpose, scripts_json,
+          created_at, updated_at, deleted_at
+        )
+        VALUES
+          ('project-task', 'Task', '/tmp/FangdeAI/Tasks/2026-11-11-09-39-28', 'task', '[]',
+            '2026-11-11T00:00:00.000Z', '2026-11-11T00:00:00.000Z', NULL),
+          ('project-space', 'Space', '/tmp/space', 'workspace', '[]',
+            '2026-11-11T00:00:01.000Z', '2026-11-11T00:00:01.000Z', NULL)
+      `;
+
+      const purposeById = (
+        projects: ReadonlyArray<{
+          readonly id: ProjectId;
+          readonly projectPurpose?: string | undefined;
+        }>,
+      ) => Object.fromEntries(projects.map((project) => [project.id, project.projectPurpose]));
+      const expected = { "project-task": "task", "project-space": "workspace" };
+
+      const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+      assert.deepEqual(purposeById(shellSnapshot.projects), expected);
+
+      const fullSnapshot = yield* snapshotQuery.getSnapshot();
+      assert.deepEqual(purposeById(fullSnapshot.projects), expected);
+
+      const commandReadModel = yield* snapshotQuery.getCommandReadModel();
+      assert.deepEqual(purposeById(commandReadModel.projects), expected);
+
+      const taskShell = yield* snapshotQuery.getProjectShellById(asProjectId("project-task"));
+      assert.equal(Option.getOrThrow(taskShell).projectPurpose, "task");
+
+      const taskByRoot = yield* snapshotQuery.getActiveProjectByWorkspaceRoot(
+        "/tmp/FangdeAI/Tasks/2026-11-11-09-39-28",
+      );
+      assert.equal(Option.getOrThrow(taskByRoot).projectPurpose, "task");
     }),
   );
 

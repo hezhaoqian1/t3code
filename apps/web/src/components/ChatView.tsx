@@ -591,7 +591,11 @@ function useLocalDispatchState(input: {
     resetLocalDispatch,
     localDispatchStartedAt: activeLocalDispatch?.startedAt ?? null,
     isPreparingWorktree: activeLocalDispatch?.preparingWorktree ?? false,
-    isSendBusy: activeLocalDispatch !== null,
+    // A session that is still starting is busy too, with or without a local
+    // dispatch: a new task's first send is promoted into a freshly mounted
+    // thread view that never saw the dispatch, and would otherwise show an
+    // idle composer (and send a second turn on Enter) until the turn runs.
+    isSendBusy: activeLocalDispatch !== null || input.phase === "connecting",
   };
 }
 
@@ -5065,17 +5069,22 @@ function ChatViewContent(props: ChatViewProps) {
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
+    // A draft's first message is the exception: the draft view is replaced by
+    // the thread view as soon as the server thread starts, and that view
+    // starts unanchored. Anchoring here scrolled the row up 32px only for it
+    // to drop back when the view swapped.
+    const anchorNewTurn = !isLocalDraftThread;
     isAtEndRef.current = true;
-    timelineScrollModeRef.current = "anchoring-new-turn";
+    timelineScrollModeRef.current = anchorNewTurn ? "anchoring-new-turn" : "following-end";
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
     setTimelineLiveFollowEnabled(true);
-    pendingTimelineAnchorRef.current = messageIdForSend;
+    pendingTimelineAnchorRef.current = anchorNewTurn ? messageIdForSend : null;
     activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
     setTimelineAnchor({
       threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
-      messageId: messageIdForSend,
+      messageId: anchorNewTurn ? messageIdForSend : null,
     });
     setOptimisticUserMessages((existing) => [
       ...existing,

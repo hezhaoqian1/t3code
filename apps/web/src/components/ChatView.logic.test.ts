@@ -710,6 +710,51 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(true);
   });
 
+  it("keeps sending while the provider session starts, then acknowledges once it settles", () => {
+    const localDispatch = createLocalDispatchSnapshot(
+      makeThread({ latestTurn: completedTurn, session: readySession }),
+    );
+    const startingSession = {
+      ...readySession,
+      status: "starting" as const,
+      updatedAt: "2026-03-29T00:01:00.000Z",
+    };
+    const common = {
+      localDispatch,
+      latestTurn: completedTurn,
+      latestUserMessageId: MessageId.make("message-just-sent"),
+      hasPendingApproval: false,
+      hasPendingUserInput: false,
+      threadError: null,
+    };
+
+    // Session status and timestamp both changed, but nothing runs yet.
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        phase: "connecting",
+        session: startingSession,
+      }),
+    ).toBe(false);
+    // The session failed to start: hand the composer back.
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        phase: "disconnected",
+        session: { ...startingSession, status: "error" },
+      }),
+    ).toBe(true);
+    // A pending approval or an error still wins while starting.
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        ...common,
+        phase: "connecting",
+        session: startingSession,
+        threadError: "failed",
+      }),
+    ).toBe(true);
+  });
+
   it("acknowledges pending user interaction and errors immediately", () => {
     const localDispatch = createLocalDispatchSnapshot(makeThread());
     const common = {
