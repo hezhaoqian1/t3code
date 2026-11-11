@@ -50,6 +50,11 @@ interface RightPanelTabsProps {
   filesAvailable: boolean;
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
+  /**
+   * False in office mode: only the browser and file previews are offered, not
+   * the terminal, diff or sub-agent panels.
+   */
+  technicalSurfacesAvailable?: boolean;
   children: ReactNode;
 }
 
@@ -90,6 +95,7 @@ function SurfaceMenuItem(props: {
 }
 
 function RightPanelEmptyState(props: {
+  technicalSurfacesAvailable: boolean;
   onAddBrowser: () => void;
   onAddTerminal: () => void;
   onAddDiff: () => void;
@@ -100,8 +106,9 @@ function RightPanelEmptyState(props: {
   filesAvailable: boolean;
   liveAgentCount: number;
 }) {
-  const actions = [
+  const allActions = [
     {
+      technical: false,
       label: "浏览器",
       description: "打开本地应用或网址。",
       icon: Globe2,
@@ -111,6 +118,7 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
+      technical: true,
       label: "终端",
       description: "在当前空间中启动终端。",
       icon: TerminalSquare,
@@ -120,6 +128,7 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
+      technical: false,
       label: "文件",
       description: "浏览并读取空间文件。",
       icon: Files,
@@ -129,6 +138,7 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
+      technical: true,
       label: "变更",
       description: "查看这个任务中的文件变更。",
       icon: FileDiff,
@@ -138,6 +148,7 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
+      technical: true,
       label: "Agent",
       description: "查看子 Agent 和工作流运行情况。",
       icon: Bot,
@@ -147,15 +158,16 @@ function RightPanelEmptyState(props: {
       badgeCount: props.liveAgentCount,
     },
   ] as const;
+  const actions = allActions.filter(
+    (action) => props.technicalSurfacesAvailable || !action.technical,
+  );
 
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center p-6">
       <div className="w-full max-w-xl">
         <div className="mb-5 text-center">
           <h3 className="text-sm font-medium text-foreground">打开面板</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Choose what to show in the right panel.
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">选择要在右侧显示的内容。</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {actions.map((action) => {
@@ -298,6 +310,7 @@ function SurfaceIcon({
 }
 
 export function RightPanelTabs(props: RightPanelTabsProps) {
+  const technicalSurfacesAvailable = props.technicalSurfacesAvailable ?? true;
   const ownsDesktopTitleBar = isElectron && props.mode === "inline";
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
@@ -472,32 +485,38 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onClick={props.onAddBrowser}
                   >
                     <Globe2 />
-                    Browser
+                    浏览器
                   </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddTerminal}>
-                    <TerminalSquare />
-                    Terminal
-                  </SurfaceMenuItem>
+                  {technicalSurfacesAvailable ? (
+                    <SurfaceMenuItem available onClick={props.onAddTerminal}>
+                      <TerminalSquare />
+                      终端
+                    </SurfaceMenuItem>
+                  ) : null}
                   <SurfaceMenuItem
                     available={props.filesAvailable}
                     disabledReason={SURFACE_DISABLED_REASONS.files}
                     onClick={props.onAddFiles}
                   >
                     <Files />
-                    Files
+                    文件
                   </SurfaceMenuItem>
-                  <SurfaceMenuItem
-                    available={props.diffAvailable}
-                    disabledReason={SURFACE_DISABLED_REASONS.diff}
-                    onClick={props.onAddDiff}
-                  >
-                    <FileDiff />
-                    Diff
-                  </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddAgents}>
-                    <Bot />
-                    Agents
-                  </SurfaceMenuItem>
+                  {technicalSurfacesAvailable ? (
+                    <>
+                      <SurfaceMenuItem
+                        available={props.diffAvailable}
+                        disabledReason={SURFACE_DISABLED_REASONS.diff}
+                        onClick={props.onAddDiff}
+                      >
+                        <FileDiff />
+                        变更
+                      </SurfaceMenuItem>
+                      <SurfaceMenuItem available onClick={props.onAddAgents}>
+                        <Bot />
+                        Agent
+                      </SurfaceMenuItem>
+                    </>
+                  ) : null}
                 </MenuPopup>
               </Menu>
             ) : null}
@@ -508,6 +527,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       <div className="flex min-h-0 flex-1 flex-col" data-right-panel-surface-content>
         {props.activeSurfaceId === null ? (
           <RightPanelEmptyState
+            technicalSurfacesAvailable={technicalSurfacesAvailable}
             onAddBrowser={props.onAddBrowser}
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}

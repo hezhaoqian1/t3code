@@ -185,6 +185,7 @@ import {
 import { sendQueuedMessage } from "./chat/sendQueuedMessage";
 import { useFdAccount } from "../fd/FdAccountProvider";
 import {
+  isOfficeRightPanelSurfaceKind,
   isOfficeWorkspaceProject,
   shouldBlockOfficeTechnicalWorkbenchCommand,
 } from "../officeMode";
@@ -6095,7 +6096,7 @@ function ChatViewContent(props: ChatViewProps) {
       terminalAvailable={!isOfficeMode && activeProject !== null}
       terminalOpen={terminalUiState.terminalOpen}
       terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
-      rightPanelAvailable={!isOfficeMode && activeProject !== null}
+      rightPanelAvailable={activeProject !== null}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
       // Suppressed while the Agents surface is visible: the roster itself is
@@ -6125,8 +6126,18 @@ function ChatViewContent(props: ChatViewProps) {
       {panelToggleControls}
     </div>
   );
+  // Office mode keeps the right panel for the task's previews only (browser
+  // and files); terminal, diff and sub-agent panels stay hidden there.
+  const rightPanelSurfaces = isOfficeMode
+    ? rightPanelState.surfaces.filter((surface) => isOfficeRightPanelSurfaceKind(surface.kind))
+    : rightPanelState.surfaces;
+  const visibleRightPanelSurfaceId =
+    isOfficeMode && !isOfficeRightPanelSurfaceKind(activeRightPanelSurface?.kind)
+      ? null
+      : (activeRightPanelSurface?.id ?? null);
   const rightPanelContent =
-    !isOfficeMode && activeThreadRef ? (
+    activeThreadRef &&
+    (!isOfficeMode || isOfficeRightPanelSurfaceKind(activeRightPanelSurface?.kind)) ? (
       activeRightPanelSurface?.kind === "preview" ? (
         <Suspense fallback={null}>
           <PreviewPanel
@@ -6655,12 +6666,13 @@ function ChatViewContent(props: ChatViewProps) {
           )}
       </div>
 
-      {!isOfficeMode && !shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
+      {!shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
           maximized={rightPanelMaximized}
-          surfaces={rightPanelState.surfaces}
-          activeSurfaceId={activeRightPanelSurface?.id ?? null}
+          surfaces={rightPanelSurfaces}
+          activeSurfaceId={visibleRightPanelSurfaceId}
+          technicalSurfacesAvailable={!isOfficeMode}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
           terminalLabelsById={activeTerminalLabelsById}
@@ -6683,13 +6695,14 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
-      {!isOfficeMode && shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
+      {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelSheet open onClose={closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"
             layoutControls={panelToggleControls}
-            surfaces={rightPanelState.surfaces}
-            activeSurfaceId={activeRightPanelSurface?.id ?? null}
+            surfaces={rightPanelSurfaces}
+            activeSurfaceId={visibleRightPanelSurfaceId}
+            technicalSurfacesAvailable={!isOfficeMode}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
             terminalLabelsById={activeTerminalLabelsById}

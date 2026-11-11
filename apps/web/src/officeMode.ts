@@ -85,11 +85,23 @@ export function isTechnicalWorkbenchCommand(command: string | null): boolean {
   return (
     command === "filePicker.toggle" ||
     command === "projectSearch.toggle" ||
-    command === "rightPanel.toggle" ||
     command === "diff.toggle" ||
     command.startsWith("terminal.") ||
     (command.startsWith("script.") && command.endsWith(".run"))
   );
+}
+
+/**
+ * Right-panel content an office-mode task can show: the browser preview and
+ * file previews, i.e. looking at what the task produced (HTML pages, PDFs,
+ * spreadsheets). Terminal, diff and sub-agent panels stay technical.
+ */
+export type OfficeRightPanelSurfaceKind = "preview" | "files" | "file";
+
+export function isOfficeRightPanelSurfaceKind(
+  kind: string | null | undefined,
+): kind is OfficeRightPanelSurfaceKind {
+  return kind === "preview" || kind === "files" || kind === "file";
 }
 
 export function shouldBlockOfficeTechnicalWorkbenchCommand(input: {

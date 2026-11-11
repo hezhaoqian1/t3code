@@ -6,6 +6,7 @@ import {
   isOfficeWorkspaceProject,
   isOfficeWorkspaceShellContext,
   isGeneratedTaskWorkspaceRoot,
+  isOfficeRightPanelSurfaceKind,
   isTaskAreaProject,
   isTechnicalWorkbenchCommand,
   shouldBlockOfficeTechnicalWorkbenchCommand,
@@ -174,11 +175,19 @@ describe("officeMode", () => {
     expect(shouldExposeTechnicalWorkbenchEntryPoints(false)).toBe(true);
   });
 
+  it("keeps browser and file previews in office mode, and nothing else on the right", () => {
+    for (const kind of ["preview", "files", "file"]) {
+      expect(isOfficeRightPanelSurfaceKind(kind)).toBe(true);
+    }
+    for (const kind of ["terminal", "diff", "agents", null, undefined]) {
+      expect(isOfficeRightPanelSurfaceKind(kind)).toBe(false);
+    }
+  });
+
   it("blocks technical workbench commands only while office mode is active", () => {
     for (const command of [
       "filePicker.toggle",
       "projectSearch.toggle",
-      "rightPanel.toggle",
       "diff.toggle",
       "terminal.toggle",
       "terminal.new",
@@ -194,6 +203,8 @@ describe("officeMode", () => {
       );
     }
     expect(isTechnicalWorkbenchCommand("chat.new")).toBe(false);
+    // The right panel holds the task's previews, which office mode keeps.
+    expect(isTechnicalWorkbenchCommand("rightPanel.toggle")).toBe(false);
     expect(
       shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: true, command: "chat.new" }),
     ).toBe(false);
