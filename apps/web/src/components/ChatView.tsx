@@ -185,7 +185,6 @@ import {
 import { sendQueuedMessage } from "./chat/sendQueuedMessage";
 import { useFdAccount } from "../fd/FdAccountProvider";
 import {
-  isOfficeRightPanelSurfaceKind,
   isOfficeWorkspaceProject,
   shouldBlockOfficeTechnicalWorkbenchCommand,
 } from "../officeMode";
@@ -6093,7 +6092,7 @@ function ChatViewContent(props: ChatViewProps) {
 
   const panelToggleControls = (
     <PanelLayoutControls
-      terminalAvailable={!isOfficeMode && activeProject !== null}
+      terminalAvailable={activeProject !== null}
       terminalOpen={terminalUiState.terminalOpen}
       terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
       rightPanelAvailable={activeProject !== null}
@@ -6126,88 +6125,79 @@ function ChatViewContent(props: ChatViewProps) {
       {panelToggleControls}
     </div>
   );
-  // Office mode keeps the right panel for the task's previews (browser and
-  // files) and its sub-agent runs; terminal and diff panels stay hidden there.
-  const rightPanelSurfaces = isOfficeMode
-    ? rightPanelState.surfaces.filter((surface) => isOfficeRightPanelSurfaceKind(surface.kind))
-    : rightPanelState.surfaces;
-  const visibleRightPanelSurfaceId =
-    isOfficeMode && !isOfficeRightPanelSurfaceKind(activeRightPanelSurface?.kind)
-      ? null
-      : (activeRightPanelSurface?.id ?? null);
-  const rightPanelContent =
-    activeThreadRef &&
-    (!isOfficeMode || isOfficeRightPanelSurfaceKind(activeRightPanelSurface?.kind)) ? (
-      activeRightPanelSurface?.kind === "preview" ? (
-        <Suspense fallback={null}>
-          <PreviewPanel
-            mode="embedded"
-            threadRef={activeThreadRef}
-            tabId={activeRightPanelSurface.resourceId}
-            configuredUrls={configuredPreviewUrls}
-            visible
-            onSendAnnotation={(annotation, image) => {
-              void onSend(undefined, { annotation, image });
-            }}
-          />
-        </Suspense>
-      ) : activeRightPanelSurface?.kind === "terminal" ? (
-        <PersistentThreadTerminalPanel
+  // Office mode only changes the chrome (no Git or project controls in the
+  // header); the terminal drawer and every right-panel surface work as usual.
+  const rightPanelContent = activeThreadRef ? (
+    activeRightPanelSurface?.kind === "preview" ? (
+      <Suspense fallback={null}>
+        <PreviewPanel
+          mode="embedded"
           threadRef={activeThreadRef}
-          surface={activeRightPanelSurface}
-          launchContext={activeTerminalLaunchContext ?? null}
-          focusRequestId={terminalFocusRequestId}
+          tabId={activeRightPanelSurface.resourceId}
+          configuredUrls={configuredPreviewUrls}
+          visible
+          onSendAnnotation={(annotation, image) => {
+            void onSend(undefined, { annotation, image });
+          }}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === "terminal" ? (
+      <PersistentThreadTerminalPanel
+        threadRef={activeThreadRef}
+        surface={activeRightPanelSurface}
+        launchContext={activeTerminalLaunchContext ?? null}
+        focusRequestId={terminalFocusRequestId}
+        keybindings={keybindings}
+        onAddTerminalContext={addTerminalContextToDraft}
+        onSplitTerminal={splitPanelTerminal}
+        onSplitTerminalVertical={splitPanelTerminalVertical}
+        onNewTerminal={addTerminalSurface}
+        onActiveTerminalChange={activatePanelTerminal}
+        onCloseTerminal={closePanelTerminal}
+        splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+        splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
+        newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+        closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+      />
+    ) : activeRightPanelSurface?.kind === "diff" ? (
+      <Suspense fallback={null}>
+        <DiffPanel
+          key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
+          mode="embedded"
+          composerDraftTarget={composerDraftTarget}
+          initialGitScope={initialDiffPanelGitScope}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === "agents" ? (
+      <AgentsPanel
+        model={agentPanelModel}
+        environmentId={activeThreadRef?.environmentId ?? null}
+        threadId={activeThreadRef?.threadId ?? null}
+      />
+    ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
+      activeProject &&
+      activeWorkspaceRoot ? (
+      <Suspense fallback={null}>
+        <FilePreviewPanel
+          key={`${activeProject.environmentId}:${activeWorkspaceRoot}`}
+          environmentId={activeProject.environmentId}
+          cwd={activeWorkspaceRoot}
+          projectName={activeProject.title}
+          threadRef={activeThreadRef}
+          composerDraftTarget={composerDraftTarget}
           keybindings={keybindings}
-          onAddTerminalContext={addTerminalContextToDraft}
-          onSplitTerminal={splitPanelTerminal}
-          onSplitTerminalVertical={splitPanelTerminalVertical}
-          onNewTerminal={addTerminalSurface}
-          onActiveTerminalChange={activatePanelTerminal}
-          onCloseTerminal={closePanelTerminal}
-          splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-          splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
-          newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-          closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+          availableEditors={availableEditors}
+          relativePath={
+            activeRightPanelSurface.kind === "file" ? activeRightPanelSurface.relativePath : null
+          }
+          revealLine={activeFileSurface?.revealLine ?? null}
+          revealRequestId={activeFileSurface?.revealRequestId ?? 0}
+          onOpenFile={openFileSurface}
+          onPendingChange={handleFilePendingChange}
         />
-      ) : activeRightPanelSurface?.kind === "diff" ? (
-        <Suspense fallback={null}>
-          <DiffPanel
-            key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
-            mode="embedded"
-            composerDraftTarget={composerDraftTarget}
-            initialGitScope={initialDiffPanelGitScope}
-          />
-        </Suspense>
-      ) : activeRightPanelSurface?.kind === "agents" ? (
-        <AgentsPanel
-          model={agentPanelModel}
-          environmentId={activeThreadRef?.environmentId ?? null}
-          threadId={activeThreadRef?.threadId ?? null}
-        />
-      ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
-        activeProject &&
-        activeWorkspaceRoot ? (
-        <Suspense fallback={null}>
-          <FilePreviewPanel
-            key={`${activeProject.environmentId}:${activeWorkspaceRoot}`}
-            environmentId={activeProject.environmentId}
-            cwd={activeWorkspaceRoot}
-            projectName={activeProject.title}
-            threadRef={activeThreadRef}
-            composerDraftTarget={composerDraftTarget}
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            relativePath={
-              activeRightPanelSurface.kind === "file" ? activeRightPanelSurface.relativePath : null
-            }
-            revealLine={activeFileSurface?.revealLine ?? null}
-            revealRequestId={activeFileSurface?.revealRequestId ?? 0}
-            onOpenFile={openFileSurface}
-            onPendingChange={handleFilePendingChange}
-          />
-        </Suspense>
-      ) : null
-    ) : null;
+      </Suspense>
+    ) : null
+  ) : null;
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
@@ -6640,38 +6630,32 @@ function ChatViewContent(props: ChatViewProps) {
         </div>
         {/* end horizontal flex container */}
 
-        {!isOfficeMode &&
-          mountedTerminalThreadRefs.map(
-            ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
-              <PersistentThreadTerminalDrawer
-                key={mountedThreadKey}
-                threadRef={mountedThreadRef}
-                threadId={mountedThreadRef.threadId}
-                visible={mountedThreadKey === activeThreadKey && terminalUiState.terminalOpen}
-                launchContext={
-                  mountedThreadKey === activeThreadKey
-                    ? (activeTerminalLaunchContext ?? null)
-                    : null
-                }
-                focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
-                splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-                splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
-                newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-                closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-                keybindings={keybindings}
-                onAddTerminalContext={addTerminalContextToDraft}
-              />
-            ),
-          )}
+        {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
+          <PersistentThreadTerminalDrawer
+            key={mountedThreadKey}
+            threadRef={mountedThreadRef}
+            threadId={mountedThreadRef.threadId}
+            visible={mountedThreadKey === activeThreadKey && terminalUiState.terminalOpen}
+            launchContext={
+              mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
+            }
+            focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
+            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+            splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
+            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+            keybindings={keybindings}
+            onAddTerminalContext={addTerminalContextToDraft}
+          />
+        ))}
       </div>
 
       {!shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
           maximized={rightPanelMaximized}
-          surfaces={rightPanelSurfaces}
-          activeSurfaceId={visibleRightPanelSurfaceId}
-          technicalSurfacesAvailable={!isOfficeMode}
+          surfaces={rightPanelState.surfaces}
+          activeSurfaceId={activeRightPanelSurface?.id ?? null}
           pendingSurfaceIds={pendingFileSurfaceIds}
           previewSessions={activePreviewState.sessions}
           terminalLabelsById={activeTerminalLabelsById}
@@ -6699,9 +6683,8 @@ function ChatViewContent(props: ChatViewProps) {
           <RightPanelTabs
             mode="sheet"
             layoutControls={panelToggleControls}
-            surfaces={rightPanelSurfaces}
-            activeSurfaceId={visibleRightPanelSurfaceId}
-            technicalSurfacesAvailable={!isOfficeMode}
+            surfaces={rightPanelState.surfaces}
+            activeSurfaceId={activeRightPanelSurface?.id ?? null}
             pendingSurfaceIds={pendingFileSurfaceIds}
             previewSessions={activePreviewState.sessions}
             terminalLabelsById={activeTerminalLabelsById}

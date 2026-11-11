@@ -6,7 +6,6 @@ import {
   isOfficeWorkspaceProject,
   isOfficeWorkspaceShellContext,
   isGeneratedTaskWorkspaceRoot,
-  isOfficeRightPanelSurfaceKind,
   isTaskAreaProject,
   isTechnicalWorkbenchCommand,
   shouldBlockOfficeTechnicalWorkbenchCommand,
@@ -175,27 +174,8 @@ describe("officeMode", () => {
     expect(shouldExposeTechnicalWorkbenchEntryPoints(false)).toBe(true);
   });
 
-  it("keeps previews and sub-agent runs in office mode, not the terminal or diff", () => {
-    for (const kind of ["preview", "files", "file", "agents"]) {
-      expect(isOfficeRightPanelSurfaceKind(kind)).toBe(true);
-    }
-    for (const kind of ["terminal", "diff", null, undefined]) {
-      expect(isOfficeRightPanelSurfaceKind(kind)).toBe(false);
-    }
-  });
-
   it("blocks technical workbench commands only while office mode is active", () => {
-    for (const command of [
-      "filePicker.toggle",
-      "projectSearch.toggle",
-      "diff.toggle",
-      "terminal.toggle",
-      "terminal.new",
-      "terminal.split",
-      "terminal.splitVertical",
-      "terminal.close",
-      "script.test.run",
-    ]) {
+    for (const command of ["filePicker.toggle", "projectSearch.toggle", "script.test.run"]) {
       expect(isTechnicalWorkbenchCommand(command)).toBe(true);
       expect(shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: true, command })).toBe(true);
       expect(shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: false, command })).toBe(
@@ -203,8 +183,11 @@ describe("officeMode", () => {
       );
     }
     expect(isTechnicalWorkbenchCommand("chat.new")).toBe(false);
-    // The right panel holds the task's previews, which office mode keeps.
-    expect(isTechnicalWorkbenchCommand("rightPanel.toggle")).toBe(false);
+    // Office mode only changes the chrome: the panels and terminal still work.
+    for (const command of ["rightPanel.toggle", "diff.toggle", "terminal.toggle", "terminal.new"]) {
+      expect(isTechnicalWorkbenchCommand(command)).toBe(false);
+      expect(shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: true, command })).toBe(false);
+    }
     expect(
       shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: true, command: "chat.new" }),
     ).toBe(false);
