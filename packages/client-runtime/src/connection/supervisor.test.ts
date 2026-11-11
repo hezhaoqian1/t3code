@@ -53,9 +53,14 @@ function awaitState(
 }
 
 const makeHarness = Effect.fn("TestPrimarySupervisor.make")(function* (
-  initialNetwork: NetworkStatus = "online",
+  options: {
+    readonly network?: NetworkStatus;
+    /** Runs at the start of each connection attempt (1-based). */
+    readonly beforeConnect?: (attempt: number) => Effect.Effect<void>;
+    readonly probe?: Effect.Effect<void, ConnectionTransientError>;
+  } = {},
 ) {
-  const network = yield* SubscriptionRef.make<NetworkStatus>(initialNetwork);
+  const network = yield* SubscriptionRef.make<NetworkStatus>(options.network ?? "online");
   const attempts = yield* Ref.make(0);
   const releases = yield* Ref.make(0);
   const closed = yield* Ref.make<ReadonlyArray<Deferred.Deferred<never, ConnectionTransientError>>>(
@@ -69,9 +74,10 @@ const makeHarness = Effect.fn("TestPrimarySupervisor.make")(function* (
   const driver = ConnectionDriver.ConnectionDriver.of({
     connect: (_entry, reportProgress) =>
       Effect.gen(function* () {
+        const attempt = yield* Ref.updateAndGet(attempts, (count) => count + 1);
+        if (options.beforeConnect) yield* options.beforeConnect(attempt);
         yield* reportProgress({ stage: "preparing" });
         yield* reportProgress({ stage: "opening", prepared: PREPARED });
-        const attempt = yield* Ref.updateAndGet(attempts, (count) => count + 1);
         const sessionClosed = yield* Deferred.make<never, ConnectionTransientError>();
         yield* Ref.update(closed, (current) => [...current, sessionClosed]);
         const session = yield* Effect.acquireRelease(
@@ -79,7 +85,7 @@ const makeHarness = Effect.fn("TestPrimarySupervisor.make")(function* (
             client: {} as WsRpcProtocolClient,
             initialConfig: Effect.never,
             ready: Effect.void,
-            probe: Effect.void,
+            probe: options.probe ?? Effect.void,
             closed: Deferred.await(sessionClosed),
           } satisfies RpcSession),
           () => Ref.update(releases, (count) => count + 1),
@@ -115,20 +121,103 @@ const makeHarness = Effect.fn("TestPrimarySupervisor.make")(function* (
 });
 
 describe("EnvironmentSupervisor", () => {
-  it.effect("does not contact the primary endpoint while the network is offline", () =>
+  // The browser's navigator.onLine is often wrong behind corporate proxies and
+  // VPNs, while the primary environment runs on loopback beside the app.
+  it.effect("connects to the primary environment while the device reports offline", () =>
     Effect.gen(function* () {
-      const harness = yield* makeHarness("offline");
+      const harness = yield* makeHarness({ network: "offline" });
       const supervisor = yield* EnvironmentSupervisor.make(ENTRY, { initiallyDesired: true }).pipe(
         Effect.provide(harness.dependencies),
       );
 
-      expect((yield* SubscriptionRef.get(supervisor.state)).phase).toBe("offline");
-      expect(yield* Ref.get(harness.attempts)).toBe(0);
+      const settled = yield* awaitState(
+        supervisor.state,
+        (state) => state.phase === "connected" || state.phase === "offline",
+      );
 
-      yield* harness.setNetwork("online");
-      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      expect(settled).toMatchObject({
+        phase: "connected",
+        network: "unknown",
+        attempt: 1,
+        lastFailure: null,
+      });
       expect(yield* Ref.get(harness.attempts)).toBe(1);
     }),
+  );
+
+  it.effect(
+    "keeps a primary attempt through an offline report and restarts it when the network returns",
+    () =>
+      Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const harness = yield* makeHarness({
+          beforeConnect: (attempt) =>
+            attempt === 1
+              ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+              : Effect.void,
+        });
+        const supervisor = yield* EnvironmentSupervisor.make(ENTRY, {
+          initiallyDesired: true,
+        }).pipe(Effect.provide(harness.dependencies));
+
+        yield* Deferred.await(started);
+        yield* harness.setNetwork("offline");
+        yield* TestClock.adjust("1 second");
+        expect(yield* Ref.get(harness.attempts)).toBe(1);
+        expect((yield* SubscriptionRef.get(supervisor.state)).phase).toBe("connecting");
+
+        yield* harness.setNetwork("online");
+        yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+        expect(yield* Ref.get(harness.attempts)).toBe(2);
+      }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("keeps a healthy primary session through an offline report", () =>
+    Effect.gen(function* () {
+      const probed = yield* Deferred.make<void>();
+      const harness = yield* makeHarness({ probe: Deferred.succeed(probed, undefined) });
+      const supervisor = yield* EnvironmentSupervisor.make(ENTRY, { initiallyDesired: true }).pipe(
+        Effect.provide(harness.dependencies),
+      );
+
+      yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+      yield* harness.setNetwork("offline");
+      yield* Deferred.await(probed);
+      yield* TestClock.adjust("5 seconds");
+
+      expect(yield* SubscriptionRef.get(supervisor.state)).toMatchObject({
+        phase: "connected",
+        generation: 1,
+      });
+      expect(yield* Ref.get(harness.attempts)).toBe(1);
+      expect(yield* Ref.get(harness.releases)).toBe(0);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect(
+    "checks the primary session when the device reports offline and replaces a dead one",
+    () =>
+      Effect.gen(function* () {
+        const probed = yield* Deferred.make<void>();
+        const harness = yield* makeHarness({
+          probe: Deferred.succeed(probed, undefined).pipe(Effect.andThen(Effect.never)),
+        });
+        const supervisor = yield* EnvironmentSupervisor.make(ENTRY, {
+          initiallyDesired: true,
+        }).pipe(Effect.provide(harness.dependencies));
+
+        yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+        yield* harness.setNetwork("offline");
+        yield* Deferred.await(probed);
+        yield* TestClock.adjust("3 seconds");
+        yield* awaitState(
+          supervisor.state,
+          (state) => state.phase === "connected" && state.generation === 2,
+        );
+
+        expect(yield* Ref.get(harness.attempts)).toBe(2);
+        expect(yield* Ref.get(harness.releases)).toBe(1);
+      }).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("reconnects the primary WebSocket after an involuntary close", () =>
