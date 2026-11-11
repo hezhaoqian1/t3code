@@ -164,7 +164,14 @@ export function isSameOriginRendererNavigation(input: {
   readonly navigationUrl: string;
 }): boolean {
   try {
-    return new URL(input.applicationUrl).origin === new URL(input.navigationUrl).origin;
+    const applicationUrl = new URL(input.applicationUrl);
+    const navigationUrl = new URL(input.navigationUrl);
+    // Node serializes custom-scheme origins as "null", even for different hosts and schemes.
+    return (
+      applicationUrl.host !== "" &&
+      navigationUrl.protocol === applicationUrl.protocol &&
+      navigationUrl.host === applicationUrl.host
+    );
   } catch {
     return false;
   }
