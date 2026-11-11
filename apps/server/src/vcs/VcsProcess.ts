@@ -97,6 +97,11 @@ export const make = Effect.gen(function* () {
       argumentCount: input.args.length,
     };
 
+    // Failures are read by English patterns, but Git follows the system language when it
+    // ships translations (macOS Git without LANG, localized Git builds on Windows).
+    // LANGUAGE leaves LC_CTYPE, which hooks inherit, alone. The runner extends the host env.
+    const env = input.command === "git" ? { LANGUAGE: "C", ...input.env } : input.env;
+
     const result = yield* processRunner
       .run({
         command: input.command,
@@ -104,7 +109,7 @@ export const make = Effect.gen(function* () {
         cwd: input.cwd,
         ...(input.spawnCwd !== undefined ? { spawnCwd: input.spawnCwd } : {}),
         ...(input.stdin !== undefined ? { stdin: input.stdin } : {}),
-        ...(input.env !== undefined ? { env: input.env } : {}),
+        ...(env !== undefined ? { env } : {}),
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxOutputBytes: input.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
         outputMode: "truncate",
