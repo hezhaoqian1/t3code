@@ -593,7 +593,6 @@ export interface ChatComposerProps {
   activeThreadModelSelection: ModelSelection | null | undefined;
 
   // Context window
-  activeThreadActivities: Thread["activities"] | undefined;
 
   // Misc
   resolvedTheme: "light" | "dark";
@@ -693,7 +692,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectSkillCatalogState,
     activeProjectDefaultModelSelection,
     activeThreadModelSelection,
-    activeThreadActivities,
     resolvedTheme,
     settings,
     keybindings,

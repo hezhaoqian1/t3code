@@ -6468,7 +6468,6 @@ function ChatViewContent(props: ChatViewProps) {
                               activeProject?.defaultModelSelection
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
-                            activeThreadActivities={activeThread?.activities}
                             resolvedTheme={resolvedTheme}
                             settings={settings}
                             keybindings={keybindings}

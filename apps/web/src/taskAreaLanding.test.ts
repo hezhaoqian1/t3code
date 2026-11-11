@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - reads index.html and public/ from disk.
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import { renderBootSplashMarkup, BOOT_SPLASH_APP_STATUSES } from "@t3tools/shared/bootSplash";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -40,10 +40,10 @@ describe("start page while the task area loads", () => {
 });
 
 describe("index.html boot shell", () => {
-  const webRoot = resolve(import.meta.dirname, "..");
+  const webRoot = NodePath.resolve(import.meta.dirname, "..");
 
   it("keeps the markers the Vite plugin fills with the shared loading screen", () => {
-    const html = readFileSync(resolve(webRoot, "index.html"), "utf8");
+    const html = NodeFS.readFileSync(NodePath.resolve(webRoot, "index.html"), "utf8");
     expect(html).toContain(`<div id="boot-shell">`);
     expect(html).toContain("<!-- fd-boot-splash:style -->");
     expect(html).toContain("<!-- fd-boot-splash:markup -->");
@@ -57,7 +57,7 @@ describe("index.html boot shell", () => {
     });
     for (const src of [BOOT_MARK_PURPLE_SRC, BOOT_MARK_NAVY_SRC]) {
       expect(markup).toContain(`src="${src}"`);
-      expect(existsSync(resolve(webRoot, "public", src.slice(1)))).toBe(true);
+      expect(NodeFS.existsSync(NodePath.resolve(webRoot, "public", src.slice(1)))).toBe(true);
     }
   });
 });
