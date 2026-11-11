@@ -47,6 +47,10 @@
       "types": "./src/textPaste.ts",
       "default": "./src/textPaste.ts"
     },
+    "./delayed-status": {
+      "types": "./src/delayedStatus.ts",
+      "default": "./src/delayedStatus.ts"
+    },
     "./work-log/presentation": {
       "types": "./src/work-log/presentation.ts",
       "default": "./src/work-log/presentation.ts"

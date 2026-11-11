@@ -119,6 +119,7 @@ import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
@@ -1196,6 +1197,12 @@ function ChatViewContent(props: ChatViewProps) {
   const draftId = routeKind === "draft" ? props.draftId : null;
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
   const threadDetailLoading = threadSyncPhase === "loading";
+  // Opening a running thread resyncs for a few frames. Show the pill only when
+  // the sync lasts (upstream ab70c8943); logic keeps reading the real phase.
+  const shownThreadSyncPhase = useDelayedStatus(
+    `${props.environmentId}:${props.threadId}`,
+    threadSyncPhase,
+  );
   const handleNewThread = useNewThreadHandler();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -6377,8 +6384,8 @@ function ChatViewContent(props: ChatViewProps) {
                     onRemove={onRemoveQueuedMessage}
                     onRestore={onRestoreQueuedMessage}
                   />
-                  {threadSyncPhase && !activeEnvironmentUnavailable ? (
-                    <ThreadSyncStatusPill phase={threadSyncPhase} />
+                  {shownThreadSyncPhase && !activeEnvironmentUnavailable ? (
+                    <ThreadSyncStatusPill phase={shownThreadSyncPhase} />
                   ) : null}
                   <div
                     className="relative"

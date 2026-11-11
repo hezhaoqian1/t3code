@@ -23,5 +23,5 @@ export function resolveThreadSyncPhase(input: {
 }
 
 export function threadSyncLabel(phase: ThreadSyncPhase): string {
-  return phase === "loading" ? "Loading messages..." : "Syncing messages...";
+  return phase === "loading" ? "正在加载消息…" : "正在同步消息…";
 }
