@@ -55,10 +55,17 @@ export function deriveTaskFolderLabel(title: string | null | undefined): string 
   if (Array.from(firstClause.replace(DISALLOWED_LABEL_CHARACTERS, "")).length >= 4) {
     text = firstClause;
   }
-  const label = Array.from(text.replace(DISALLOWED_LABEL_CHARACTERS, "-").replace(/^-+|-+$/gu, ""))
-    .slice(0, TASK_FOLDER_LABEL_MAX_LENGTH)
-    .join("")
-    .replace(/-+$/u, "");
+  const characters = Array.from(
+    text.replace(DISALLOWED_LABEL_CHARACTERS, "-").replace(/^-+|-+$/gu, ""),
+  );
+  let kept = characters.slice(0, TASK_FOLDER_LABEL_MAX_LENGTH);
+  // Don't end in the middle of a Latin word: back up to the last word break.
+  const isLatin = (character: string | undefined) => /^[A-Za-z0-9]$/u.test(character ?? "");
+  if (isLatin(characters[kept.length]) && isLatin(kept[kept.length - 1])) {
+    const lastBreak = kept.lastIndexOf("-");
+    if (lastBreak >= 4) kept = kept.slice(0, lastBreak);
+  }
+  const label = kept.join("").replace(/-+$/u, "");
   return label.length > 0 ? label : TASK_FOLDER_FALLBACK_LABEL;
 }
 

@@ -56,6 +56,8 @@ it.layer(TestLayer)("taskWorkspace", (it) => {
       ["生成PPT，10页", "生成PPT"],
       // Spaces and symbols become hyphens; letters and digits stay.
       ["Build a Q3 sales/ops report", "Build-a-Q3-sales-ops"],
+      // A cut never ends inside an English word.
+      ["Summarize three benefits of index funds", "Summarize-three"],
       ['把 "合同.docx" 转成 PDF', "把-合同-docx-转成-PDF"],
       // Full-width characters fold to ASCII; emoji and Windows-illegal characters go.
       ["整理ＡＢＣ数据🙂<>:*?|", "整理ABC数据"],
