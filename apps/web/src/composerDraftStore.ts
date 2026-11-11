@@ -1653,6 +1653,25 @@ function normalizePersistedDraftThreads(
   return { draftThreadsByThreadKey, logicalProjectDraftThreadKeyByLogicalProjectKey };
 }
 
+/**
+ * Older versions wrote `provider` and object-shaped options into the
+ * per-provider maps. Normalize each entry and drop the ones that can't be read,
+ * instead of trusting the stored shape: one bad entry used to fail the whole
+ * store's validation and wipe every draft (upstream 228e289506).
+ */
+function normalizePersistedModelSelectionByProvider(
+  value: object,
+): Partial<Record<ProviderInstanceId, ModelSelection>> {
+  const result: Partial<Record<ProviderInstanceId, ModelSelection>> = {};
+  for (const [key, selection] of Object.entries(value)) {
+    const instanceId = normalizeProviderInstanceId(key);
+    const normalized = normalizeModelSelection(selection, { provider: key });
+    if (instanceId === null || normalized === null) continue;
+    result[instanceId] = normalized;
+  }
+  return result;
+}
+
 function normalizePersistedDraftsByThreadId(
   rawDraftMap: unknown,
   draftThreadsByThreadKey: PersistedComposerDraftStoreState["draftThreadsByThreadKey"],
@@ -1728,9 +1747,9 @@ function normalizePersistedDraftsByThreadId(
       typeof draftCandidate.modelSelectionByProvider === "object"
     ) {
       // v3 format
-      modelSelectionByProvider = draftCandidate.modelSelectionByProvider as Partial<
-        Record<ProviderInstanceId, ModelSelection>
-      >;
+      modelSelectionByProvider = normalizePersistedModelSelectionByProvider(
+        draftCandidate.modelSelectionByProvider,
+      );
       activeProvider = normalizeProviderInstanceId(draftCandidate.activeProvider);
     } else {
       // v2 or legacy format: migrate
@@ -1984,10 +2003,9 @@ function normalizeCurrentPersistedComposerDraftStoreState(
     normalizedPersistedState.stickyModelSelectionByProvider &&
     typeof normalizedPersistedState.stickyModelSelectionByProvider === "object"
   ) {
-    stickyModelSelectionByProvider =
-      normalizedPersistedState.stickyModelSelectionByProvider as Partial<
-        Record<ProviderInstanceId, ModelSelection>
-      >;
+    stickyModelSelectionByProvider = normalizePersistedModelSelectionByProvider(
+      normalizedPersistedState.stickyModelSelectionByProvider,
+    );
     stickyActiveProvider = normalizeProviderInstanceId(
       normalizedPersistedState.stickyActiveProvider,
     );

@@ -1891,6 +1891,58 @@ describe("composer draft persistence", () => {
       resetComposerDraftStore();
     }
   });
+
+  // Upstream 228e289506: an older stored selection shape used to reach the
+  // store unchecked and could fail validation, wiping every saved draft.
+  it("upgrades older stored model selections and drops unreadable ones instead of wiping drafts", async () => {
+    await useComposerDraftStore.persist.clearStorage();
+    vi.useFakeTimers();
+    const threadId = ThreadId.make("legacy-selection-draft");
+    const threadKey = threadKeyFor(threadId, TEST_ENVIRONMENT_ID);
+    const legacySelection = { provider: "codex", model: "gpt-5.4", options: [] };
+    try {
+      resetComposerDraftStore();
+      const storage = useComposerDraftStore.persist.getOptions().storage;
+      expect(storage).toBeDefined();
+      storage?.setItem(COMPOSER_DRAFT_STORAGE_KEY, {
+        version: 8,
+        state: {
+          draftsByThreadKey: {
+            [threadKey]: {
+              prompt: "keep this draft",
+              attachments: [],
+              modelSelectionByProvider: { codex: legacySelection, broken: { model: 42 } },
+              activeProvider: "codex",
+            },
+          },
+          draftThreadsByThreadKey: {},
+          logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+          stickyModelSelectionByProvider: { codex: legacySelection, broken: "not a selection" },
+          stickyActiveProvider: "codex",
+        },
+      } as never);
+      await vi.advanceTimersByTimeAsync(300);
+
+      resetComposerDraftStore();
+      await useComposerDraftStore.persist.rehydrate();
+
+      const upgraded = createModelSelection(CODEX_INSTANCE, "gpt-5.4");
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toMatchObject({
+        prompt: "keep this draft",
+        modelSelectionByProvider: { [CODEX_INSTANCE]: upgraded },
+      });
+      expect(
+        Object.keys(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider ?? {}),
+      ).toEqual([CODEX_INSTANCE]);
+      expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toEqual({
+        [CODEX_INSTANCE]: upgraded,
+      });
+    } finally {
+      await useComposerDraftStore.persist.clearStorage();
+      vi.useRealTimers();
+      resetComposerDraftStore();
+    }
+  });
 });
 
 describe("createDeferredStorage", () => {
