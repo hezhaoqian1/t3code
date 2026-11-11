@@ -69,6 +69,7 @@ def main() -> None:
         f'export const BOOT_MARK_PURPLE_DATA_URL =\n  "data:image/png;base64,{encoded["purple"]}";\n'
         f'export const BOOT_MARK_NAVY_DATA_URL =\n  "data:image/png;base64,{encoded["navy"]}";\n',
         encoding="utf-8",
+        newline="\n",
     )
     print(f"wrote {WEB_PUBLIC}/boot-mark-*.png and {DESKTOP_MODULE}")
 
