@@ -693,7 +693,8 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
         yield* execute({
           operation,
           cwd: input.cwd,
-          args: ["add", "-A", "--", "."],
+          // safecrlf=true refuses LF files under CRLF conversion; capture them as Git's default does.
+          args: ["-c", "core.safecrlf=false", "add", "-A", "--", "."],
           env: commitEnv,
         });
 
