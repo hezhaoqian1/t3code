@@ -6126,8 +6126,8 @@ function ChatViewContent(props: ChatViewProps) {
       {panelToggleControls}
     </div>
   );
-  // Office mode keeps the right panel for the task's previews only (browser
-  // and files); terminal, diff and sub-agent panels stay hidden there.
+  // Office mode keeps the right panel for the task's previews (browser and
+  // files) and its sub-agent runs; terminal and diff panels stay hidden there.
   const rightPanelSurfaces = isOfficeMode
     ? rightPanelState.surfaces.filter((surface) => isOfficeRightPanelSurfaceKind(surface.kind))
     : rightPanelState.surfaces;

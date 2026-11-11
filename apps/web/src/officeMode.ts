@@ -92,16 +92,17 @@ export function isTechnicalWorkbenchCommand(command: string | null): boolean {
 }
 
 /**
- * Right-panel content an office-mode task can show: the browser preview and
- * file previews, i.e. looking at what the task produced (HTML pages, PDFs,
- * spreadsheets). Terminal, diff and sub-agent panels stay technical.
+ * Right-panel content an office-mode task can show: what the task produced
+ * (browser and file previews of HTML pages, PDFs, spreadsheets) and how its
+ * work is going (sub-agent and workflow runs). Terminal and diff stay
+ * technical.
  */
-export type OfficeRightPanelSurfaceKind = "preview" | "files" | "file";
+export type OfficeRightPanelSurfaceKind = "preview" | "files" | "file" | "agents";
 
 export function isOfficeRightPanelSurfaceKind(
   kind: string | null | undefined,
 ): kind is OfficeRightPanelSurfaceKind {
-  return kind === "preview" || kind === "files" || kind === "file";
+  return kind === "preview" || kind === "files" || kind === "file" || kind === "agents";
 }
 
 export function shouldBlockOfficeTechnicalWorkbenchCommand(input: {

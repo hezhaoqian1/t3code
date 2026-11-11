@@ -175,11 +175,11 @@ describe("officeMode", () => {
     expect(shouldExposeTechnicalWorkbenchEntryPoints(false)).toBe(true);
   });
 
-  it("keeps browser and file previews in office mode, and nothing else on the right", () => {
-    for (const kind of ["preview", "files", "file"]) {
+  it("keeps previews and sub-agent runs in office mode, not the terminal or diff", () => {
+    for (const kind of ["preview", "files", "file", "agents"]) {
       expect(isOfficeRightPanelSurfaceKind(kind)).toBe(true);
     }
-    for (const kind of ["terminal", "diff", "agents", null, undefined]) {
+    for (const kind of ["terminal", "diff", null, undefined]) {
       expect(isOfficeRightPanelSurfaceKind(kind)).toBe(false);
     }
   });

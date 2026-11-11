@@ -51,8 +51,8 @@ interface RightPanelTabsProps {
   /** Running + waiting subagents; badges the Agents card in the empty state. */
   liveAgentCount: number;
   /**
-   * False in office mode: only the browser and file previews are offered, not
-   * the terminal, diff or sub-agent panels.
+   * False in office mode: the browser, file and sub-agent panels are offered,
+   * not the terminal or diff.
    */
   technicalSurfacesAvailable?: boolean;
   children: ReactNode;
@@ -148,7 +148,7 @@ function RightPanelEmptyState(props: {
       badgeCount: 0,
     },
     {
-      technical: true,
+      technical: false,
       label: "Agent",
       description: "查看子 Agent 和工作流运行情况。",
       icon: Bot,
@@ -502,21 +502,19 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     文件
                   </SurfaceMenuItem>
                   {technicalSurfacesAvailable ? (
-                    <>
-                      <SurfaceMenuItem
-                        available={props.diffAvailable}
-                        disabledReason={SURFACE_DISABLED_REASONS.diff}
-                        onClick={props.onAddDiff}
-                      >
-                        <FileDiff />
-                        变更
-                      </SurfaceMenuItem>
-                      <SurfaceMenuItem available onClick={props.onAddAgents}>
-                        <Bot />
-                        Agent
-                      </SurfaceMenuItem>
-                    </>
+                    <SurfaceMenuItem
+                      available={props.diffAvailable}
+                      disabledReason={SURFACE_DISABLED_REASONS.diff}
+                      onClick={props.onAddDiff}
+                    >
+                      <FileDiff />
+                      变更
+                    </SurfaceMenuItem>
                   ) : null}
+                  <SurfaceMenuItem available onClick={props.onAddAgents}>
+                    <Bot />
+                    Agent
+                  </SurfaceMenuItem>
                 </MenuPopup>
               </Menu>
             ) : null}

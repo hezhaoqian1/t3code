@@ -35,13 +35,13 @@ function render(technicalSurfacesAvailable: boolean | undefined) {
 }
 
 describe("right panel in office mode", () => {
-  it("offers only the browser and file previews", () => {
+  it("offers the previews and sub-agent runs, not the terminal or diff", () => {
     const markup = render(false);
     expect(markup).toContain("浏览器");
     expect(markup).toContain("文件");
+    expect(markup).toContain("查看子 Agent");
     expect(markup).not.toContain("终端");
     expect(markup).not.toContain("变更");
-    expect(markup).not.toContain("查看子 Agent");
   });
 
   it("offers every panel outside office mode", () => {
