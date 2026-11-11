@@ -122,7 +122,7 @@ it.effect("validates IPC and clears on native focus, quit, and disposal", () =>
       Effect.provideService(HostProcessPlatform, "linux"),
       Effect.provide([
         ElectronApp.layer,
-        DesktopIpc.layer({
+        DesktopIpc.layerTest({
           handle: (channel, handler) => {
             handlers.set(channel, handler);
           },

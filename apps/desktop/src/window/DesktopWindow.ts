@@ -672,6 +672,9 @@ export const make = Effect.gen(function* () {
       void runPromise(electronWindow.reveal(window));
     });
 
+    // Desktop IPC only answers the main window, so register it before its renderer can call in.
+    yield* electronWindow.setMain(window);
+
     // Load a zero-dependency document first. The backend starts in parallel,
     // so a cold Windows launch always gets a visible window before HTTP ready.
     const backendReady = yield* Ref.get(backendReadyRef);
@@ -699,7 +702,6 @@ export const make = Effect.gen(function* () {
 
   const createMain = Effect.gen(function* () {
     const window = yield* createWindow();
-    yield* electronWindow.setMain(window);
     yield* logWindowInfo("main window created");
     return window;
   }).pipe(Effect.withSpan("desktop.window.createMain"));
