@@ -335,6 +335,41 @@ export function spanToTraceRecord(span: SerializableSpan): EffectTraceRecord {
   };
 }
 
+// WebSocket tickets and their DPoP proofs ride in URL queries and stay valid after the request.
+const URL_CREDENTIAL_PARAMS = /(^|[?&"\s])(wsTicket|dpop)=[^&#"\\\s]*/g;
+
+const redactUrlCredentials = (text: string) =>
+  text.replace(URL_CREDENTIAL_PARAMS, "$1$2=<redacted>");
+
+// Socket tickets and proofs, pairing tokens, and OAuth codes travel in query strings.
+// (Effect's own UrlParams redaction for HTTP spans is newer than the version used here.)
+const URL_ATTRIBUTE_CREDENTIAL_PARAMS =
+  /(^|[?&])(wsTicket|dpop|token|pairingUrl|code|state|challenge)=[^&#]*/g;
+
+/** Redacts credential query parameters from an HTTP span's `url.full` or `url.query`. */
+export function redactUrlAttribute(key: string, value: unknown): unknown {
+  return (key === "url.full" || key === "url.query") && typeof value === "string"
+    ? value.replace(URL_ATTRIBUTE_CREDENTIAL_PARAMS, "$1$2=<redacted>")
+    : value;
+}
+
+function redactRecordUrlAttributes(record: TraceRecord): TraceRecord {
+  const { attributes } = record;
+  const full = redactUrlAttribute("url.full", attributes["url.full"]);
+  const query = redactUrlAttribute("url.query", attributes["url.query"]);
+  if (full === attributes["url.full"] && query === attributes["url.query"]) {
+    return record;
+  }
+  return {
+    ...record,
+    attributes: {
+      ...attributes,
+      ...(full === undefined ? {} : { "url.full": full }),
+      ...(query === undefined ? {} : { "url.query": query }),
+    },
+  };
+}
+
 export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: TraceSinkOptions) {
   const sink = new RotatingFileSink({
     filePath: options.filePath,
@@ -417,7 +452,9 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     filePath: options.filePath,
     push(record) {
       try {
-        buffer.push(`${JSON.stringify(record)}\n`);
+        // Browser spans arrive here directly, so their URLs are redacted here as well.
+        const text = JSON.stringify(redactRecordUrlAttributes(record));
+        buffer.push(`${redactUrlCredentials(text)}\n`);
         if (buffer.length >= FLUSH_BUFFER_THRESHOLD) {
           flushUnsafe();
         }
@@ -429,6 +466,24 @@ export const makeTraceSink = Effect.fn("makeTraceSink")(function* (options: Trac
     close: () => flush,
   } satisfies TraceSink;
 });
+
+// Effect's HTTP errors, including failed upgrades, put the request URL in their message.
+export function redactCauseCredentials(cause: Cause.Cause<unknown>): Cause.Cause<unknown> {
+  if (cause.reasons.length === 0 || Cause.hasInterruptsOnly(cause)) {
+    return cause;
+  }
+  const pretty = Cause.pretty(cause);
+  const redacted = redactUrlCredentials(pretty);
+  return redacted === pretty ? cause : Cause.die(new Error(redacted));
+}
+
+function redactExitCredentials(exit: Exit.Exit<unknown, unknown>): Exit.Exit<unknown, unknown> {
+  if (ExitRuntime.isSuccess(exit)) {
+    return exit;
+  }
+  const cause = redactCauseCredentials(exit.cause);
+  return cause === exit.cause ? exit : ExitRuntime.failCause(cause);
+}
 
 class LocalFileSpan implements Tracer.Span {
   readonly _tag = "Span";
@@ -471,13 +526,14 @@ class LocalFileSpan implements Tracer.Span {
   }
 
   end(endTime: bigint, exit: Exit.Exit<unknown, unknown>): void {
+    const traceExit = redactExitCredentials(exit);
     this.status = {
       _tag: "Ended",
       startTime: this.status.startTime,
       endTime,
-      exit,
+      exit: traceExit,
     };
-    this.delegate.end(endTime, exit);
+    this.delegate.end(endTime, traceExit);
 
     if (this.sampled) {
       this.push(spanToTraceRecord(this));
@@ -485,12 +541,17 @@ class LocalFileSpan implements Tracer.Span {
   }
 
   attribute(key: string, value: unknown): void {
-    this.attributes.set(key, value);
-    this.delegate.attribute(key, value);
+    const recorded = redactUrlAttribute(key, value);
+    this.attributes.set(key, recorded);
+    this.delegate.attribute(key, recorded);
   }
 
   event(name: string, startTime: bigint, attributes?: Record<string, unknown>): void {
-    const nextAttributes = attributes ?? {};
+    const cause = attributes?.["effect.cause"];
+    const nextAttributes =
+      typeof cause === "string"
+        ? { ...attributes, "effect.cause": redactUrlCredentials(cause) }
+        : (attributes ?? {});
     this.events.push([name, startTime, nextAttributes]);
     this.delegate.event(name, startTime, nextAttributes);
   }

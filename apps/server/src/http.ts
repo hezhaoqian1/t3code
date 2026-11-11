@@ -74,6 +74,18 @@ export const httpCompressionLayer = HttpRouter.middleware(HttpMiddleware.compres
   global: true,
 });
 
+const layerUntracedRequests = Layer.succeed(HttpMiddleware.TracerDisabledWhen)((request) => {
+  const queryIndex = request.url.indexOf("?");
+  const path = queryIndex === -1 ? request.url : request.url.slice(0, queryIndex);
+  // Signed URLs carry bearer tokens in the path, so they never reach a trace.
+  return (
+    path.startsWith(`${ASSET_ROUTE_PREFIX}/`) ||
+    path.startsWith(`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/`)
+  );
+});
+
+export const withUntracedRequests = Layer.provide(layerUntracedRequests);
+
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig.ServerConfig;

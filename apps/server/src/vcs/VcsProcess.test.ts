@@ -4,6 +4,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
 
 import {
@@ -138,6 +139,50 @@ describe("VcsProcess.run", () => {
       expect(error.message).not.toContain(secretStderr);
       expect(error.message).not.toContain("super-secret-token");
     }).pipe(provideLive),
+  );
+
+  // Without LANG, macOS Git follows the system language, as in an app launched from Finder;
+  // localized Git builds on Windows follow the display language the same way.
+  it.effect("reads Git failures in English when Git would follow the system language", () =>
+    Effect.gen(function* () {
+      const envs: Array<NodeJS.ProcessEnv | undefined> = [];
+      const service = yield* VcsProcess.make.pipe(
+        Effect.provideService(
+          ProcessRunner.ProcessRunner,
+          ProcessRunner.ProcessRunner.of({
+            run: (input) =>
+              Effect.sync(() => {
+                envs.push(input.env);
+                return {
+                  stdout: "",
+                  stderr:
+                    input.env?.LANGUAGE === "C"
+                      ? "fatal: Authentication failed for 'https://example.com/repo.git/'\n"
+                      : "致命错误：'https://example.com/repo.git/' 身份验证失败\n",
+                  code: ChildProcessSpawner.ExitCode(128),
+                  timedOut: false,
+                  stdoutTruncated: false,
+                  stderrTruncated: false,
+                };
+              }),
+          }),
+        ),
+      );
+
+      const error = yield* Effect.flip(service.run(baseInput));
+      expect(error).toBeInstanceOf(VcsProcessExitError);
+      expect(error).toMatchObject({ failureKind: "authentication" });
+
+      yield* Effect.flip(service.run({ ...baseInput, env: { GIT_INDEX_FILE: "/tmp/t3-index" } }));
+      yield* Effect.flip(service.run({ ...baseInput, env: { LANGUAGE: "de" } }));
+      yield* Effect.flip(service.run({ ...baseInput, command: "gh", args: ["pr", "view"] }));
+      expect(envs).toEqual([
+        { LANGUAGE: "C" },
+        { LANGUAGE: "C", GIT_INDEX_FILE: "/tmp/t3-index" },
+        { LANGUAGE: "de" },
+        undefined,
+      ]);
+    }),
   );
 
   it.effect("retains spawn causes without exposing process arguments in the error message", () =>

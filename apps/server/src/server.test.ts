@@ -2298,11 +2298,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           modKey: true,
         },
       };
+      const issues = [
+        { kind: "keybindings.invalid-entry" as const, index: 1, message: "unknown command" },
+      ];
 
       yield* buildAppUnderTest({
         layers: {
           keybindings: {
-            upsertKeybindingRule: () => Effect.succeed([resolved]),
+            upsertKeybindingRule: () => Effect.succeed({ keybindings: [resolved], issues }),
           },
         },
       });
@@ -2312,7 +2315,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverUpsertKeybinding](rule)),
       );
 
-      assert.deepEqual(response.issues, []);
+      // Entries the server kept but cannot read are reported with the saved config.
+      assert.deepEqual(response.issues, issues);
       assert.deepEqual(response.keybindings, [resolved]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -2338,7 +2342,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           keybindings: {
-            removeKeybindingRule: () => Effect.succeed([resolved]),
+            removeKeybindingRule: () => Effect.succeed({ keybindings: [resolved], issues: [] }),
           },
         },
       });

@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Arr from "effect/Array";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -335,6 +336,131 @@ describe("observability", () => {
           assert.isAtMost(Number(stat.size), maxBytes);
         }),
       ),
+    );
+
+    it.effect("keeps WebSocket credentials out of trace files and exported spans", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const tempDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-trace-sink-" });
+          const tracePath = path.join(tempDir, "shared.trace.ndjson");
+          const sink = yield* makeTraceSink({
+            filePath: tracePath,
+            maxBytes: 1024 * 1024,
+            maxFiles: 2,
+            batchWindowMs: 10_000,
+          });
+          const delegates: Array<Tracer.NativeSpan> = [];
+          const tracer = yield* makeLocalFileTracer({
+            filePath: tracePath,
+            maxBytes: 1024 * 1024,
+            maxFiles: 2,
+            batchWindowMs: 10_000,
+            sink,
+            delegate: Tracer.make({
+              span: (options) => {
+                const span = new Tracer.NativeSpan(options);
+                delegates.push(span);
+                return span;
+              },
+            }),
+          });
+          const url = "/ws?wsTicket=ticket-secret&dpop=proof-secret&clientSurface=web";
+
+          yield* Effect.annotateCurrentSpan({
+            "url.full": `http://127.0.0.1:3773${url}`,
+            "url.query": url.slice(4),
+          }).pipe(
+            Effect.withSpan("GET", { kind: "server" }),
+            Effect.provideService(Tracer.Tracer, tracer),
+          );
+          yield* Effect.die(new Error(`RequestParseError (GET ${url})`)).pipe(
+            Effect.tapCause((cause) => Effect.logError(cause)),
+            Effect.withSpan("EnvironmentAuth.authenticateWebSocketUpgrade"),
+            Effect.provideService(Tracer.Tracer, tracer),
+            Effect.provide(Logger.layer([Logger.tracerLogger], { mergeWithExisting: false })),
+            Effect.exit,
+          );
+          yield* sink.close();
+
+          const written = yield* fileSystem.readFileString(tracePath);
+          const exported = delegates.map((span) =>
+            JSON.stringify({
+              attributes: Object.fromEntries(span.attributes),
+              events: span.events.map(([, , attributes]) => attributes),
+              exit:
+                span.status._tag === "Ended" && Exit.isFailure(span.status.exit)
+                  ? Cause.pretty(span.status.exit.cause)
+                  : "",
+            }),
+          );
+          for (const text of [written, ...exported]) {
+            assert.notInclude(text, "ticket-secret");
+            assert.notInclude(text, "proof-secret");
+          }
+          assert.include(written, "wsTicket=<redacted>&dpop=<redacted>&clientSurface=web");
+          assert.include(exported.join("\n"), "effect.cause");
+        }),
+      ),
+    );
+
+    it.effect(
+      "redacts credential query parameters in HTTP span URLs, including browser spans",
+      () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const tempDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-trace-sink-" });
+            const tracePath = path.join(tempDir, "shared.trace.ndjson");
+            const sink = yield* makeTraceSink({
+              filePath: tracePath,
+              maxBytes: 1024 * 1024,
+              maxFiles: 2,
+              batchWindowMs: 10_000,
+            });
+            const tracer = yield* makeLocalFileTracer({
+              filePath: tracePath,
+              maxBytes: 1024 * 1024,
+              maxFiles: 2,
+              batchWindowMs: 10_000,
+              sink,
+            });
+            const query = "token=pair-secret&clientOs=windows&code=oauth-secret&state=state-secret";
+
+            yield* Effect.annotateCurrentSpan({
+              "url.full": `https://example.com/pair?${query}`,
+              "url.query": query,
+              "url.path": "/pair",
+            }).pipe(
+              Effect.withSpan("GET", { kind: "client" }),
+              Effect.provideService(Tracer.Tracer, tracer),
+            );
+            // Spans the browser reports are written to the same sink as OTLP records.
+            sink.push({
+              ...makeRecord("browser"),
+              attributes: { "url.full": `https://example.com/pair?${query}` },
+            });
+            yield* sink.close();
+
+            const records = yield* readTraceRecords(tracePath);
+            const redactedQuery =
+              "token=<redacted>&clientOs=windows&code=<redacted>&state=<redacted>";
+            const server = records.find((record) => record.name === "GET");
+            assert.equal(
+              server?.attributes["url.full"],
+              `https://example.com/pair?${redactedQuery}`,
+            );
+            assert.equal(server?.attributes["url.query"], redactedQuery);
+            assert.equal(server?.attributes["url.path"], "/pair");
+            const browser = records.find((record) => record.name === "browser");
+            assert.equal(
+              browser?.attributes["url.full"],
+              `https://example.com/pair?${redactedQuery}`,
+            );
+          }),
+        ),
     );
 
     it.effect("drops only the invalid trace record when serialization fails", () =>

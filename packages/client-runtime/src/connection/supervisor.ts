@@ -1,6 +1,7 @@
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -30,6 +31,8 @@ import * as ConnectionWakeups from "./wakeups.ts";
 const RETRY_DELAYS_MS = [3_000, 4_000, 8_000, 16_000] as const;
 const CONNECTION_ESTABLISHMENT_TIMEOUT = "15 seconds";
 const CONNECTION_PROBE_TIMEOUT = "15 seconds";
+// The primary environment answers on loopback, so a live socket answers at once.
+const OFFLINE_REPORT_PROBE_TIMEOUT = "3 seconds";
 const BACKOFF_RESET_AFTER_MS = 30_000;
 
 interface SupervisorIntent {
@@ -212,9 +215,15 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   const connectivity = yield* Connectivity.Connectivity;
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
+  // The primary environment served this client or runs beside it on loopback,
+  // so the device reporting offline (often wrongly, e.g. behind a corporate
+  // proxy or VPN) never parks it. The report still probes its live session.
+  const isPrimaryTarget = target._tag === "PrimaryConnectionTarget";
+  const targetNetwork = (network: NetworkStatus): NetworkStatus =>
+    network === "offline" && isPrimaryTarget ? "unknown" : network;
   const initialIntent: SupervisorIntent = {
     desired: options?.initiallyDesired ?? false,
-    network: yield* connectivity.status,
+    network: targetNetwork(yield* connectivity.status),
   };
   const intent = yield* Ref.make(initialIntent);
   const signals = yield* Queue.unbounded<SupervisorSignal>();
@@ -290,6 +299,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   });
 
   const waitForEstablishmentInterrupt = Effect.fnUntraced(function* () {
+    // A primary attempt keeps running through an offline report, so the
+    // network returning restarts it in case it stalled meanwhile.
+    let deviceOffline = (yield* connectivity.status) === "offline";
     for (;;) {
       const next = yield* Queue.take(signals);
       switch (next._tag) {
@@ -297,8 +309,14 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
         case "RetryRequested":
           return false;
         case "NetworkChanged":
-          if (next.network === "offline") {
-            return false;
+          if (!isPrimaryTarget) {
+            if (next.network === "offline") {
+              return false;
+            }
+          } else if (next.network === "offline") {
+            deviceOffline = true;
+          } else if (deviceOffline) {
+            return true;
           }
           break;
         case "ConnectRequested":
@@ -307,6 +325,61 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           if (next.reason === "application-active-reconnect") {
             return true;
           }
+          break;
+      }
+    }
+  });
+
+  // Probes the live session. Fails when the probe fails or times out; returns
+  // the lease's resetRetry when a signal ends the lease meanwhile, and
+  // undefined once the session answered.
+  const probeConnectedLease = Effect.fnUntraced(function* (
+    lease: ConnectionDriver.EnvironmentConnectionLease,
+    timeout: Duration.Input,
+  ) {
+    const probe = yield* lease.session.probe.pipe(
+      Effect.timeoutOrElse({
+        duration: timeout,
+        orElse: () =>
+          Effect.fail(
+            new ConnectionTransientError({
+              reason: "timeout",
+              detail: `${target.label} did not respond to a connection health check.`,
+            }),
+          ),
+      }),
+      Effect.forkChild,
+    );
+    for (;;) {
+      const probeEvent = yield* Effect.raceFirst(
+        Fiber.await(probe).pipe(Effect.map((exit) => ({ _tag: "ProbeCompleted" as const, exit }))),
+        Queue.take(signals).pipe(Effect.map((signal) => ({ _tag: "Signal" as const, signal }))),
+      );
+      if (probeEvent._tag === "ProbeCompleted") {
+        if (Exit.isFailure(probeEvent.exit)) {
+          yield* Ref.set(wakeProbeFailed, true);
+        }
+        yield* probeEvent.exit;
+        return undefined;
+      }
+      switch (probeEvent.signal._tag) {
+        case "DisconnectRequested":
+        case "RetryRequested":
+          yield* Fiber.interrupt(probe);
+          return false;
+        case "NetworkChanged":
+          if (probeEvent.signal.network === "offline" && !isPrimaryTarget) {
+            yield* Fiber.interrupt(probe);
+            return false;
+          }
+          break;
+        case "Wakeup":
+          if (probeEvent.signal.reason === "application-active-reconnect") {
+            yield* Fiber.interrupt(probe);
+            return true;
+          }
+          break;
+        case "ConnectRequested":
           break;
       }
     }
@@ -323,7 +396,15 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
           return false;
         case "NetworkChanged":
           if (next.network === "offline") {
-            return false;
+            if (!isPrimaryTarget) {
+              return false;
+            }
+            // A primary session is checked instead of replaced, so a wrong
+            // offline report does not tear down a healthy loopback socket.
+            const ended = yield* probeConnectedLease(lease, OFFLINE_REPORT_PROBE_TIMEOUT);
+            if (ended !== undefined) {
+              return ended;
+            }
           }
           break;
         case "Wakeup":
@@ -334,55 +415,9 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
             return true;
           }
           if (next.reason === "application-active" || next.reason === "application-active-probe") {
-            const probe = yield* lease.session.probe.pipe(
-              Effect.timeoutOrElse({
-                duration: CONNECTION_PROBE_TIMEOUT,
-                orElse: () =>
-                  Effect.fail(
-                    new ConnectionTransientError({
-                      reason: "timeout",
-                      detail: `${target.label} did not respond to a connection health check.`,
-                    }),
-                  ),
-              }),
-              Effect.forkChild,
-            );
-            for (;;) {
-              const probeEvent = yield* Effect.raceFirst(
-                Fiber.await(probe).pipe(
-                  Effect.map((exit) => ({ _tag: "ProbeCompleted" as const, exit })),
-                ),
-                Queue.take(signals).pipe(
-                  Effect.map((signal) => ({ _tag: "Signal" as const, signal })),
-                ),
-              );
-              if (probeEvent._tag === "ProbeCompleted") {
-                if (Exit.isFailure(probeEvent.exit)) {
-                  yield* Ref.set(wakeProbeFailed, true);
-                }
-                yield* probeEvent.exit;
-                break;
-              }
-              switch (probeEvent.signal._tag) {
-                case "DisconnectRequested":
-                case "RetryRequested":
-                  yield* Fiber.interrupt(probe);
-                  return false;
-                case "NetworkChanged":
-                  if (probeEvent.signal.network === "offline") {
-                    yield* Fiber.interrupt(probe);
-                    return false;
-                  }
-                  break;
-                case "Wakeup":
-                  if (probeEvent.signal.reason === "application-active-reconnect") {
-                    yield* Fiber.interrupt(probe);
-                    return true;
-                  }
-                  break;
-                case "ConnectRequested":
-                  break;
-              }
+            const ended = yield* probeConnectedLease(lease, CONNECTION_PROBE_TIMEOUT);
+            if (ended !== undefined) {
+              return ended;
             }
           }
           break;
@@ -646,9 +681,12 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
 
   yield* connectivity.changes.pipe(
     Stream.runForEach((network) =>
-      Ref.modify(intent, (current) =>
-        current.network === network ? [false, current] : ([true, { ...current, network }] as const),
-      ).pipe(
+      Ref.modify(intent, (current) => {
+        const next = targetNetwork(network);
+        return current.network === next
+          ? [false, current]
+          : ([true, { ...current, network: next }] as const);
+      }).pipe(
         Effect.flatMap((changed) =>
           changed ? signal({ _tag: "NetworkChanged", network }) : Effect.void,
         ),
