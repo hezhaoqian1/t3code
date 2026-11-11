@@ -6201,7 +6201,6 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -6225,7 +6224,6 @@ function ChatViewContent(props: ChatViewProps) {
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
-          {!rightPanelOpen ? panelLayoutControls : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -6251,6 +6249,11 @@ function ChatViewContent(props: ChatViewProps) {
             onUpdateProjectScript={updateProjectScript}
             onDeleteProjectScript={deleteProjectScript}
           />
+          {/* After the header content on purpose: the controls are absolutely
+              positioned over the header's right edge, and Chromium applies
+              app regions in DOM order, so a drag region that comes later (the
+              header row) would swallow real mouse clicks on these buttons. */}
+          {!rightPanelOpen ? panelLayoutControls : null}
         </header>
 
         <ThreadErrorBanner
@@ -6678,6 +6681,8 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
+      {/* After the panel, for the same app-region ordering reason as above. */}
+      {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
       {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelSheet open onClose={closePreviewPanel}>
           <RightPanelTabs
