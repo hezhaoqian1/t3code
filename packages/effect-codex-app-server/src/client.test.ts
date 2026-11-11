@@ -1,7 +1,9 @@
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Scope from "effect/Scope";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -10,6 +12,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 
 import * as CodexClient from "./client.ts";
+import { makeInMemoryStdio } from "./_internal/stdio.ts";
 
 const mockPeerPath = Effect.map(Effect.service(Path.Path), (path) =>
   path.join(import.meta.dirname, "../test/fixtures/codex-app-server-mock-peer.ts"),
@@ -154,5 +157,47 @@ it.layer(NodeServices.layer)("effect-codex-app-server client", (it) => {
 
       assert.equal(initialized.userAgent, "mock-codex-app-server");
     }),
+  );
+
+  // regression: an unlisted codexErrorInfo failed the whole decode, so the
+  // failed turn/completed was dropped and the turn stayed running.
+  it.effect("delivers a failed turn whose error code the schema does not list", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const client = yield* CodexClient.make(stdio);
+      const message =
+        "The 'gpt-5-codex' model is not supported when using Codex with a ChatGPT account.";
+      const error = { message, codexErrorInfo: "modelNotFound", additionalDetails: null };
+      const errorNotification = yield* Deferred.make<unknown>();
+      const completed = yield* Deferred.make<unknown>();
+      yield* client.handleServerNotification("error", (payload) =>
+        Deferred.succeed(errorNotification, payload).pipe(Effect.asVoid),
+      );
+      yield* client.handleServerNotification("turn/completed", (payload) =>
+        Deferred.succeed(completed, payload).pipe(Effect.asVoid),
+      );
+
+      const send = (method: string, params: unknown) =>
+        Queue.offer(
+          input,
+          new TextEncoder().encode(`${JSON.stringify({ method, params })}
+`),
+        );
+      yield* send("error", { threadId: "thread-1", turnId: "turn-1", willRetry: false, error });
+      yield* send("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", items: [], status: "failed", error },
+      });
+
+      const delivered = (yield* Deferred.await(errorNotification)) as {
+        readonly error: typeof error;
+      };
+      assert.deepEqual(delivered.error, error);
+      const turn = (yield* Deferred.await(completed)) as {
+        readonly turn: { readonly status: string; readonly error: typeof error };
+      };
+      assert.equal(turn.turn.status, "failed");
+      assert.deepEqual(turn.turn.error, error);
+    }).pipe(Effect.scoped),
   );
 });
