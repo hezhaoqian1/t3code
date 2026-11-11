@@ -106,6 +106,49 @@ it.effect("checkpoint capture keeps LF files that core.safecrlf would refuse to 
   }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
 );
 
+it.effect("restores a checkpoint before the first commit without staging its files", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const driver = yield* GitVcsDriver.makeVcsDriverShape();
+    for (const nested of [false, true]) {
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-unborn-restore-" });
+      yield* runGit(root, ["init"]);
+      yield* runGit(root, ["config", "user.email", "test@test.com"]);
+      yield* runGit(root, ["config", "user.name", "Test"]);
+      // Compare file contents byte for byte, also where Git for Windows sets autocrlf.
+      yield* runGit(root, ["config", "core.autocrlf", "false"]);
+      if (nested) {
+        yield* fileSystem.writeFileString(path.join(root, "outside.txt"), "staged\n");
+        yield* runGit(root, ["add", "outside.txt"]);
+      }
+      const cwd = nested ? path.join(root, "nested") : root;
+      yield* fileSystem.makeDirectory(cwd, { recursive: true });
+      yield* fileSystem.writeFileString(path.join(cwd, "file.txt"), "original\n");
+      const checkpointRef = CheckpointRef.make("refs/t3/checkpoints/unborn");
+      yield* driver.checkpoints.captureCheckpoint({ cwd, checkpointRef });
+      yield* fileSystem.writeFileString(path.join(cwd, "file.txt"), "changed\n");
+      yield* fileSystem.writeFileString(path.join(cwd, "added.txt"), "new\n");
+
+      assert.isTrue(
+        yield* driver.checkpoints.restoreCheckpoint({ cwd, checkpointRef, fallbackToHead: false }),
+      );
+
+      assert.strictEqual(
+        yield* fileSystem.readFileString(path.join(cwd, "file.txt")),
+        "original\n",
+      );
+      assert.isFalse(yield* fileSystem.exists(path.join(cwd, "added.txt")));
+      const staged = yield* driver.execute({
+        operation: "test",
+        cwd: root,
+        args: ["diff", "--cached", "--name-only"],
+      });
+      assert.strictEqual(staged.stdout.trim(), nested ? "outside.txt" : "");
+    }
+  }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
+);
+
 it.effect("restores empty checkpoints without changing paths outside the workspace", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -116,6 +159,7 @@ it.effect("restores empty checkpoints without changing paths outside the workspa
       yield* runGit(root, ["init"]);
       yield* runGit(root, ["config", "user.email", "test@test.com"]);
       yield* runGit(root, ["config", "user.name", "Test"]);
+      yield* runGit(root, ["config", "core.autocrlf", "false"]);
       if (nested) {
         yield* fileSystem.writeFileString(path.join(root, "outside.txt"), "original\n");
         yield* runGit(root, ["add", "."]);
@@ -133,6 +177,9 @@ it.effect("restores empty checkpoints without changing paths outside the workspa
         const addedPath = path.join(cwd, "added.txt");
         yield* fileSystem.writeFileString(addedPath, "new\n");
         if (staged) yield* runGit(cwd, ["add", "added.txt"]);
+        // A new .gitignore hiding a file in a workspace with nothing tracked in it.
+        yield* fileSystem.writeFileString(path.join(cwd, ".gitignore"), "hidden.txt\n");
+        yield* fileSystem.writeFileString(path.join(cwd, "hidden.txt"), "remove\n");
         assert.isTrue(
           yield* driver.checkpoints.restoreCheckpoint({
             cwd,
@@ -141,6 +188,8 @@ it.effect("restores empty checkpoints without changing paths outside the workspa
           }),
         );
         assert.isFalse(yield* fileSystem.exists(addedPath));
+        assert.isFalse(yield* fileSystem.exists(path.join(cwd, "hidden.txt")));
+        assert.isTrue(yield* fileSystem.exists(cwd));
       }
       yield* fileSystem.writeFileString(
         path.join(root, ".git", "info", "exclude"),
@@ -149,6 +198,8 @@ it.effect("restores empty checkpoints without changing paths outside the workspa
       yield* fileSystem.writeFileString(path.join(cwd, "ignored.txt"), "keep\n");
       yield* fileSystem.makeDirectory(path.join(cwd, "untracked"));
       yield* fileSystem.writeFileString(path.join(cwd, "untracked", "file.txt"), "remove\n");
+      yield* fileSystem.writeFileString(path.join(cwd, "untracked", ".gitignore"), "hidden.txt\n");
+      yield* fileSystem.writeFileString(path.join(cwd, "untracked", "hidden.txt"), "remove\n");
       assert.isTrue(
         yield* driver.checkpoints.restoreCheckpoint({ cwd, checkpointRef, fallbackToHead: false }),
       );
@@ -165,6 +216,43 @@ it.effect("restores empty checkpoints without changing paths outside the workspa
           args: ["diff", "--cached", "--name-only"],
         });
         assert.strictEqual(staged.stdout.trim(), "outside.txt");
+      }
+      yield* fileSystem.writeFileString(path.join(cwd, "checkpoint.txt"), "checkpoint\n");
+      yield* driver.checkpoints.captureCheckpoint({ cwd, checkpointRef });
+      yield* fileSystem.writeFileString(path.join(cwd, "checkpoint.txt"), "later\n");
+      let deepest = cwd;
+      for (let depth = 0; depth < 4; depth++) {
+        yield* fileSystem.writeFileString(path.join(deepest, ".gitignore"), "d/.gitignore\n");
+        deepest = path.join(deepest, "d");
+        yield* fileSystem.makeDirectory(deepest);
+      }
+      yield* fileSystem.writeFileString(path.join(deepest, ".gitignore"), "hidden.txt\n");
+      yield* fileSystem.writeFileString(path.join(deepest, "hidden.txt"), "remove\n");
+      const incomplete = yield* driver.checkpoints
+        .restoreCheckpoint({ cwd, checkpointRef, fallbackToHead: false })
+        .pipe(Effect.flip);
+      assert.strictEqual(incomplete._tag, "VcsProcessExitError");
+      assert.strictEqual(
+        yield* fileSystem.readFileString(path.join(cwd, "checkpoint.txt")),
+        "checkpoint\n",
+      );
+      assert.strictEqual(
+        (yield* driver.execute({
+          operation: "test",
+          cwd,
+          args: ["diff", "--cached", "--name-only", "--", "."],
+        })).stdout,
+        "",
+      );
+      if (nested) {
+        assert.strictEqual(
+          (yield* driver.execute({
+            operation: "test",
+            cwd: root,
+            args: ["diff", "--cached", "--name-only"],
+          })).stdout.trim(),
+          "outside.txt",
+        );
       }
     }
   }).pipe(Effect.scoped, Effect.provide(GitContractLayer)),
