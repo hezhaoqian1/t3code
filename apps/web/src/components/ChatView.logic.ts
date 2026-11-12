@@ -828,6 +828,14 @@ export function hasServerAcknowledgedLocalDispatch(input: {
     input.localDispatch.latestTurnStartedAt !== (latestTurn?.startedAt ?? null) ||
     input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null);
 
+  // The provider session is still starting up for this send (about 0.1 s on a
+  // follow-up, closer to 1 s for a new task). Keep the local "sending" state
+  // until the turn runs or the session settles; acknowledging here showed an
+  // idle composer for that gap, and then the running controls popped in.
+  if (input.phase === "connecting") {
+    return false;
+  }
+
   if (input.phase === "running") {
     // Steering adds a user message to the current running turn without
     // necessarily changing any of the turn timestamps. Treat that projected

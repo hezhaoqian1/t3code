@@ -148,6 +148,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   if (isRunning) {
+    // An empty composer gets the stop button alone, in the send button's place
+    // and at its size, so starting a turn only swaps the icon. The queue button
+    // joins it once there is something to queue (the placeholder explains it).
+    if (!hasSendableContent) {
+      return renderStopGenerationButton(false);
+    }
     return (
       <div className="flex items-center gap-2">
         {renderStopGenerationButton(false)}

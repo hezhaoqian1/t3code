@@ -41,12 +41,13 @@ catalog:
   effect: 4.0.0-beta.103
   jose: 6.2.2
   typescript: ~6.0.3
+  undici: 8.12.4
   vite: npm:@voidzero-dev/vite-plus-core@0.2.2
   vite-plus: 0.2.2
   yaml: ^2.9.0
 
 minimumReleaseAgeExclude:
-  - electron@44.9.3
+  - electron@44.10.1
   - "@effect/atom-react@4.0.0-beta.103"
   - "@effect/openapi-generator@4.0.0-beta.103"
   - "@effect/platform-bun@4.0.0-beta.103"
@@ -72,6 +73,14 @@ overrides:
   effect: "catalog:"
   # Electron 44 needs node-abi >= 4.33 for @electron/rebuild on macOS.
   node-abi: 4.35.0
+  # Patched releases of vulnerable transitive dependencies, as resolved upstream
+  # (t3code c6ca605630). Each stays within the range its dependents declare.
+  "undici@^8": "catalog:"
+  "undici@^7": 7.30.2
+  "undici@^6": 6.29.1
+  "fast-uri@^3": 3.1.9
+  seroval: 1.7.10
+  seroval-plugins: 1.7.8
   vite: "catalog:"
   yaml: "catalog:"
 

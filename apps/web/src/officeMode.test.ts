@@ -175,18 +175,7 @@ describe("officeMode", () => {
   });
 
   it("blocks technical workbench commands only while office mode is active", () => {
-    for (const command of [
-      "filePicker.toggle",
-      "projectSearch.toggle",
-      "rightPanel.toggle",
-      "diff.toggle",
-      "terminal.toggle",
-      "terminal.new",
-      "terminal.split",
-      "terminal.splitVertical",
-      "terminal.close",
-      "script.test.run",
-    ]) {
+    for (const command of ["filePicker.toggle", "projectSearch.toggle", "script.test.run"]) {
       expect(isTechnicalWorkbenchCommand(command)).toBe(true);
       expect(shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: true, command })).toBe(true);
       expect(shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: false, command })).toBe(
@@ -194,6 +183,11 @@ describe("officeMode", () => {
       );
     }
     expect(isTechnicalWorkbenchCommand("chat.new")).toBe(false);
+    // Office mode only changes the chrome: the panels and terminal still work.
+    for (const command of ["rightPanel.toggle", "diff.toggle", "terminal.toggle", "terminal.new"]) {
+      expect(isTechnicalWorkbenchCommand(command)).toBe(false);
+      expect(shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: true, command })).toBe(false);
+    }
     expect(
       shouldBlockOfficeTechnicalWorkbenchCommand({ officeMode: true, command: "chat.new" }),
     ).toBe(false);

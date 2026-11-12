@@ -31,20 +31,20 @@ function renderPendingActions(isRunning: boolean) {
   );
 }
 
-function renderStandaloneStop() {
+function renderStandaloneStop(hasSendableContent = false) {
   return renderToStaticMarkup(
     createElement(ComposerPrimaryActions, {
       compact: true,
       pendingAction: null,
       isRunning: true,
       showPlanFollowUpPrompt: false,
-      promptHasText: false,
+      promptHasText: hasSendableContent,
       isSendBusy: false,
       sendDisabledReason: null,
       isConnecting: false,
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
-      hasSendableContent: false,
+      hasSendableContent,
       onPreviousPendingQuestion: () => {},
       onInterrupt: () => {},
       onImplementPlanInNewThread: () => {},
@@ -155,5 +155,20 @@ describe("ComposerPrimaryActions", () => {
     expect(renderPendingActions(true)).toContain("size-8 sm:size-7");
     expect(renderStandaloneStop()).toContain("size-8 sm:h-8 sm:w-8");
     expect(renderStandaloneStop()).not.toContain("sm:size-7");
+  });
+
+  it("shows only the stop button while running with an empty composer", () => {
+    const markup = renderStandaloneStop();
+    expect(markup).toContain('aria-label="停止生成"');
+    expect(markup).not.toContain('aria-label="加入排队"');
+    // Same footprint as the idle send button (h-8 w-8 on desktop), so the
+    // model picker beside it does not move when a turn starts.
+    expect(markup.startsWith("<button")).toBe(true);
+  });
+
+  it("adds the queue button next to stop once there is something to queue", () => {
+    const markup = renderStandaloneStop(true);
+    expect(markup).toContain('aria-label="停止生成"');
+    expect(markup).toContain('aria-label="加入排队"');
   });
 });

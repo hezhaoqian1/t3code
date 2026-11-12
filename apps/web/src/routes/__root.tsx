@@ -59,6 +59,8 @@ import {
 } from "../components/KeybindingsUpdateToast.logic";
 import { FdAccountProvider } from "../fd/FdAccountProvider";
 import { FdLoginGate } from "../fd/FdLoginGate";
+import { BootSplashScreen } from "../components/BootSplash";
+import { WindowDragStrip } from "../components/WindowDragStrip";
 import { FeishuConnectorProvider } from "../state/feishuConnector";
 
 export const Route = createRootRoute({
@@ -69,6 +71,11 @@ export const Route = createRootRoute({
     };
   },
   component: RootRouteView,
+  // beforeLoad waits for the local service's auth state; without a pending
+  // view the router paints nothing between the boot shell and the app.
+  pendingComponent: BootSplashScreen,
+  pendingMs: 0,
+  pendingMinMs: 0,
   errorComponent: RootRouteErrorView,
   head: () => ({
     meta: [{ name: "title", content: APP_DISPLAY_NAME }],
@@ -145,14 +152,15 @@ function LocalBootstrapUnavailable({
   readonly errorMessage?: string | undefined;
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
+      <WindowDragStrip />
       <section className="w-full max-w-md text-center">
-        <h1 className="text-xl font-semibold">Local service unavailable</h1>
+        <h1 className="text-xl font-semibold">本地服务暂不可用</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          {errorMessage ?? "Restart the Desktop app to reconnect to its local service."}
+          {errorMessage ?? "请重启方德 AI，重新连接本地服务。"}
         </p>
         <Button className="mt-5" size="sm" onClick={() => window.location.reload()}>
-          Retry
+          重试
         </Button>
       </section>
     </div>
@@ -240,6 +248,7 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+      <WindowDragStrip />
       <div className="pointer-events-none absolute inset-0 opacity-80">
         <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-red-500)_16%,transparent),transparent)]" />
         <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />

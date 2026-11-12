@@ -4,7 +4,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { createFdAccountController } from "./accountController";
-import { FdAccountProvider } from "./FdAccountProvider";
+import {
+  FdAccountContext,
+  FdAccountProvider,
+  type FdAccountContextValue,
+} from "./FdAccountProvider";
 import { FdLoginGate } from "./FdLoginGate";
 
 describe("FD login gate state", () => {
@@ -18,6 +22,33 @@ describe("FD login gate state", () => {
     );
 
     expect(markup).toContain("正在检查账号");
+    // The same loading screen as the startup stages, draggable by its top edge.
+    expect(markup).toContain("方小德正在来的路上");
+    expect(markup).toContain('data-window-drag-strip="true"');
+    expect(markup).not.toContain("data-app-shell");
+  });
+
+  it("lets the login screen drag the frameless window and shows the transparent mark", () => {
+    const account: FdAccountContextValue = {
+      state: { status: "anonymous" },
+      busy: null,
+      error: null,
+      login: vi.fn(async () => true),
+      logout: vi.fn(async () => undefined),
+      retryRevocation: vi.fn(async () => undefined),
+      reload: vi.fn(async () => undefined),
+      clearError: vi.fn(),
+    };
+    const markup = renderToStaticMarkup(
+      <FdAccountContext value={account}>
+        <FdLoginGate>
+          <div data-app-shell="mounted" />
+        </FdLoginGate>
+      </FdAccountContext>,
+    );
+    expect(markup).toContain("员工账号");
+    expect(markup).toContain('data-window-drag-strip="true"');
+    expect(markup).toContain("fd-boot-purple");
     expect(markup).not.toContain("data-app-shell");
   });
 

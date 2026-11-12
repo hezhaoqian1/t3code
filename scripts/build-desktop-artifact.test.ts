@@ -126,7 +126,8 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   );
 
   it("stages the AI SDK schema runtime as a server production dependency", () => {
-    assert.equal(serverPackageJson.dependencies.zod, "4.4.3");
+    // Pinned exactly; 4.6.7 carries the upstream security update (c6ca605630).
+    assert.equal(serverPackageJson.dependencies.zod, "4.6.7");
   });
 
   it("resolves the dedicated nightly updater channel from nightly versions", () => {

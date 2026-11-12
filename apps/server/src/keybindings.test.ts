@@ -359,7 +359,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         { key: "mod+j", command: "terminal.toggle" },
         { key: "mod+shift+r", command: "script.run-tests.run" },
       ]);
-      assert.isTrue(resolved.some((entry) => entry.command === "script.run-tests.run"));
+      assert.isTrue(resolved.keybindings.some((entry) => entry.command === "script.run-tests.run"));
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
@@ -451,6 +451,58 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
       const persistedView = persisted.map(({ key, command }) => ({ key, command }));
       assert.deepEqual(persistedView, [{ key: "mod+shift+r", command: "script.run-tests.run" }]);
+    }).pipe(Effect.provide(makeKeybindingsLayer())),
+  );
+
+  it.effect("keeps entries it cannot decode when editing other keybindings", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const futureCommand = { key: "mod+shift+k", command: "command.from-a-newer-build" };
+      const badShortcut = { key: "mod+shift+d+o", command: "terminal.new" };
+      yield* fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true });
+      yield* fs.writeFileString(
+        keybindingsConfigPath,
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify([
+          { key: "mod+r", command: "script.run-tests.run" },
+          futureCommand,
+          badShortcut,
+        ]),
+      );
+      const keybindings = yield* Keybindings.Keybindings;
+      const persisted = fs
+        .readFileString(keybindingsConfigPath)
+        .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))));
+
+      const saved = yield* keybindings.upsertKeybindingRule({
+        key: "mod+shift+r",
+        command: "script.run-tests.run",
+      });
+      assert.equal(saved.issues.length, 2);
+      assert.deepEqual(yield* persisted, [
+        { key: "mod+r", command: "script.run-tests.run" },
+        futureCommand,
+        badShortcut,
+        { key: "mod+shift+r", command: "script.run-tests.run" },
+      ]);
+
+      const removed = yield* keybindings.removeKeybindingRule({
+        key: "mod+r",
+        command: "script.run-tests.run",
+      });
+      assert.deepEqual(yield* persisted, [
+        futureCommand,
+        badShortcut,
+        { key: "mod+shift+r", command: "script.run-tests.run" },
+      ]);
+      const { issues } = yield* keybindings.loadConfigState;
+      assert.deepEqual(removed.issues, issues);
+      assert.deepEqual(
+        issues.map((issue) => issue.kind === "keybindings.invalid-entry" && issue.index),
+        [0, 1],
+      );
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 

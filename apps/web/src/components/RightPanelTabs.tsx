@@ -153,9 +153,7 @@ function RightPanelEmptyState(props: {
       <div className="w-full max-w-xl">
         <div className="mb-5 text-center">
           <h3 className="text-sm font-medium text-foreground">打开面板</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Choose what to show in the right panel.
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">选择要在右侧显示的内容。</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           {actions.map((action) => {
@@ -472,11 +470,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onClick={props.onAddBrowser}
                   >
                     <Globe2 />
-                    Browser
+                    浏览器
                   </SurfaceMenuItem>
                   <SurfaceMenuItem available onClick={props.onAddTerminal}>
                     <TerminalSquare />
-                    Terminal
+                    终端
                   </SurfaceMenuItem>
                   <SurfaceMenuItem
                     available={props.filesAvailable}
@@ -484,7 +482,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onClick={props.onAddFiles}
                   >
                     <Files />
-                    Files
+                    文件
                   </SurfaceMenuItem>
                   <SurfaceMenuItem
                     available={props.diffAvailable}
@@ -492,11 +490,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     onClick={props.onAddDiff}
                   >
                     <FileDiff />
-                    Diff
+                    变更
                   </SurfaceMenuItem>
                   <SurfaceMenuItem available onClick={props.onAddAgents}>
                     <Bot />
-                    Agents
+                    Agent
                   </SurfaceMenuItem>
                 </MenuPopup>
               </Menu>

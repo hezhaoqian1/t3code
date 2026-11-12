@@ -16,6 +16,7 @@ import {
   makeWindow,
 } from "../../usage/usageFormat";
 import { ScrollArea } from "../ui/scroll-area";
+import { WindowDragStrip } from "../WindowDragStrip";
 import { UsageChartLegend, UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
 import { PROVIDER_COLOR, PROVIDER_LABEL, PROVIDER_MARK, PROVIDER_ORDER } from "./usageProviders";
 
@@ -75,303 +76,306 @@ export function UsagePage() {
   const cachedShare = observedInput === 0 ? 0 : merged.cachedInputTokens / observedInput;
 
   return (
-    <ScrollArea className="h-full">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
-            <button
-              type="button"
-              aria-label="返回"
-              onClick={() => {
-                if (canGoBack) {
-                  router.history.back();
-                  return;
-                }
-                void navigate({ to: "/" });
-              }}
-              className="mt-1 cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
-            >
-              <ArrowLeftIcon className="size-3.5" />
-            </button>
-            <div className="flex flex-col gap-1">
-              <h1 className="text-2xl font-semibold text-foreground">用量统计</h1>
-              <p className="text-sm text-muted-foreground">
-                {formatDayShort(window.sinceDay)} 至 {formatDayShort(window.untilDay)}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex overflow-hidden rounded-md border border-border">
-              {WINDOW_OPTIONS.map((option) => (
-                <button
-                  key={option.days}
-                  type="button"
-                  onClick={() => setWindowDays(option.days)}
-                  className={cn(
-                    "cursor-pointer px-3 py-1.5 text-xs",
-                    option.days === windowDays
-                      ? "bg-muted text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={refresh}
-              disabled={isPending || isRefreshing}
-              aria-label={isRefreshing ? "正在刷新用量" : "刷新用量"}
-              className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-60"
-            >
-              <RefreshCwIcon className={cn("size-3.5", isRefreshing && "animate-spin")} />
-            </button>
-          </div>
-        </header>
-
-        {isPending ? (
-          <UsageSkeleton />
-        ) : (
-          <>
-            {error ? (
-              <div className="border border-border px-3 py-2 text-xs text-muted-foreground">
-                {error}
+    <div className="relative h-full">
+      <WindowDragStrip className="h-6" />
+      <ScrollArea className="h-full">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-6">
+          <header className="drag-region flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                aria-label="返回"
+                onClick={() => {
+                  if (canGoBack) {
+                    router.history.back();
+                    return;
+                  }
+                  void navigate({ to: "/" });
+                }}
+                className="mt-1 cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeftIcon className="size-3.5" />
+              </button>
+              <div className="flex flex-col gap-1">
+                <h1 className="text-2xl font-semibold text-foreground">用量统计</h1>
+                <p className="text-sm text-muted-foreground">
+                  {formatDayShort(window.sinceDay)} 至 {formatDayShort(window.untilDay)}
+                </p>
               </div>
-            ) : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex overflow-hidden rounded-md border border-border">
+                {WINDOW_OPTIONS.map((option) => (
+                  <button
+                    key={option.days}
+                    type="button"
+                    onClick={() => setWindowDays(option.days)}
+                    className={cn(
+                      "cursor-pointer px-3 py-1.5 text-xs",
+                      option.days === windowDays
+                        ? "bg-muted text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={isPending || isRefreshing}
+                aria-label={isRefreshing ? "正在刷新用量" : "刷新用量"}
+                className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-60"
+              >
+                <RefreshCwIcon className={cn("size-3.5", isRefreshing && "animate-spin")} />
+              </button>
+            </div>
+          </header>
 
-            {/* Cost first: the financial answer, then the provider split. */}
-            <section className="grid gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
-              {/* The summary follows the chart toggle, so the headline and the
+          {isPending ? (
+            <UsageSkeleton />
+          ) : (
+            <>
+              {error ? (
+                <div className="border border-border px-3 py-2 text-xs text-muted-foreground">
+                  {error}
+                </div>
+              ) : null}
+
+              {/* Cost first: the financial answer, then the provider split. */}
+              <section className="grid gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+                {/* The summary follows the chart toggle, so the headline and the
                   series are always reading the same units. */}
-              <div className="flex flex-col gap-5">
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs tracking-wide text-muted-foreground uppercase">
-                    {metric === "cost" ? "Token 估算成本" : "已处理 Token"}
-                  </span>
-                  <span className="text-4xl font-semibold text-foreground tabular-nums">
-                    {metric === "cost"
-                      ? `${formatUsd(merged.costUsd)}*`
-                      : formatTokens(merged.totalTokens)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {metric === "cost"
-                      ? "* 按完整 API 单价估算，并非实际账单"
-                      : `${formatCount(merged.sessions)} 个会话的输入、缓存读取与输出总量。`}
-                  </span>
+                <div className="flex flex-col gap-5">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs tracking-wide text-muted-foreground uppercase">
+                      {metric === "cost" ? "Token 估算成本" : "已处理 Token"}
+                    </span>
+                    <span className="text-4xl font-semibold text-foreground tabular-nums">
+                      {metric === "cost"
+                        ? `${formatUsd(merged.costUsd)}*`
+                        : formatTokens(merged.totalTokens)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {metric === "cost"
+                        ? "* 按完整 API 单价估算，并非实际账单"
+                        : `${formatCount(merged.sessions)} 个会话的输入、缓存读取与输出总量。`}
+                    </span>
+                  </div>
+
+                  {orderedProviders.map((provider) => {
+                    const share = metric === "cost" ? provider.costShare : provider.tokenShare;
+                    return (
+                      <div key={provider.provider} className="flex flex-col gap-1.5">
+                        <div className="flex items-baseline justify-between">
+                          <span className="flex items-center gap-2 text-sm text-foreground">
+                            <ProviderMark provider={provider.provider} className="size-4" />
+                            {PROVIDER_LABEL[provider.provider]}
+                          </span>
+                          <span className="text-sm text-foreground tabular-nums">
+                            {metric === "cost"
+                              ? formatUsd(provider.costUsd)
+                              : formatTokens(provider.totalTokens)}
+                          </span>
+                        </div>
+                        <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full"
+                            style={{
+                              width: `${(share * 100).toFixed(1)}%`,
+                              backgroundColor: PROVIDER_COLOR[provider.provider],
+                            }}
+                          />
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {metric === "cost"
+                            ? `占成本 ${formatPercent(share)} · ${formatTokens(provider.totalTokens)} Token`
+                            : `占 Token ${formatPercent(share)} · ${formatUsd(provider.costUsd)}`}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {orderedProviders.map((provider) => {
-                  const share = metric === "cost" ? provider.costShare : provider.tokenShare;
-                  return (
-                    <div key={provider.provider} className="flex flex-col gap-1.5">
-                      <div className="flex items-baseline justify-between">
-                        <span className="flex items-center gap-2 text-sm text-foreground">
-                          <ProviderMark provider={provider.provider} className="size-4" />
-                          {PROVIDER_LABEL[provider.provider]}
-                        </span>
-                        <span className="text-sm text-foreground tabular-nums">
-                          {metric === "cost"
-                            ? formatUsd(provider.costUsd)
-                            : formatTokens(provider.totalTokens)}
-                        </span>
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="text-sm font-medium text-foreground">
+                      每日{metric === "tokens" ? "已处理 Token" : "估算成本"}
+                    </h2>
+                    <div className="flex items-center gap-4">
+                      <div className="flex overflow-hidden rounded-md border border-border">
+                        {(["cost", "tokens"] as const).map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => setMetric(option)}
+                            className={cn(
+                              "cursor-pointer px-2.5 py-1 text-[10px] tracking-wide uppercase",
+                              option === metric
+                                ? "bg-muted text-foreground"
+                                : "text-muted-foreground hover:text-foreground",
+                            )}
+                          >
+                            {option === "cost" ? "成本" : "Token"}
+                          </button>
+                        ))}
                       </div>
-                      <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-                        <div
-                          className="h-full"
-                          style={{
-                            width: `${(share * 100).toFixed(1)}%`,
-                            backgroundColor: PROVIDER_COLOR[provider.provider],
-                          }}
-                        />
-                      </div>
-                      <span className="text-xs text-muted-foreground">
-                        {metric === "cost"
-                          ? `占成本 ${formatPercent(share)} · ${formatTokens(provider.totalTokens)} Token`
-                          : `占 Token ${formatPercent(share)} · ${formatUsd(provider.costUsd)}`}
-                      </span>
+                      <UsageChartLegend />
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                  <UsageProviderChart days={days} daily={merged.daily} metric={metric} />
+                </div>
+              </section>
 
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="text-sm font-medium text-foreground">
-                    每日{metric === "tokens" ? "已处理 Token" : "估算成本"}
-                  </h2>
-                  <div className="flex items-center gap-4">
-                    <div className="flex overflow-hidden rounded-md border border-border">
-                      {(["cost", "tokens"] as const).map((option) => (
-                        <button
-                          key={option}
-                          type="button"
-                          onClick={() => setMetric(option)}
-                          className={cn(
-                            "cursor-pointer px-2.5 py-1 text-[10px] tracking-wide uppercase",
-                            option === metric
-                              ? "bg-muted text-foreground"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {option === "cost" ? "成本" : "Token"}
-                        </button>
-                      ))}
-                    </div>
-                    <UsageChartLegend />
+              <section className="grid grid-cols-2 gap-px border-y border-border bg-border md:grid-cols-5">
+                <Metric
+                  label="已处理 Token"
+                  value={formatTokens(merged.totalTokens)}
+                  detail={`活跃日均 ${formatTokens(dailyAverage)}`}
+                />
+                <Metric
+                  label="缓存输入"
+                  value={formatTokens(merged.cachedInputTokens)}
+                  detail={`占已观测输入 ${formatPercent(cachedShare)}`}
+                />
+                <Metric
+                  label="非缓存输入"
+                  value={formatTokens(merged.uncachedInputTokens)}
+                  detail={`${formatTokens(merged.cacheCreationTokens)} 次缓存写入`}
+                />
+                <Metric
+                  label="输出"
+                  value={formatTokens(merged.outputTokens)}
+                  detail={`其中推理 ${formatTokens(merged.reasoningTokens)}`}
+                />
+                <Metric
+                  label="缓存节省"
+                  value={formatUsd(merged.costQuality.cacheSavingsUsd)}
+                  detail={
+                    merged.costUsd > 0
+                      ? `约为原始 Token 成本的 ${(merged.costQuality.cacheSavingsUsd / merged.costUsd).toFixed(1)} 倍`
+                      : "相对完整输入单价"
+                  }
+                />
+              </section>
+
+              <section className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-medium text-foreground">明细</h2>
+                  <div className="flex overflow-hidden rounded-md border border-border">
+                    {(["model", "day"] as const).map((option) => (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => setBreakdown(option)}
+                        className={cn(
+                          "cursor-pointer px-2.5 py-1 text-[10px] tracking-wide uppercase",
+                          option === breakdown
+                            ? "bg-muted text-foreground"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {option === "model" ? "模型" : "日期"}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <UsageProviderChart days={days} daily={merged.daily} metric={metric} />
-              </div>
-            </section>
 
-            <section className="grid grid-cols-2 gap-px border-y border-border bg-border md:grid-cols-5">
-              <Metric
-                label="已处理 Token"
-                value={formatTokens(merged.totalTokens)}
-                detail={`活跃日均 ${formatTokens(dailyAverage)}`}
-              />
-              <Metric
-                label="缓存输入"
-                value={formatTokens(merged.cachedInputTokens)}
-                detail={`占已观测输入 ${formatPercent(cachedShare)}`}
-              />
-              <Metric
-                label="非缓存输入"
-                value={formatTokens(merged.uncachedInputTokens)}
-                detail={`${formatTokens(merged.cacheCreationTokens)} 次缓存写入`}
-              />
-              <Metric
-                label="输出"
-                value={formatTokens(merged.outputTokens)}
-                detail={`其中推理 ${formatTokens(merged.reasoningTokens)}`}
-              />
-              <Metric
-                label="缓存节省"
-                value={formatUsd(merged.costQuality.cacheSavingsUsd)}
-                detail={
-                  merged.costUsd > 0
-                    ? `约为原始 Token 成本的 ${(merged.costQuality.cacheSavingsUsd / merged.costUsd).toFixed(1)} 倍`
-                    : "相对完整输入单价"
-                }
-              />
-            </section>
-
-            <section className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-medium text-foreground">明细</h2>
-                <div className="flex overflow-hidden rounded-md border border-border">
-                  {(["model", "day"] as const).map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => setBreakdown(option)}
-                      className={cn(
-                        "cursor-pointer px-2.5 py-1 text-[10px] tracking-wide uppercase",
-                        option === breakdown
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      {option === "model" ? "模型" : "日期"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {breakdown === "model" ? (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th className="py-2 font-normal">模型</th>
-                      <th className="py-2 text-right font-normal">成本</th>
-                      <th className="py-2 text-right font-normal">占比</th>
-                      <th className="py-2 text-right font-normal">Token</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {merged.models.length === 0 ? (
-                      <tr>
-                        <td colSpan={4} className="py-6 text-center text-muted-foreground">
-                          当前时间范围内暂无用量。
-                        </td>
+                {breakdown === "model" ? (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <th className="py-2 font-normal">模型</th>
+                        <th className="py-2 text-right font-normal">成本</th>
+                        <th className="py-2 text-right font-normal">占比</th>
+                        <th className="py-2 text-right font-normal">Token</th>
                       </tr>
-                    ) : (
-                      merged.models.map((model) => (
-                        <tr
-                          key={`${model.provider}:${model.model}`}
-                          className="border-b border-border/50"
-                        >
-                          <td className="py-2 text-foreground">
-                            <span className="flex items-center gap-2">
-                              <ProviderMark provider={model.provider} className="size-3.5" />
-                              {model.model}
-                            </span>
-                          </td>
-                          <td className="py-2 text-right text-foreground tabular-nums">
-                            {formatUsd(model.costUsd)}
-                          </td>
-                          <td className="py-2 text-right text-muted-foreground tabular-nums">
-                            {formatPercent(model.costShare)}
-                          </td>
-                          <td className="py-2 text-right text-muted-foreground tabular-nums">
-                            {formatTokens(model.totalTokens)}
+                    </thead>
+                    <tbody>
+                      {merged.models.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} className="py-6 text-center text-muted-foreground">
+                            当前时间范围内暂无用量。
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                      <th className="py-2 font-normal">日期</th>
-                      {PROVIDER_ORDER.map((provider) => (
-                        <th key={provider} className="py-2 text-right font-normal">
-                          {PROVIDER_LABEL[provider]}
-                        </th>
-                      ))}
-                      <th className="py-2 text-right font-normal">合计</th>
-                      <th className="py-2 text-right font-normal">Token</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentDays.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-6 text-center text-muted-foreground">
-                          当前时间范围内暂无用量。
-                        </td>
-                      </tr>
-                    ) : (
-                      recentDays.map((day) => (
-                        <tr key={day.day} className="border-b border-border/50">
-                          <td className="py-2 text-foreground">{formatDayShort(day.day)}</td>
-                          {PROVIDER_ORDER.map((provider) => (
-                            <td
-                              key={provider}
-                              className="py-2 text-right text-muted-foreground tabular-nums"
-                            >
-                              {formatUsd(day.byProvider.get(provider)?.costUsd ?? 0)}
+                      ) : (
+                        merged.models.map((model) => (
+                          <tr
+                            key={`${model.provider}:${model.model}`}
+                            className="border-b border-border/50"
+                          >
+                            <td className="py-2 text-foreground">
+                              <span className="flex items-center gap-2">
+                                <ProviderMark provider={model.provider} className="size-3.5" />
+                                {model.model}
+                              </span>
                             </td>
-                          ))}
-                          <td className="py-2 text-right text-foreground tabular-nums">
-                            {formatUsd(day.costUsd)}
-                          </td>
-                          <td className="py-2 text-right text-muted-foreground tabular-nums">
-                            {formatTokens(day.totalTokens)}
+                            <td className="py-2 text-right text-foreground tabular-nums">
+                              {formatUsd(model.costUsd)}
+                            </td>
+                            <td className="py-2 text-right text-muted-foreground tabular-nums">
+                              {formatPercent(model.costShare)}
+                            </td>
+                            <td className="py-2 text-right text-muted-foreground tabular-nums">
+                              {formatTokens(model.totalTokens)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                        <th className="py-2 font-normal">日期</th>
+                        {PROVIDER_ORDER.map((provider) => (
+                          <th key={provider} className="py-2 text-right font-normal">
+                            {PROVIDER_LABEL[provider]}
+                          </th>
+                        ))}
+                        <th className="py-2 text-right font-normal">合计</th>
+                        <th className="py-2 text-right font-normal">Token</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentDays.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                            当前时间范围内暂无用量。
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              )}
-            </section>
-          </>
-        )}
-      </div>
-    </ScrollArea>
+                      ) : (
+                        recentDays.map((day) => (
+                          <tr key={day.day} className="border-b border-border/50">
+                            <td className="py-2 text-foreground">{formatDayShort(day.day)}</td>
+                            {PROVIDER_ORDER.map((provider) => (
+                              <td
+                                key={provider}
+                                className="py-2 text-right text-muted-foreground tabular-nums"
+                              >
+                                {formatUsd(day.byProvider.get(provider)?.costUsd ?? 0)}
+                              </td>
+                            ))}
+                            <td className="py-2 text-right text-foreground tabular-nums">
+                              {formatUsd(day.costUsd)}
+                            </td>
+                            <td className="py-2 text-right text-muted-foreground tabular-nums">
+                              {formatTokens(day.totalTokens)}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </section>
+            </>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 
@@ -448,111 +452,114 @@ function GatewayUsagePage({
   );
 
   return (
-    <ScrollArea className="h-full">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-3">
+    <div className="relative h-full">
+      <WindowDragStrip className="h-6" />
+      <ScrollArea className="h-full">
+        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6">
+          <header className="drag-region flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                aria-label="返回"
+                onClick={onBack}
+                className="mt-1 cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeftIcon className="size-3.5" />
+              </button>
+              <div>
+                <h1 className="text-2xl font-semibold text-foreground">用量统计</h1>
+                <p className="mt-1 text-sm text-muted-foreground">Gateway AI 点数 · 近 30 天</p>
+              </div>
+            </div>
             <button
               type="button"
-              aria-label="返回"
-              onClick={onBack}
-              className="mt-1 cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
+              onClick={usage.refresh}
+              disabled={usage.isRefreshing || usage.isPending}
+              aria-label="刷新用量"
+              className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:opacity-60"
             >
-              <ArrowLeftIcon className="size-3.5" />
+              <RefreshCwIcon className={cn("size-3.5", usage.isRefreshing && "animate-spin")} />
             </button>
-            <div>
-              <h1 className="text-2xl font-semibold text-foreground">用量统计</h1>
-              <p className="mt-1 text-sm text-muted-foreground">Gateway AI 点数 · 近 30 天</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={usage.refresh}
-            disabled={usage.isRefreshing || usage.isPending}
-            aria-label="刷新用量"
-            className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:opacity-60"
-          >
-            <RefreshCwIcon className={cn("size-3.5", usage.isRefreshing && "animate-spin")} />
-          </button>
-        </header>
+          </header>
 
-        {usage.isPending ? (
-          <div className="border border-border px-4 py-10 text-center text-sm text-muted-foreground">
-            正在读取 Gateway 用量…
-          </div>
-        ) : usage.error && summary === null ? (
-          <div className="border border-border px-4 py-10 text-center text-sm text-muted-foreground">
-            {usage.error}
-          </div>
-        ) : summary !== null ? (
-          <>
-            <section className="grid gap-px border border-border bg-border sm:grid-cols-2 lg:grid-cols-6">
-              <UsageMetric
-                label="AI 点数消耗"
-                value={formatQuotaAiCredits(
-                  summary.quota,
-                  summary.quotaPerUnit,
-                  summary.usdExchangeRate,
-                )}
-                detail="近 30 天 Gateway 统计"
-              />
-              <UsageMetric
-                label="模型 Token"
-                value={formatTokens(totalTokens)}
-                detail="输入与输出合计"
-              />
-              <UsageMetric
-                label="模型请求"
-                value={formatCount(summary.requestCount)}
-                detail="近 30 天全量"
-              />
-              <UsageMetric
-                label="当前速率"
-                value={`${formatCount(summary.rpm)} RPM`}
-                detail={`${formatCount(summary.tpm)} TPM`}
-              />
-              <UsageMetric
-                label="失败事件"
-                value={formatCount(summary.failedCount)}
-                detail="错误与异常断流"
-              />
-              <UsageMetric
-                label="平均响应"
-                value={summary.averageUseTime ? `${summary.averageUseTime.toFixed(1)} 秒` : "-"}
-                detail="近 30 天模型请求"
-              />
-            </section>
-            <section className="grid gap-4 lg:grid-cols-2">
-              {quotaCard("今日", summary.dailyQuota)}
-              {quotaCard("本月", summary.monthlyQuota)}
-            </section>
-            <section className="border border-border bg-background p-5">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground">模型使用分布</h2>
-                <p className="mt-1 text-xs text-muted-foreground">按 Gateway 实际 Token 统计</p>
-              </div>
-              {summary.models.length > 0 ? (
-                <div className="mt-4 divide-y divide-border border-y border-border">
-                  {summary.models.map((model) => (
-                    <div
-                      key={model.model}
-                      className="flex items-center justify-between py-3 text-sm"
-                    >
-                      <span className="truncate text-foreground">{model.model}</span>
-                      <span className="text-muted-foreground tabular-nums">
-                        {formatTokens(model.tokens)} Token
-                      </span>
-                    </div>
-                  ))}
+          {usage.isPending ? (
+            <div className="border border-border px-4 py-10 text-center text-sm text-muted-foreground">
+              正在读取 Gateway 用量…
+            </div>
+          ) : usage.error && summary === null ? (
+            <div className="border border-border px-4 py-10 text-center text-sm text-muted-foreground">
+              {usage.error}
+            </div>
+          ) : summary !== null ? (
+            <>
+              <section className="grid gap-px border border-border bg-border sm:grid-cols-2 lg:grid-cols-6">
+                <UsageMetric
+                  label="AI 点数消耗"
+                  value={formatQuotaAiCredits(
+                    summary.quota,
+                    summary.quotaPerUnit,
+                    summary.usdExchangeRate,
+                  )}
+                  detail="近 30 天 Gateway 统计"
+                />
+                <UsageMetric
+                  label="模型 Token"
+                  value={formatTokens(totalTokens)}
+                  detail="输入与输出合计"
+                />
+                <UsageMetric
+                  label="模型请求"
+                  value={formatCount(summary.requestCount)}
+                  detail="近 30 天全量"
+                />
+                <UsageMetric
+                  label="当前速率"
+                  value={`${formatCount(summary.rpm)} RPM`}
+                  detail={`${formatCount(summary.tpm)} TPM`}
+                />
+                <UsageMetric
+                  label="失败事件"
+                  value={formatCount(summary.failedCount)}
+                  detail="错误与异常断流"
+                />
+                <UsageMetric
+                  label="平均响应"
+                  value={summary.averageUseTime ? `${summary.averageUseTime.toFixed(1)} 秒` : "-"}
+                  detail="近 30 天模型请求"
+                />
+              </section>
+              <section className="grid gap-4 lg:grid-cols-2">
+                {quotaCard("今日", summary.dailyQuota)}
+                {quotaCard("本月", summary.monthlyQuota)}
+              </section>
+              <section className="border border-border bg-background p-5">
+                <div>
+                  <h2 className="text-sm font-semibold text-foreground">模型使用分布</h2>
+                  <p className="mt-1 text-xs text-muted-foreground">按 Gateway 实际 Token 统计</p>
                 </div>
-              ) : (
-                <p className="mt-5 text-sm text-muted-foreground">当前时间范围内暂无模型调用。</p>
-              )}
-            </section>
-          </>
-        ) : null}
-      </div>
-    </ScrollArea>
+                {summary.models.length > 0 ? (
+                  <div className="mt-4 divide-y divide-border border-y border-border">
+                    {summary.models.map((model) => (
+                      <div
+                        key={model.model}
+                        className="flex items-center justify-between py-3 text-sm"
+                      >
+                        <span className="truncate text-foreground">{model.model}</span>
+                        <span className="text-muted-foreground tabular-nums">
+                          {formatTokens(model.tokens)} Token
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-5 text-sm text-muted-foreground">当前时间范围内暂无模型调用。</p>
+                )}
+              </section>
+            </>
+          ) : null}
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 

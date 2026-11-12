@@ -32,6 +32,21 @@ const requestError = (operation: FdTextGenerationOperation) =>
   });
 const isTextGenerationError = Schema.is(TextGenerationError);
 
+/**
+ * FD task titles are always Simplified Chinese, whatever language the employee
+ * wrote in. Upstream's title prompt sets no language and counts English words,
+ * so the model answered in English about four times in ten.
+ */
+export const FD_THREAD_TITLE_INSTRUCTIONS = [
+  "Language: always write the title in Simplified Chinese (简体中文), even when the user writes in another language.",
+  "Keep proper nouns, product names, file names and technical terms in their usual form, e.g. Excel, PDF, PPT, Python, API.",
+  "Length: 4 to 16 Chinese characters. This replaces the 3-8 words / 40 characters rule above.",
+  "Use a noun phrase or an action phrase, such as 基金持仓分析 or 生成销售周报 PPT. No quotes and no trailing punctuation.",
+].join("\n");
+const FD_THREAD_TITLE_RETRY_INSTRUCTION =
+  "The previous answer was not in Chinese. Answer again with a Simplified Chinese title only.";
+const containsChinese = (text: string) => /[一-鿿]/u.test(text);
+
 export const makeFdDeepSeekTextGeneration = (client: FdResponsesStreamer) => {
   const runJson = <S extends Schema.Top>(
     operation: FdTextGenerationOperation,
@@ -126,18 +141,33 @@ export const makeFdDeepSeekTextGeneration = (client: FdResponsesStreamer) => {
 
   const generateThreadTitle: TextGeneration.TextGeneration["Service"]["generateThreadTitle"] =
     Effect.fn("FdDeepSeekTextGeneration.generateThreadTitle")(function* (input) {
-      const { prompt, outputSchema } = buildThreadTitlePrompt({
-        message: input.message,
-        previousTitle: input.previousTitle,
-        attachments: input.attachments,
+      for (const retry of [false, true]) {
+        const { prompt, outputSchema } = buildThreadTitlePrompt({
+          message: input.message,
+          previousTitle: input.previousTitle,
+          attachments: input.attachments,
+          policy: {
+            kind: "custom",
+            inferRepositoryConventions: false,
+            threadTitleInstructions: retry
+              ? `${FD_THREAD_TITLE_INSTRUCTIONS}\n${FD_THREAD_TITLE_RETRY_INSTRUCTION}`
+              : FD_THREAD_TITLE_INSTRUCTIONS,
+          },
+        });
+        const generated = yield* runJson(
+          "generateThreadTitle",
+          prompt,
+          outputSchema,
+          input.modelSelection,
+        );
+        const title = sanitizeThreadTitle(generated.title);
+        if (containsChinese(title)) return { title };
+      }
+      // Still not Chinese: keep the provisional title rather than show English.
+      return yield* new TextGenerationError({
+        operation: "generateThreadTitle",
+        detail: "FD thread title was not in Chinese.",
       });
-      const generated = yield* runJson(
-        "generateThreadTitle",
-        prompt,
-        outputSchema,
-        input.modelSelection,
-      );
-      return { title: sanitizeThreadTitle(generated.title) };
     });
 
   return TextGeneration.TextGeneration.of({

@@ -85,9 +85,6 @@ export function isTechnicalWorkbenchCommand(command: string | null): boolean {
   return (
     command === "filePicker.toggle" ||
     command === "projectSearch.toggle" ||
-    command === "rightPanel.toggle" ||
-    command === "diff.toggle" ||
-    command.startsWith("terminal.") ||
     (command.startsWith("script.") && command.endsWith(".run"))
   );
 }

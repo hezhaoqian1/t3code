@@ -23,7 +23,7 @@ import {
 } from "../ui/sidebar";
 import { SidebarThreadUndoNotice } from "./SidebarThreadUndoNotice";
 import { SidebarUpdatePill } from "./SidebarUpdatePill";
-import fdsureMark from "../../assets/fdsure-mark.png";
+import { BrandMark } from "../BootSplash";
 import { useFdAccount } from "../../fd/FdAccountProvider";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 
@@ -65,7 +65,7 @@ function SidebarBrand() {
       className="sidebar-brand relative z-10 h-9 min-w-0 items-center gap-2 overflow-hidden rounded-md px-1.5 text-sidebar-foreground outline-hidden ring-ring focus-visible:ring-2"
       to="/"
     >
-      <img className="size-6 shrink-0 object-contain" src={fdsureMark} alt="" />
+      <BrandMark className="size-6" />
       <span className="truncate text-[15px] font-semibold">方德 AI</span>
     </Link>
   );

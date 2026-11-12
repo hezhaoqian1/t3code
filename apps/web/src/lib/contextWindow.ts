@@ -1,3 +1,6 @@
+// The composer no longer shows a context-usage ring (removed in 0.2.47), but
+// the server's activity projection tests use this to check that deduplicated
+// context-window activity still yields the same snapshot the client derives.
 import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from "@t3tools/contracts";
 
 function asRecord(value: unknown): Record<string, unknown> | null {

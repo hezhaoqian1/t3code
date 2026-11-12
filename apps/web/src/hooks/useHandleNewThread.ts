@@ -30,6 +30,7 @@ import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore"
 import { useClientSettings } from "./useSettings";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { isElectron } from "../env";
+import { NEW_TASK_MODEL_SELECTION } from "../newTaskModel";
 import { findOfficeWorkspaceProject } from "../officeMode";
 
 interface NewThreadWorkspaceOptions {
@@ -132,12 +133,6 @@ export function useNewThreadHandler() {
             : carrySourceComposer;
         return latest?.prompt ?? "";
       };
-      const composerActiveProvider = carrySourceComposer?.activeProvider ?? null;
-      const composerModelSelection = composerActiveProvider
-        ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
-        : null;
-      const carryModelSelection =
-        composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
       const carryRuntimeMode =
         carrySourceComposer?.runtimeMode ??
         carrySourceShell?.runtimeMode ??
@@ -286,14 +281,6 @@ export function useNewThreadHandler() {
               ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             });
-            if (carryModelSelection) {
-              // The carried selection is a complete snapshot of the viewed
-              // thread's model state: absent options mean "no options", not
-              // "keep the stale draft's options".
-              setModelSelection(reusableStoredDraftThread.draftId, carryModelSelection, {
-                replaceOptions: true,
-              });
-            }
           }
           // The workspace context must also ride along here: when projectRef
           // targets a different physical member of the logical project,
@@ -430,14 +417,9 @@ export function useNewThreadHandler() {
           setPrompt(draftId, latestPrompt);
         }
         applyStickyState(draftId);
-        if (carryModelSelection) {
-          // After sticky state so the viewed thread's exact selection
-          // (model + options like effort and context window) wins over the
-          // globally sticky one. replaceOptions: the carried selection is a
-          // complete snapshot — absent options mean "no options", not "keep
-          // whatever sticky state just wrote".
-          setModelSelection(draftId, carryModelSelection, { replaceOptions: true });
-        }
+        // New tasks always start on Flash (FD's default), not on the model of
+        // the task being viewed; see NEW_TASK_MODEL_SELECTION.
+        setModelSelection(draftId, NEW_TASK_MODEL_SELECTION, { replaceOptions: true });
 
         await router.navigate({
           to: "/draft/$draftId",

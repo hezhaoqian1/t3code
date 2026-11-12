@@ -15,7 +15,7 @@ import { clearAllEnterpriseComposerDrafts } from "../composerDraftStore";
 import { clearAllFdSkillSelections } from "../fdSkillSelectionStore";
 import { useSendQueueStore } from "../sendQueueStore";
 
-interface FdAccountContextValue {
+export interface FdAccountContextValue {
   readonly state: FdAccountState;
   readonly busy: "login" | "logout" | "reload" | "retry" | null;
   readonly error: string | null;
@@ -26,7 +26,8 @@ interface FdAccountContextValue {
   readonly clearError: () => void;
 }
 
-const FdAccountContext = createContext<FdAccountContextValue | null>(null);
+/** Exported for tests that render a gate in a fixed account state. */
+export const FdAccountContext = createContext<FdAccountContextValue | null>(null);
 
 export function createFdAccountStatePublisher(publish: (state: FdAccountState) => void) {
   let authenticatedUserId: number | null = null;

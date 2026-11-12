@@ -4,7 +4,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { RotateCcwIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { BootSplash } from "../components/BootSplash";
 import { Button } from "../components/ui/button";
+import { WindowDragStrip } from "../components/WindowDragStrip";
+import { resolveIndexLandingView, TASK_AREA_UNAVAILABLE_GRACE_MS } from "../taskAreaLanding";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
 import { SidebarInset } from "../components/ui/sidebar";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
@@ -43,6 +46,20 @@ function IndexDraftLanding() {
     return officeProject;
   }, [bootstrapped, primaryEnvironmentId, projects, serverWelcome]);
 
+  const waitingForTaskArea = bootstrapped && defaultProject === null;
+  const [taskAreaGraceElapsed, setTaskAreaGraceElapsed] = useState(false);
+  useEffect(() => {
+    if (!waitingForTaskArea) {
+      setTaskAreaGraceElapsed(false);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => setTaskAreaGraceElapsed(true),
+      TASK_AREA_UNAVAILABLE_GRACE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [waitingForTaskArea]);
+
   useEffect(() => {
     if (defaultProject === null || startingRef.current) {
       return;
@@ -57,11 +74,14 @@ function IndexDraftLanding() {
     });
   }, [defaultProject, handleNewThread, startState.retryRequest]);
 
-  if (!bootstrapped) {
-    return null;
-  }
-  if (defaultProject !== null) {
-    return startState.failed ? (
+  const view = resolveIndexLandingView({
+    bootstrapped,
+    taskAreaFound: defaultProject !== null,
+    draftStartFailed: startState.failed,
+    taskAreaGraceElapsed,
+  });
+  if (view === "draft-start-error") {
+    return (
       <DraftStartError
         onRetry={() => {
           setStartState((state) => ({
@@ -70,14 +90,28 @@ function IndexDraftLanding() {
           }));
         }}
       />
-    ) : null;
+    );
   }
-  return <TaskAreaBootstrapError />;
+  if (view === "task-area-unavailable") {
+    return <TaskAreaBootstrapError />;
+  }
+  // Still starting, or about to open the new task's draft.
+  return <TaskAreaLoading />;
+}
+
+function TaskAreaLoading() {
+  return (
+    <SidebarInset className="relative h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <WindowDragStrip />
+      <BootSplash />
+    </SidebarInset>
+  );
 }
 
 function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+    <SidebarInset className="relative h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <WindowDragStrip />
       <Empty className="flex-1">
         <EmptyHeader className="max-w-md">
           <EmptyTitle className="text-foreground text-xl">无法开始新对话</EmptyTitle>
@@ -98,7 +132,8 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
 
 function TaskAreaBootstrapError() {
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+    <SidebarInset className="relative h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <WindowDragStrip />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <Empty className="flex-1">
           <div className="w-full max-w-lg px-8 py-12">

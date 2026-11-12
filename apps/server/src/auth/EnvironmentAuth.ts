@@ -20,6 +20,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
@@ -223,7 +224,10 @@ type BootstrapExchangeResult = {
 };
 
 const AUTHORIZATION_PREFIX = "Bearer ";
-const WEBSOCKET_TICKET_QUERY_PARAM = "wsTicket";
+const WebSocketUpgradeQuery = Schema.Struct({
+  wsTicket: Schema.optionalKey(Schema.RedactedFromValue(Schema.String)),
+});
+const decodeWebSocketUpgradeQuery = Schema.decodeEffect(WebSocketUpgradeQuery);
 
 export function toBootstrapExchangeError(
   cause: BootstrapCredentialStore.BootstrapCredentialError,
@@ -427,7 +431,7 @@ export const make = Effect.gen(function* () {
       Effect.map(
         (issued) =>
           ({
-            ticket: issued.token,
+            ticket: Redacted.make(issued.token),
             expiresAt: DateTime.toUtc(issued.expiresAt),
           }) satisfies AuthWebSocketTicketResult,
       ),
@@ -443,7 +447,10 @@ export const make = Effect.gen(function* () {
     Effect.fn("EnvironmentAuth.authenticateWebSocketUpgrade")(function* (request) {
       const requestUrl = HttpServerRequest.toURL(request);
       if (Option.isSome(requestUrl)) {
-        const websocketTicket = requestUrl.value.searchParams.get(WEBSOCKET_TICKET_QUERY_PARAM);
+        const query = yield* decodeWebSocketUpgradeQuery(
+          Object.fromEntries(requestUrl.value.searchParams),
+        ).pipe(Effect.orDie);
+        const websocketTicket = query.wsTicket && Redacted.value(query.wsTicket);
         if (websocketTicket && websocketTicket.trim().length > 0) {
           return yield* sessions.verifyWebSocketToken(websocketTicket).pipe(
             Effect.map((session) => ({

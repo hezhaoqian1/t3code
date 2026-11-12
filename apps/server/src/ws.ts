@@ -907,7 +907,10 @@ const makeWsRpcLayer = (
                   message: "Task project and thread bootstrap project ids must match.",
                 });
               }
-              const taskWorkspaceRoot = yield* prepareTaskWorkspace(command.createdAt).pipe(
+              const taskWorkspaceRoot = yield* prepareTaskWorkspace({
+                createdAt: command.createdAt,
+                title: taskProject.title,
+              }).pipe(
                 Effect.provideService(FileSystem.FileSystem, fileSystem),
                 Effect.provideService(Path.Path, path),
                 Effect.provideService(ServerConfig.ServerConfig, config),
@@ -1697,19 +1700,13 @@ const makeWsRpcLayer = (
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
             WS_METHODS.serverUpsertKeybinding,
-            Effect.gen(function* () {
-              const keybindingsConfig = yield* keybindings.upsertKeybindingRule(rule);
-              return { keybindings: keybindingsConfig, issues: [] };
-            }),
+            keybindings.upsertKeybindingRule(rule),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverRemoveKeybinding]: (rule) =>
           observeRpcEffect(
             WS_METHODS.serverRemoveKeybinding,
-            Effect.gen(function* () {
-              const keybindingsConfig = yield* keybindings.removeKeybindingRule(rule);
-              return { keybindings: keybindingsConfig, issues: [] };
-            }),
+            keybindings.removeKeybindingRule(rule),
             { "rpc.aggregate": "server" },
           ),
         [WS_METHODS.serverGetSettings]: (_input) =>

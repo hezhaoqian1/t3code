@@ -8,6 +8,12 @@ import { defineConfig } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
 import { DEV_PROXIED_PATH_PREFIXES } from "@t3tools/shared/devProxy";
+import {
+  BOOT_SPLASH_APP_STATUSES,
+  BOOT_SPLASH_CSS,
+  bootSplashPhaseScript,
+  renderBootSplashMarkup,
+} from "@t3tools/shared/bootSplash";
 
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { prepareViteDevelopmentBootstrap } from "./src/devBootstrap";
@@ -78,6 +84,37 @@ export function resolveDevProxyTarget(backendPort: string | undefined): string |
 
 const devProxyTarget = resolveDevProxyTarget(process.env.T3CODE_PORT);
 
+const BOOT_SPLASH_STYLE_MARKER = "<!-- fd-boot-splash:style -->";
+const BOOT_SPLASH_MARKUP_MARKER = "<!-- fd-boot-splash:markup -->";
+
+/**
+ * Renders the shared 方德 AI loading screen into index.html's boot shell, so
+ * the page shows exactly what the Electron startup document showed until
+ * React mounts (see packages/shared/src/bootSplash.ts).
+ */
+const bootSplashPlugin = {
+  name: "fd-boot-splash",
+  transformIndexHtml(html: string) {
+    if (!html.includes(BOOT_SPLASH_STYLE_MARKER) || !html.includes(BOOT_SPLASH_MARKUP_MARKER)) {
+      throw new Error("index.html is missing the fd-boot-splash markers");
+    }
+    return html
+      .replace(
+        BOOT_SPLASH_STYLE_MARKER,
+        `<style>${BOOT_SPLASH_CSS}</style><script>${bootSplashPhaseScript}</script>`,
+      )
+      .replace(
+        BOOT_SPLASH_MARKUP_MARKER,
+        renderBootSplashMarkup({
+          purpleSrc: "/boot-mark-purple.png",
+          navySrc: "/boot-mark-navy.png",
+          statuses: BOOT_SPLASH_APP_STATUSES,
+          draggable: true,
+        }),
+      );
+  },
+};
+
 export default defineConfig(({ command }) => {
   const developmentBootstrapDefine = prepareViteDevelopmentBootstrap({
     command,
@@ -98,6 +135,7 @@ export default defineConfig(({ command }) => {
         presets: [reactCompilerPreset()],
       }),
       tailwindcss(),
+      bootSplashPlugin,
     ],
     optimizeDeps: {
       include: [

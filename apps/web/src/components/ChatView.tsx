@@ -119,6 +119,7 @@ import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
+import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
@@ -591,7 +592,11 @@ function useLocalDispatchState(input: {
     resetLocalDispatch,
     localDispatchStartedAt: activeLocalDispatch?.startedAt ?? null,
     isPreparingWorktree: activeLocalDispatch?.preparingWorktree ?? false,
-    isSendBusy: activeLocalDispatch !== null,
+    // A session that is still starting is busy too, with or without a local
+    // dispatch: a new task's first send is promoted into a freshly mounted
+    // thread view that never saw the dispatch, and would otherwise show an
+    // idle composer (and send a second turn on Enter) until the turn runs.
+    isSendBusy: activeLocalDispatch !== null || input.phase === "connecting",
   };
 }
 
@@ -1192,6 +1197,12 @@ function ChatViewContent(props: ChatViewProps) {
   const draftId = routeKind === "draft" ? props.draftId : null;
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
   const threadDetailLoading = threadSyncPhase === "loading";
+  // Opening a running thread resyncs for a few frames. Show the pill only when
+  // the sync lasts (upstream ab70c8943); logic keeps reading the real phase.
+  const shownThreadSyncPhase = useDelayedStatus(
+    `${props.environmentId}:${props.threadId}`,
+    threadSyncPhase,
+  );
   const handleNewThread = useNewThreadHandler();
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -5065,17 +5076,22 @@ function ChatViewContent(props: ChatViewProps) {
     // Sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
+    // A draft's first message is the exception: the draft view is replaced by
+    // the thread view as soon as the server thread starts, and that view
+    // starts unanchored. Anchoring here scrolled the row up 32px only for it
+    // to drop back when the view swapped.
+    const anchorNewTurn = !isLocalDraftThread;
     isAtEndRef.current = true;
-    timelineScrollModeRef.current = "anchoring-new-turn";
+    timelineScrollModeRef.current = anchorNewTurn ? "anchoring-new-turn" : "following-end";
     liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current;
     setTimelineLiveFollowEnabled(true);
-    pendingTimelineAnchorRef.current = messageIdForSend;
+    pendingTimelineAnchorRef.current = anchorNewTurn ? messageIdForSend : null;
     activeTimelineAnchorIndexRef.current = null;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
     setTimelineAnchor({
       threadKey: scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
-      messageId: messageIdForSend,
+      messageId: anchorNewTurn ? messageIdForSend : null,
     });
     setOptimisticUserMessages((existing) => [
       ...existing,
@@ -6076,10 +6092,10 @@ function ChatViewContent(props: ChatViewProps) {
 
   const panelToggleControls = (
     <PanelLayoutControls
-      terminalAvailable={!isOfficeMode && activeProject !== null}
+      terminalAvailable={activeProject !== null}
       terminalOpen={terminalUiState.terminalOpen}
       terminalShortcutLabel={shortcutLabelForCommand(keybindings, "terminal.toggle")}
-      rightPanelAvailable={!isOfficeMode && activeProject !== null}
+      rightPanelAvailable={activeProject !== null}
       rightPanelOpen={rightPanelOpen}
       rightPanelShortcutLabel={shortcutLabelForCommand(keybindings, "rightPanel.toggle")}
       // Suppressed while the Agents surface is visible: the roster itself is
@@ -6109,82 +6125,82 @@ function ChatViewContent(props: ChatViewProps) {
       {panelToggleControls}
     </div>
   );
-  const rightPanelContent =
-    !isOfficeMode && activeThreadRef ? (
-      activeRightPanelSurface?.kind === "preview" ? (
-        <Suspense fallback={null}>
-          <PreviewPanel
-            mode="embedded"
-            threadRef={activeThreadRef}
-            tabId={activeRightPanelSurface.resourceId}
-            configuredUrls={configuredPreviewUrls}
-            visible
-            onSendAnnotation={(annotation, image) => {
-              void onSend(undefined, { annotation, image });
-            }}
-          />
-        </Suspense>
-      ) : activeRightPanelSurface?.kind === "terminal" ? (
-        <PersistentThreadTerminalPanel
+  // Office mode only changes the chrome (no Git or project controls in the
+  // header); the terminal drawer and every right-panel surface work as usual.
+  const rightPanelContent = activeThreadRef ? (
+    activeRightPanelSurface?.kind === "preview" ? (
+      <Suspense fallback={null}>
+        <PreviewPanel
+          mode="embedded"
           threadRef={activeThreadRef}
-          surface={activeRightPanelSurface}
-          launchContext={activeTerminalLaunchContext ?? null}
-          focusRequestId={terminalFocusRequestId}
+          tabId={activeRightPanelSurface.resourceId}
+          configuredUrls={configuredPreviewUrls}
+          visible
+          onSendAnnotation={(annotation, image) => {
+            void onSend(undefined, { annotation, image });
+          }}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === "terminal" ? (
+      <PersistentThreadTerminalPanel
+        threadRef={activeThreadRef}
+        surface={activeRightPanelSurface}
+        launchContext={activeTerminalLaunchContext ?? null}
+        focusRequestId={terminalFocusRequestId}
+        keybindings={keybindings}
+        onAddTerminalContext={addTerminalContextToDraft}
+        onSplitTerminal={splitPanelTerminal}
+        onSplitTerminalVertical={splitPanelTerminalVertical}
+        onNewTerminal={addTerminalSurface}
+        onActiveTerminalChange={activatePanelTerminal}
+        onCloseTerminal={closePanelTerminal}
+        splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+        splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
+        newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+        closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+      />
+    ) : activeRightPanelSurface?.kind === "diff" ? (
+      <Suspense fallback={null}>
+        <DiffPanel
+          key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
+          mode="embedded"
+          composerDraftTarget={composerDraftTarget}
+          initialGitScope={initialDiffPanelGitScope}
+        />
+      </Suspense>
+    ) : activeRightPanelSurface?.kind === "agents" ? (
+      <AgentsPanel
+        model={agentPanelModel}
+        environmentId={activeThreadRef?.environmentId ?? null}
+        threadId={activeThreadRef?.threadId ?? null}
+      />
+    ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
+      activeProject &&
+      activeWorkspaceRoot ? (
+      <Suspense fallback={null}>
+        <FilePreviewPanel
+          key={`${activeProject.environmentId}:${activeWorkspaceRoot}`}
+          environmentId={activeProject.environmentId}
+          cwd={activeWorkspaceRoot}
+          projectName={activeProject.title}
+          threadRef={activeThreadRef}
+          composerDraftTarget={composerDraftTarget}
           keybindings={keybindings}
-          onAddTerminalContext={addTerminalContextToDraft}
-          onSplitTerminal={splitPanelTerminal}
-          onSplitTerminalVertical={splitPanelTerminalVertical}
-          onNewTerminal={addTerminalSurface}
-          onActiveTerminalChange={activatePanelTerminal}
-          onCloseTerminal={closePanelTerminal}
-          splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-          splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
-          newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-          closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+          availableEditors={availableEditors}
+          relativePath={
+            activeRightPanelSurface.kind === "file" ? activeRightPanelSurface.relativePath : null
+          }
+          revealLine={activeFileSurface?.revealLine ?? null}
+          revealRequestId={activeFileSurface?.revealRequestId ?? 0}
+          onOpenFile={openFileSurface}
+          onPendingChange={handleFilePendingChange}
         />
-      ) : activeRightPanelSurface?.kind === "diff" ? (
-        <Suspense fallback={null}>
-          <DiffPanel
-            key={`${activeThreadKey}:${diffPanelGitStatusResolutionKey}`}
-            mode="embedded"
-            composerDraftTarget={composerDraftTarget}
-            initialGitScope={initialDiffPanelGitScope}
-          />
-        </Suspense>
-      ) : activeRightPanelSurface?.kind === "agents" ? (
-        <AgentsPanel
-          model={agentPanelModel}
-          environmentId={activeThreadRef?.environmentId ?? null}
-          threadId={activeThreadRef?.threadId ?? null}
-        />
-      ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
-        activeProject &&
-        activeWorkspaceRoot ? (
-        <Suspense fallback={null}>
-          <FilePreviewPanel
-            key={`${activeProject.environmentId}:${activeWorkspaceRoot}`}
-            environmentId={activeProject.environmentId}
-            cwd={activeWorkspaceRoot}
-            projectName={activeProject.title}
-            threadRef={activeThreadRef}
-            composerDraftTarget={composerDraftTarget}
-            keybindings={keybindings}
-            availableEditors={availableEditors}
-            relativePath={
-              activeRightPanelSurface.kind === "file" ? activeRightPanelSurface.relativePath : null
-            }
-            revealLine={activeFileSurface?.revealLine ?? null}
-            revealRequestId={activeFileSurface?.revealRequestId ?? 0}
-            onOpenFile={openFileSurface}
-            onPendingChange={handleFilePendingChange}
-          />
-        </Suspense>
-      ) : null
-    ) : null;
+      </Suspense>
+    ) : null
+  ) : null;
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
@@ -6208,7 +6224,6 @@ function ChatViewContent(props: ChatViewProps) {
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
-          {!rightPanelOpen ? panelLayoutControls : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -6234,6 +6249,11 @@ function ChatViewContent(props: ChatViewProps) {
             onUpdateProjectScript={updateProjectScript}
             onDeleteProjectScript={deleteProjectScript}
           />
+          {/* After the header content on purpose: the controls are absolutely
+              positioned over the header's right edge, and Chromium applies
+              app regions in DOM order, so a drag region that comes later (the
+              header row) would swallow real mouse clicks on these buttons. */}
+          {!rightPanelOpen ? panelLayoutControls : null}
         </header>
 
         <ThreadErrorBanner
@@ -6368,8 +6388,8 @@ function ChatViewContent(props: ChatViewProps) {
                     onRemove={onRemoveQueuedMessage}
                     onRestore={onRestoreQueuedMessage}
                   />
-                  {threadSyncPhase && !activeEnvironmentUnavailable ? (
-                    <ThreadSyncStatusPill phase={threadSyncPhase} />
+                  {shownThreadSyncPhase && !activeEnvironmentUnavailable ? (
+                    <ThreadSyncStatusPill phase={shownThreadSyncPhase} />
                   ) : null}
                   <div
                     className="relative"
@@ -6441,7 +6461,6 @@ function ChatViewContent(props: ChatViewProps) {
                               activeProject?.defaultModelSelection
                             }
                             activeThreadModelSelection={activeThread?.modelSelection}
-                            activeThreadActivities={activeThread?.activities}
                             resolvedTheme={resolvedTheme}
                             settings={settings}
                             keybindings={keybindings}
@@ -6452,24 +6471,6 @@ function ChatViewContent(props: ChatViewProps) {
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
-                            onCompactContext={() => {
-                              const context = composerRef.current?.getSendContext();
-                              if (
-                                !context ||
-                                promptRef.current.trim() ||
-                                context.images.length ||
-                                context.documents.length ||
-                                context.terminalContexts.length ||
-                                context.elementContexts.length ||
-                                context.previewAnnotations.length ||
-                                context.reviewComments.length ||
-                                context.nativeSkillNames.length ||
-                                context.presentation ||
-                                isWorking
-                              )
-                                return;
-                              void onSend(undefined, undefined, "/compact");
-                            }}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
@@ -6632,32 +6633,27 @@ function ChatViewContent(props: ChatViewProps) {
         </div>
         {/* end horizontal flex container */}
 
-        {!isOfficeMode &&
-          mountedTerminalThreadRefs.map(
-            ({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
-              <PersistentThreadTerminalDrawer
-                key={mountedThreadKey}
-                threadRef={mountedThreadRef}
-                threadId={mountedThreadRef.threadId}
-                visible={mountedThreadKey === activeThreadKey && terminalUiState.terminalOpen}
-                launchContext={
-                  mountedThreadKey === activeThreadKey
-                    ? (activeTerminalLaunchContext ?? null)
-                    : null
-                }
-                focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
-                splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-                splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
-                newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-                closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-                keybindings={keybindings}
-                onAddTerminalContext={addTerminalContextToDraft}
-              />
-            ),
-          )}
+        {mountedTerminalThreadRefs.map(({ key: mountedThreadKey, threadRef: mountedThreadRef }) => (
+          <PersistentThreadTerminalDrawer
+            key={mountedThreadKey}
+            threadRef={mountedThreadRef}
+            threadId={mountedThreadRef.threadId}
+            visible={mountedThreadKey === activeThreadKey && terminalUiState.terminalOpen}
+            launchContext={
+              mountedThreadKey === activeThreadKey ? (activeTerminalLaunchContext ?? null) : null
+            }
+            focusRequestId={mountedThreadKey === activeThreadKey ? terminalFocusRequestId : 0}
+            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
+            splitVerticalShortcutLabel={splitTerminalVerticalShortcutLabel ?? undefined}
+            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
+            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
+            keybindings={keybindings}
+            onAddTerminalContext={addTerminalContextToDraft}
+          />
+        ))}
       </div>
 
-      {!isOfficeMode && !shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
+      {!shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
           maximized={rightPanelMaximized}
@@ -6685,7 +6681,9 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
-      {!isOfficeMode && shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
+      {/* After the panel, for the same app-region ordering reason as above. */}
+      {rightPanelOpen && !shouldUseRightPanelSheet ? panelLayoutControls : null}
+      {shouldUseRightPanelSheet && rightPanelOpen && activeThreadRef ? (
         <RightPanelSheet open onClose={closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"
