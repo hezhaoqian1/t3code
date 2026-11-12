@@ -42,7 +42,7 @@ jobs:
         include:
           - platform: mac
             arch: arm64
-            runner: macos-14
+            runner: macos-15
             rust_target: aarch64-apple-darwin
           - platform: mac
             arch: x64
