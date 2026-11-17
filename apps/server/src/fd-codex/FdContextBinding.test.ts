@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
-import { encodeFdContextBinding, restoreFdContextBinding } from "./FdContextBinding.ts";
+import {
+  encodeFdContextBinding,
+  fdExecutionProfileFor,
+  fdSkillVersionIdsForProfile,
+  restoreFdContextBinding,
+} from "./FdContextBinding.ts";
 
 describe("FD context binding", () => {
   it("restores local and enterprise threads independently after serialization", () => {
@@ -16,6 +21,30 @@ describe("FD context binding", () => {
     expect(restored.profiles.get("local")).toEqual({ threadId: "ordinary" });
     expect(restored.profiles.get("enterprise:17")).toEqual({ threadId: "skill-17" });
     expect(restored.profiles.get("enterprise:22")).toEqual({ threadId: "skill-22" });
+  });
+  it("names one profile per FD Skill selection", () => {
+    expect(fdExecutionProfileFor([])).toBe("local");
+    expect(fdExecutionProfileFor([17])).toBe("enterprise:17");
+    expect(fdExecutionProfileFor([17, 22])).toBe("enterprise:17+22");
+    expect(fdSkillVersionIdsForProfile(undefined)).toEqual([]);
+    expect(fdSkillVersionIdsForProfile("local")).toEqual([]);
+    expect(fdSkillVersionIdsForProfile("enterprise:17")).toEqual([17]);
+    expect(fdSkillVersionIdsForProfile("enterprise:17+22")).toEqual([17, 22]);
+    expect(fdSkillVersionIdsForProfile("enterprise:17+")).toEqual([]);
+  });
+  it("restores a selection of several Skills apart from each single Skill", () => {
+    const cursor = encodeFdContextBinding(
+      "enterprise:17+22",
+      new Map([
+        ["enterprise:17", { threadId: "skill-17" }],
+        ["enterprise:17+22", { threadId: "skills-17-22" }],
+      ]),
+    );
+    const restored = restoreFdContextBinding(JSON.parse(JSON.stringify(cursor)));
+    expect(restored.activeProfile).toBe("enterprise:17+22");
+    expect(restored.profiles.get("enterprise:17")).toEqual({ threadId: "skill-17" });
+    expect(restored.profiles.get("enterprise:17+22")).toEqual({ threadId: "skills-17-22" });
+    expect(restored.profiles.has("enterprise:22")).toBe(false);
   });
   it("does not assign legacy local context to an enterprise Skill", () => {
     const restored = restoreFdContextBinding({ threadId: "legacy" });

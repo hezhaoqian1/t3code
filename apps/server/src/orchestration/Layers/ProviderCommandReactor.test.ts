@@ -670,6 +670,81 @@ describe("ProviderCommandReactor", () => {
     expect(JSON.stringify(Array.from(persisted))).toContain("hello reactor");
   });
 
+  it("sends every selected FD Skill to the provider", async () => {
+    const harness = await createHarness();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-several-skills"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-several-skills"),
+          role: "user",
+          text: "compare macro data with product data",
+          attachments: [],
+        },
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      threadId: ThreadId.make("thread-1"),
+      fdSkillVersionId: 10004,
+      additionalFdSkillVersionIds: [10012],
+      input: "compare macro data with product data",
+    });
+    expect(harness.generateThreadTitle).not.toHaveBeenCalled();
+  });
+
+  it("routes /compact to the conversation of every selected FD Skill", async () => {
+    const harness = await createHarness();
+    const ready = harness.runEffect(
+      harness.engine.streamDomainEvents.pipe(
+        Stream.filter(
+          (event) =>
+            event.type === "thread.session-set" && event.payload.session.status === "ready",
+        ),
+        Stream.runHead,
+        Effect.timeout("10 seconds"),
+      ),
+    );
+    await harness.runEffect(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("compact-several-skills-command"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("compact-several-skills-message"),
+          role: "user",
+          text: "/compact",
+          attachments: [],
+        },
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await ready;
+    await harness.drain();
+    expect(harness.compactThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-1",
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+      }),
+      "compact-several-skills-message",
+    );
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+  });
+
   it.each([
     { name: "ordinary chat", fields: {} },
     { name: "FD Skill", fields: { fdSkillVersionId: 10004 } },

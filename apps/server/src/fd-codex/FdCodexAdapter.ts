@@ -1,7 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off,runEffectInsideEffect:off
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { ProviderInstanceId } from "@t3tools/contracts";
+import { fdSkillVersionIdsOf, type ProviderInstanceId } from "@t3tools/contracts";
 import type { FdServerRuntimeCredentialProjection } from "@t3tools/contracts/fd/runtime-credentials";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -14,6 +14,7 @@ import { FD_DEEPSEEK_DRIVER_KIND } from "../provider/Layers/FdDeepSeekAdapter.ts
 import {
   FdEnterpriseCodexClient,
   FdEnterpriseCodexError,
+  type FdEnterpriseCodexRuntimeContext,
   type FdEnterpriseCodexToolArtifact,
   type FdEnterpriseCodexToolCallInput,
 } from "../fd-skills/FdEnterpriseCodexClient.ts";
@@ -229,14 +230,18 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
         const documents = input.documentTools
           ? fdDocumentToolRuntime(input.documentTools, session.threadId)
           : undefined;
-        if (session.fdSkillVersionId === undefined) return Effect.succeed(documents ?? {});
-        const skillVersionId = session.fdSkillVersionId;
+        const skillVersionIds = fdSkillVersionIdsOf(session);
+        if (skillVersionIds.length === 0) return Effect.succeed(documents ?? {});
         return Effect.tryPromise({
           try: () =>
-            enterpriseClient.getRuntimeContext({
-              skillVersionId,
-              clientThreadId: session.threadId,
-            }),
+            Promise.all(
+              skillVersionIds.map((skillVersionId) =>
+                enterpriseClient.getRuntimeContext({
+                  skillVersionId,
+                  clientThreadId: session.threadId,
+                }),
+              ),
+            ),
           catch: (cause) =>
             new ProviderAdapterRequestError({
               provider: FD_DEEPSEEK_DRIVER_KIND,
@@ -245,49 +250,117 @@ export const makeFdCodexAdapter = Effect.fn("makeFdCodexAdapter")(function* (inp
               cause,
             }),
         }).pipe(
-          Effect.map((runtimeContext) => ({
-            developerInstructions: runtimeContext.developer_instructions,
-            dynamicTools: [
-              ...runtimeContext.tools.map((tool) => ({
-                type: "function" as const,
-                name: tool.name,
-                description: tool.description,
-                inputSchema: tool.input_schema,
-              })),
-              // The gateway owns an FD Skill session's tool contract: if one
-              // of its tools ever shares a name with a document tool, it wins.
-              ...(documents?.dynamicTools ?? []).filter(
-                (tool) => !runtimeContext.tools.some((skillTool) => skillTool.name === tool.name),
-              ),
-            ],
-            dynamicToolExecutor: (request) =>
-              documents &&
-              input.documentTools?.handles(request.tool) &&
-              !runtimeContext.tools.some((skillTool) => skillTool.name === request.tool)
-                ? documents.dynamicToolExecutor(request)
-                : executeFdEnterpriseToolCall(
-                    enterpriseClient,
-                    {
-                      skillVersionId,
-                      releaseDigest: runtimeContext.release_digest,
-                      clientThreadId: session.threadId,
-                      providerThreadId: request.threadId,
-                      turnId: request.turnId,
-                      callId: request.callId,
-                      tool: request.tool,
-                      arguments: request.arguments,
-                      timeoutSeconds: runtimeContext.tools.find(
-                        (tool) => tool.name === request.tool,
-                      )?.timeout_seconds,
-                    },
-                    { taskFolder: session.cwd },
-                  ),
-          })),
+          Effect.map((runtimeContexts) => {
+            const skills = mergeFdSkillRuntimeContexts(runtimeContexts);
+            return {
+              developerInstructions: skills.developerInstructions,
+              dynamicTools: [
+                ...skills.tools.map((tool) => ({
+                  type: "function" as const,
+                  name: tool.name,
+                  description: tool.description,
+                  inputSchema: tool.input_schema,
+                })),
+                // The gateway owns an FD Skill session's tool contract: if one
+                // of its tools ever shares a name with a document tool, it wins.
+                ...(documents?.dynamicTools ?? []).filter(
+                  (tool) => skills.ownerOf(tool.name) === undefined,
+                ),
+              ],
+              dynamicToolExecutor: (request) => {
+                const owner = skills.ownerOf(request.tool);
+                if (!owner && documents && input.documentTools?.handles(request.tool)) {
+                  return documents.dynamicToolExecutor(request);
+                }
+                // A tool no selected Skill offers still goes to the gateway,
+                // which refuses it and records the attempt.
+                const target = owner ?? skills.fallbackOwner;
+                return executeFdEnterpriseToolCall(
+                  enterpriseClient,
+                  {
+                    skillVersionId: target.skillVersionId,
+                    releaseDigest: target.releaseDigest,
+                    clientThreadId: session.threadId,
+                    providerThreadId: request.threadId,
+                    turnId: request.turnId,
+                    callId: request.callId,
+                    tool: request.tool,
+                    arguments: request.arguments,
+                    timeoutSeconds: owner?.timeoutSeconds,
+                  },
+                  { taskFolder: session.cwd },
+                );
+              },
+            };
+          }),
         );
       },
     },
   );
 });
+
+interface FdSkillToolOwner {
+  readonly skillVersionId: number;
+  readonly releaseDigest: string;
+  readonly timeoutSeconds: number | undefined;
+}
+
+/**
+ * Combines the runtime contexts of the FD Skills selected for one session
+ * into one set of instructions and tools. Pass them in selection order
+ * (ascending version id): a tool several Skills offer is called through the
+ * first Skill that offers it.
+ */
+export function mergeFdSkillRuntimeContexts(
+  contexts: ReadonlyArray<FdEnterpriseCodexRuntimeContext>,
+) {
+  const [first] = contexts;
+  if (first === undefined) throw new Error("At least one FD Skill runtime context is required.");
+  const owners = new Map<string, FdSkillToolOwner>();
+  const tools: Array<FdEnterpriseCodexRuntimeContext["tools"][number]> = [];
+  const ownTools = new Map<FdEnterpriseCodexRuntimeContext, Array<string>>();
+  for (const context of contexts) {
+    const names: Array<string> = [];
+    for (const tool of context.tools) {
+      if (owners.has(tool.name)) continue;
+      owners.set(tool.name, {
+        skillVersionId: context.skill.version_id,
+        releaseDigest: context.release_digest,
+        timeoutSeconds: tool.timeout_seconds,
+      });
+      tools.push(tool);
+      names.push(tool.name);
+    }
+    ownTools.set(context, names);
+  }
+  return {
+    developerInstructions:
+      contexts.length === 1
+        ? first.developer_instructions
+        : [
+            `本任务同时启用了 ${contexts.length} 个 FD Skill：${contexts
+              .map((context) => `「${context.skill.display_name}」`)
+              .join(
+                "、",
+              )}。下面依次给出每个 Skill 的规则和资料。每个 Skill 的规则约束它自己的工具和数据；可以在同一个回答里综合多个 Skill 的结果，并分别注明各自的数据来源。同名工具只保留一份，由列出它的 Skill 授权执行。`,
+            ...contexts.map((context, index) =>
+              [
+                `<fd_skill index="${index + 1}" name="${context.skill.display_name}">`,
+                `本 Skill 的工具：${ownTools.get(context)?.join("、") || "无"}`,
+                context.developer_instructions,
+                "</fd_skill>",
+              ].join("\n"),
+            ),
+          ].join("\n\n"),
+    tools,
+    ownerOf: (tool: string) => owners.get(tool),
+    fallbackOwner: {
+      skillVersionId: first.skill.version_id,
+      releaseDigest: first.release_digest,
+      timeoutSeconds: undefined,
+    },
+  };
+}
 
 export function executeFdEnterpriseToolCall(
   client: FdEnterpriseCodexClient,

@@ -148,6 +148,14 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 
 Rewinding a thread to before one of the user's messages. `thread.conversation.revert` keeps workspace files; `thread.checkpoint.revert` also restores them from a checkpoint. When the command names the message (`messageId`), [CheckpointReactor.ts][6] plans the rewind from turn request times rather than checkpoint numbers ([conversationRewindPlan.ts][26]), so threads without checkpoints can rewind too. It rolls the provider's history back by turn id (`ProviderService.rollbackConversation` with `turnIds`) and then records `thread.reverted` with the anchor message and the removed turn ids, which every projector and client applies with the same rules ([conversationRewind.ts][27]). FD Skill history lives on the enterprise service, so rewinds that would remove it are refused.
 
+#### FD Skill selection
+
+The FD Skill versions a turn runs with, one to four. A turn carries them as `fdSkillVersionId` (the lowest version id) plus `additionalFdSkillVersionIds` (the rest, ascending); read the whole list with `fdSkillVersionIdsOf` and build the two fields with `fdSkillSelectionFields`, both in [skillSelection.ts][28]. Turns recorded before several Skills could be selected have only `fdSkillVersionId`. For each selected version [FdCodexAdapter.ts][29] loads one runtime context from the gateway and `mergeFdSkillRuntimeContexts` combines them: instructions are concatenated per Skill, tools are offered once, and each tool call goes back to the gateway under the Skill that owns the tool (the first Skill, by version id, that offers it) with that Skill's release digest.
+
+#### Execution profile
+
+The Codex conversation a turn runs in. A thread keeps one per FD Skill selection and one for ordinary turns: `local`, `enterprise:<id>`, or `enterprise:<id>+<id>…` with ascending version ids ([FdContextBinding.ts][30]). Changing the selection stops the Codex session and resumes the other profile's conversation, so a selection of several Skills does not inherit what any one of them discussed alone. The thread's resume cursor stores every profile's Codex thread id.
+
 ## Practical Shortcuts
 
 - If you see `requested`, think "intent recorded".
@@ -189,3 +197,6 @@ Rewinding a thread to before one of the user's messages. `thread.conversation.re
 [24]: ./overview.md
 [26]: ../../apps/server/src/orchestration/conversationRewindPlan.ts
 [27]: ../../packages/shared/src/conversationRewind.ts
+[28]: ../../packages/contracts/src/fd/skillSelection.ts
+[29]: ../../apps/server/src/fd-codex/FdCodexAdapter.ts
+[30]: ../../apps/server/src/fd-codex/FdContextBinding.ts

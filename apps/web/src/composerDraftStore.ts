@@ -50,7 +50,7 @@ import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
-import { selectedFdSkillVersionId, useFdSkillSelectionStore } from "./fdSkillSelectionStore";
+import { hasFdSkillSelection, useFdSkillSelectionStore } from "./fdSkillSelectionStore";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);
@@ -1891,7 +1891,7 @@ export function partializeComposerDraftStoreState(
       state.draftThreadsByThreadKey[threadKey]?.threadId ??
       parseScopedThreadKey(threadKey)?.threadId ??
       threadKey.slice(threadKey.lastIndexOf(":") + 1);
-    if (selectedFdSkillVersionId(threadId) !== undefined) {
+    if (hasFdSkillSelection(threadId)) {
       continue;
     }
     const hasModelData =
@@ -3569,7 +3569,7 @@ export function clearEnterpriseComposerDraft(threadId: string): void {
 export function clearAllEnterpriseComposerDrafts(): void {
   const selectedThreadIds = new Set(
     Object.entries(useFdSkillSelectionStore.getState().selectedByThread)
-      .filter(([, versionId]) => versionId !== null)
+      .filter(([, versionIds]) => versionIds.length > 0)
       .map(([threadId]) => threadId),
   );
   clearEnterpriseComposerDrafts(selectedThreadIds);

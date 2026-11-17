@@ -1,6 +1,26 @@
 import * as Schema from "effect/Schema";
 
-export type FdExecutionProfile = "local" | `enterprise:${number}`;
+/**
+ * A thread keeps one Codex conversation per profile: `local` for ordinary
+ * turns, and one per FD Skill selection, written `enterprise:<id>` or
+ * `enterprise:<id>+<id>…` with ascending version ids.
+ */
+export type FdExecutionProfile = "local" | `enterprise:${string}`;
+
+/** The profile of a selection given as ascending, deduplicated version ids. */
+export function fdExecutionProfileFor(
+  fdSkillVersionIds: ReadonlyArray<number>,
+): FdExecutionProfile {
+  return fdSkillVersionIds.length === 0 ? "local" : `enterprise:${fdSkillVersionIds.join("+")}`;
+}
+
+/** The FD Skill versions a profile runs with; empty for the local profile. */
+export function fdSkillVersionIdsForProfile(
+  profile: FdExecutionProfile | undefined,
+): ReadonlyArray<number> {
+  if (profile === undefined || !isProfile(profile) || profile === "local") return [];
+  return profile.slice("enterprise:".length).split("+").map(Number);
+}
 
 const ResumeCursor = Schema.Struct({ threadId: Schema.String });
 const Binding = Schema.Struct({
@@ -11,7 +31,7 @@ const Binding = Schema.Struct({
 const isCursor = Schema.is(ResumeCursor);
 const isBinding = Schema.is(Binding);
 const isProfile = (profile: string): profile is FdExecutionProfile =>
-  profile === "local" || /^enterprise:[1-9][0-9]*$/.test(profile);
+  profile === "local" || /^enterprise:[1-9][0-9]*(?:\+[1-9][0-9]*)*$/.test(profile);
 
 export function restoreFdContextBinding(cursor: unknown): {
   activeProfile: FdExecutionProfile | undefined;

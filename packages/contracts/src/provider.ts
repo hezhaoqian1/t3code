@@ -21,6 +21,7 @@ import {
   ProviderUserInputAnswers,
   RuntimeMode,
 } from "./orchestration.ts";
+import { AdditionalFdSkillVersionIds } from "./fd/skillSelection.ts";
 import { ProviderInstanceId, ProviderDriverKind } from "./providerInstance.ts";
 import { PresentationTurnSelection } from "./presentation.ts";
 
@@ -74,6 +75,7 @@ export const ProviderSendTurnInput = Schema.Struct({
       empty turn only for adapters that support promptless continuation. */
   continuation: Schema.optional(Schema.Boolean),
   fdSkillVersionId: Schema.optional(PositiveInt),
+  additionalFdSkillVersionIds: Schema.optional(AdditionalFdSkillVersionIds),
   /** Internal one-turn local Skill selection; never included in user text. */
   nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   presentation: Schema.optional(PresentationTurnSelection),

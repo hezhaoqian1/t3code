@@ -9,7 +9,12 @@ import {
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { EnvironmentId, ServerProvider, ServerProviderSkill } from "@t3tools/contracts";
+import {
+  MAX_FD_SKILLS_PER_TURN,
+  type EnvironmentId,
+  type ServerProvider,
+  type ServerProviderSkill,
+} from "@t3tools/contracts";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 
 import { useFdSkillSelectionStore } from "../../fdSkillSelectionStore";
@@ -72,41 +77,50 @@ export function mergeBusinessCapabilities(
   return merged;
 }
 
+/**
+ * Drops selected FD Skills the account no longer has. The draft was written
+ * for the whole selection, so losing any of it clears the draft as well.
+ */
 export function clearRevokedFdSkillSelection(input: {
   readonly threadId: string | null;
-  readonly selectedVersionId: number | null;
+  readonly selectedVersionIds: ReadonlyArray<number>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly providerCatalogState: BusinessCapabilityCatalogState;
 }): boolean {
-  if (
-    !shouldClearRevokedFdSkillSelection({
-      selectedVersionId: input.selectedVersionId,
-      skills: input.skills,
-      providerCatalogState: input.providerCatalogState,
-    }) ||
-    !input.threadId
-  ) {
-    return false;
-  }
+  const revoked = revokedFdSkillVersionIds(input);
+  if (revoked.length === 0 || !input.threadId) return false;
 
   clearEnterpriseComposerDraft(input.threadId);
-  useFdSkillSelectionStore.getState().clear(input.threadId);
+  useFdSkillSelectionStore.getState().replace(
+    input.threadId,
+    input.selectedVersionIds.filter((versionId) => !revoked.includes(versionId)),
+  );
   return true;
 }
 
-export function shouldClearRevokedFdSkillSelection(input: {
-  readonly selectedVersionId: number | null;
+/** Selected versions missing from a loaded catalog; none while it is loading or failed. */
+export function revokedFdSkillVersionIds(input: {
+  readonly selectedVersionIds: ReadonlyArray<number>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
   readonly providerCatalogState: BusinessCapabilityCatalogState;
-}): boolean {
-  if (input.providerCatalogState !== "ready" || input.selectedVersionId === null) return false;
-  return !input.skills.some(
-    (skill) =>
-      skill.enabled &&
-      skill.scope === "fd-managed" &&
-      versionIdFromPath(skill.path) === input.selectedVersionId,
+}): ReadonlyArray<number> {
+  if (input.providerCatalogState !== "ready") return [];
+  const authorized = new Set(
+    input.skills
+      .filter((skill) => skill.enabled && skill.scope === "fd-managed")
+      .map((skill) => versionIdFromPath(skill.path)),
   );
+  return input.selectedVersionIds.filter((versionId) => !authorized.has(versionId));
 }
+
+/** The composer chip text: the Skill's name, or the first name and how many more. */
+export function fdSkillSelectionLabel(names: ReadonlyArray<string>): string {
+  const [first, ...rest] = names;
+  if (first === undefined) return "FD Skills";
+  return rest.length === 0 ? first : `${first} +${rest.length}`;
+}
+
+const NO_FD_SKILLS: ReadonlyArray<number> = [];
 
 export function FdSkillPicker(props: {
   threadId: string | null;
@@ -140,14 +154,20 @@ export function FdSkillPicker(props: {
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const lastOpenRequestRef = useRef(props.openRequest ?? 0);
-  const [menuPosition, setMenuPosition] = useState<{ bottom: number; left: number } | null>(null);
-  const selectedVersionId = useFdSkillSelectionStore((state) =>
-    props.threadId ? (state.selectedByThread[props.threadId] ?? null) : null,
+  const [menuPosition, setMenuPosition] = useState<{
+    bottom: number;
+    left: number;
+    maxHeight: number;
+  } | null>(null);
+  const selectedVersionIds = useFdSkillSelectionStore((state) =>
+    props.threadId ? (state.selectedByThread[props.threadId] ?? NO_FD_SKILLS) : NO_FD_SKILLS,
   );
   const { fdSkills } = useMemo(() => partitionBusinessCapabilities(props.skills), [props.skills]);
-  const selectedSkill = fdSkills.find(
-    (skill) => versionIdFromPath(skill.path) === selectedVersionId,
-  );
+  const selectedSkillNames = fdSkills
+    .filter((skill) => selectedVersionIds.includes(versionIdFromPath(skill.path)!))
+    .map(formatProviderSkillDisplayName);
+  const hasSelection = selectedVersionIds.length > 0;
+  const limitReached = selectedVersionIds.length >= MAX_FD_SKILLS_PER_TURN;
 
   useEffect(() => {
     setOpen(false);
@@ -164,12 +184,12 @@ export function FdSkillPicker(props: {
   useEffect(() => {
     const revoked = clearRevokedFdSkillSelection({
       threadId: props.threadId,
-      selectedVersionId,
+      selectedVersionIds,
       skills: props.skills,
       providerCatalogState,
     });
     if (revoked) setRevokedNotice(true);
-  }, [props.skills, props.threadId, providerCatalogState, selectedVersionId]);
+  }, [props.skills, props.threadId, providerCatalogState, selectedVersionIds]);
 
   useEffect(() => {
     if (!open) return;
@@ -182,8 +202,18 @@ export function FdSkillPicker(props: {
         setOpen(false);
       }
     };
+    // The menu no longer closes on a tick, so Escape has to dismiss it too.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      setOpen(false);
+    };
     document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
   }, [open]);
 
   useLayoutEffect(() => {
@@ -199,6 +229,8 @@ export function FdSkillPicker(props: {
       setMenuPosition({
         bottom: window.innerHeight - rect.top + 8,
         left: Math.min(Math.max(16, rect.left), window.innerWidth - menuWidth - 16),
+        // The menu opens upward: keep it inside the window and let the list scroll.
+        maxHeight: Math.max(180, rect.top - 24),
       });
     };
     updatePosition();
@@ -214,16 +246,17 @@ export function FdSkillPicker(props: {
     };
   }, [open]);
 
-  const selectFdSkill = (versionId: number | null) => {
+  // The menu stays open while Skills are ticked so several can be picked in
+  // one visit; it closes on an outside click or after clearing.
+  const toggleFdSkill = (versionId: number) => {
     if (!props.threadId) return;
-    // Selecting the active skill again is a convenient toggle-off action.
-    // Keep the explicit clear row for discoverability, but don't require the
-    // user to move the pointer away from the skill they just selected.
-    if (versionId !== null && versionId === selectedVersionId) {
-      versionId = null;
-    }
-    useFdSkillSelectionStore.getState().select(props.threadId, versionId);
-    if (versionId !== null) excludeEnterpriseComposerDraftFromPersistence(props.threadId);
+    useFdSkillSelectionStore.getState().toggle(props.threadId, versionId);
+    excludeEnterpriseComposerDraftFromPersistence(props.threadId);
+    setRevokedNotice(false);
+  };
+  const clearFdSkills = () => {
+    if (!props.threadId) return;
+    useFdSkillSelectionStore.getState().clear(props.threadId);
     setRevokedNotice(false);
     setOpen(false);
   };
@@ -235,26 +268,28 @@ export function FdSkillPicker(props: {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={
-          selectedSkill
-            ? `FD Skills：${formatProviderSkillDisplayName(selectedSkill)}`
+          selectedSkillNames.length > 0
+            ? `FD Skills：${selectedSkillNames.join("、")}`
             : "FD Skills"
         }
-        title="选择 FD Skill"
+        title={
+          selectedSkillNames.length > 1
+            ? `已选 ${selectedSkillNames.length} 个：${selectedSkillNames.join("、")}`
+            : "选择 FD Skill（可多选）"
+        }
         disabled={!props.threadId}
         onPointerDown={(event) => event.preventDefault()}
         onClick={() => setOpen((value) => !value)}
         className={cn(
           "inline-flex h-8 max-w-48 items-center gap-1.5 rounded-lg border px-2.5 text-xs transition-colors",
-          selectedSkill
+          hasSelection
             ? "border-primary/50 bg-primary/10 text-foreground"
             : "border-border/70 bg-background/40 text-muted-foreground hover:bg-background/80 hover:text-foreground",
           !props.threadId && "cursor-not-allowed opacity-50",
         )}
       >
         <ShieldCheckIcon className="size-3.5 shrink-0" aria-hidden="true" />
-        <span className="truncate">
-          {selectedSkill ? formatProviderSkillDisplayName(selectedSkill) : "FD Skills"}
-        </span>
+        <span className="truncate">{fdSkillSelectionLabel(selectedSkillNames)}</span>
         <ChevronDownIcon className="size-3 shrink-0" aria-hidden="true" />
       </button>
 
@@ -263,15 +298,20 @@ export function FdSkillPicker(props: {
             <div
               ref={menuRef}
               role="listbox"
+              aria-multiselectable="true"
               aria-label="FD Skills"
-              className="fixed z-[80] w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-xl"
-              style={{ bottom: menuPosition.bottom, left: menuPosition.left }}
+              className="fixed z-[80] flex w-80 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-xl"
+              style={{
+                bottom: menuPosition.bottom,
+                left: menuPosition.left,
+                maxHeight: menuPosition.maxHeight,
+              }}
             >
               <div className="flex items-center justify-between gap-3 px-2.5 pb-2 pt-1.5">
                 <div>
                   <div className="text-sm font-semibold">FD Skills</div>
                   <div className="mt-0.5 text-[11px] text-muted-foreground">
-                    已授权 {fdSkills.length} 项
+                    已授权 {fdSkills.length} 项 · 可多选，最多 {MAX_FD_SKILLS_PER_TURN} 个
                   </div>
                 </div>
                 {props.environmentId ? (
@@ -300,17 +340,24 @@ export function FdSkillPicker(props: {
                   所选 FD Skill 权限已更新，已为你清除。
                 </p>
               ) : null}
-              {selectedVersionId !== null ? (
+              {hasSelection ? (
                 <button
                   type="button"
-                  role="option"
-                  aria-selected="false"
-                  onClick={() => selectFdSkill(null)}
+                  onClick={clearFdSkills}
                   className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-muted"
                 >
                   <XIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  <span className="min-w-0 flex-1">清除已选 FD Skill</span>
+                  <span className="min-w-0 flex-1">
+                    {selectedVersionIds.length > 1
+                      ? `清除已选的 ${selectedVersionIds.length} 个 FD Skill`
+                      : "清除已选 FD Skill"}
+                  </span>
                 </button>
+              ) : null}
+              {limitReached ? (
+                <p role="status" className="px-2.5 pb-1.5 text-[11px] text-muted-foreground">
+                  已选满 {MAX_FD_SKILLS_PER_TURN} 个，取消一个后才能再选。
+                </p>
               ) : null}
               {providerCatalogState === "loading" ? (
                 <p role="status" className="px-2.5 py-2 text-xs text-muted-foreground">
@@ -325,20 +372,25 @@ export function FdSkillPicker(props: {
                   当前账号没有已授权的 FD Skills。
                 </p>
               ) : (
-                <div className="max-h-[min(26rem,calc(100vh-10rem))] overflow-y-auto">
+                <div className="min-h-0 flex-1 overflow-y-auto">
                   {fdSkills.map((skill) => {
                     const versionId = versionIdFromPath(skill.path)!;
-                    const selected = versionId === selectedVersionId;
+                    const selected = selectedVersionIds.includes(versionId);
+                    const unavailable = limitReached && !selected;
                     return (
                       <button
                         key={`${skill.name}:${versionId}`}
                         type="button"
                         role="option"
                         aria-selected={selected}
-                        onClick={() => selectFdSkill(versionId)}
+                        aria-disabled={unavailable}
+                        disabled={unavailable}
+                        onClick={() => toggleFdSkill(versionId)}
                         className={cn(
                           "flex min-h-12 w-full items-start gap-2.5 rounded-md border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border/70 hover:bg-muted/70",
                           selected && "border-primary/25 bg-primary/8",
+                          unavailable &&
+                            "cursor-not-allowed opacity-50 hover:border-transparent hover:bg-transparent",
                         )}
                       >
                         <Building2Icon
@@ -363,6 +415,20 @@ export function FdSkillPicker(props: {
                   })}
                 </div>
               )}
+              {fdSkills.length > 0 && providerCatalogState === "ready" ? (
+                <div className="mt-1.5 flex items-center justify-between gap-3 border-t border-border/60 px-2.5 pt-2 pb-0.5">
+                  <span className="text-[11px] text-muted-foreground">
+                    {hasSelection ? `已选 ${selectedVersionIds.length} 个` : "未选择"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="inline-flex h-7 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    完成
+                  </button>
+                </div>
+              ) : null}
             </div>,
             document.body,
           )

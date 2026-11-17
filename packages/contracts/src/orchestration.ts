@@ -20,6 +20,7 @@ import {
   TrimmedString,
   TurnId,
 } from "./baseSchemas.ts";
+import { AdditionalFdSkillVersionIds } from "./fd/skillSelection.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { PresentationTurnSelection } from "./presentation.ts";
 
@@ -823,6 +824,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
     attachments: Schema.Array(ChatAttachment),
   }),
   fdSkillVersionId: Schema.optional(PositiveInt),
+  additionalFdSkillVersionIds: Schema.optional(AdditionalFdSkillVersionIds),
   /** Internal one-turn local Skill selection; never included in user text. */
   nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   presentation: Schema.optional(PresentationTurnSelection),
@@ -849,6 +851,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     attachments: Schema.Array(Schema.Union([UploadChatAttachment, ChatAttachment])),
   }),
   fdSkillVersionId: Schema.optional(PositiveInt),
+  additionalFdSkillVersionIds: Schema.optional(AdditionalFdSkillVersionIds),
   /** Internal one-turn local Skill selection; never included in user text. */
   nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   presentation: Schema.optional(PresentationTurnSelection),
@@ -1296,6 +1299,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   fdSkillVersionId: Schema.optional(PositiveInt),
+  additionalFdSkillVersionIds: Schema.optional(AdditionalFdSkillVersionIds),
   nativeSkillNames: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   presentation: Schema.optional(PresentationTurnSelection),
   modelSelection: Schema.optional(ModelSelection),

@@ -25,6 +25,7 @@ import {
   ProviderApprovalDecision,
   ThreadId,
   ProviderSendTurnInput,
+  type FdSkillSelectionFields,
   type ProviderSessionStartInput,
   type ModelCapabilities,
 } from "@t3tools/contracts";
@@ -100,7 +101,7 @@ export interface CodexAdapterLiveOptions {
     ProviderAdapterRequestError
   >;
   readonly resolveSessionRuntime?: (
-    input: ProviderSessionStartInput & { readonly fdSkillVersionId?: number },
+    input: ProviderSessionStartInput & FdSkillSelectionFields,
   ) => Effect.Effect<
     Pick<
       CodexSessionRuntimeOptions,

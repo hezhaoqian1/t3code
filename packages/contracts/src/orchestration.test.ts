@@ -799,6 +799,41 @@ it.effect(
     }),
 );
 
+it.effect("carries several FD Skills on a turn start and on its recorded request", () =>
+  Effect.gen(function* () {
+    const command = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-several-skills",
+      threadId: "thread-1",
+      message: { messageId: "msg-1", role: "user", text: "hello", attachments: [] },
+      fdSkillVersionId: 10004,
+      additionalFdSkillVersionIds: [10012],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(command.additionalFdSkillVersionIds, [10012]);
+
+    const requested = yield* decodeThreadTurnStartRequestedPayload({
+      threadId: "thread-1",
+      messageId: "msg-1",
+      fdSkillVersionId: 10004,
+      additionalFdSkillVersionIds: [10012, 10020],
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(requested.additionalFdSkillVersionIds, [10012, 10020]);
+
+    const tooMany = yield* Effect.exit(
+      decodeThreadTurnStartRequestedPayload({
+        threadId: "thread-1",
+        messageId: "msg-1",
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012, 10020, 10021, 10022],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    assert.strictEqual(tooMany._tag, "Failure");
+  }),
+);
+
 it.effect("decodes thread.turn-start-requested source proposed plan metadata when present", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartRequestedPayload({

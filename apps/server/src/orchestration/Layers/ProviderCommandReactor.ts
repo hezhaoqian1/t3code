@@ -2,6 +2,8 @@ import {
   type ChatAttachment,
   CommandId,
   EventId,
+  fdSkillSelectionFields,
+  fdSkillVersionIdsOf,
   type ModelSelection,
   type OrchestrationEvent,
   ProviderDriverKind,
@@ -740,6 +742,7 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly messageText: string;
     readonly fdSkillVersionId?: number;
+    readonly additionalFdSkillVersionIds?: ReadonlyArray<number>;
     readonly nativeSkillNames?: ReadonlyArray<string>;
     readonly presentation?: {
       readonly operation: "create" | "revise";
@@ -799,7 +802,7 @@ const make = Effect.gen(function* () {
 
     return {
       threadId: input.threadId,
-      ...(input.fdSkillVersionId !== undefined ? { fdSkillVersionId: input.fdSkillVersionId } : {}),
+      ...fdSkillSelectionFields(fdSkillVersionIdsOf(input)),
       ...(input.nativeSkillNames !== undefined ? { nativeSkillNames: input.nativeSkillNames } : {}),
       ...(input.presentation !== undefined ? { presentation: input.presentation } : {}),
       ...(input.idempotencyKey !== undefined ? { idempotencyKey: input.idempotencyKey } : {}),
@@ -1231,9 +1234,7 @@ const make = Effect.gen(function* () {
         yield* providerService.compactThread(
           {
             threadId: thread.id,
-            ...(event.payload.fdSkillVersionId !== undefined
-              ? { fdSkillVersionId: event.payload.fdSkillVersionId }
-              : {}),
+            ...fdSkillSelectionFields(fdSkillVersionIdsOf(event.payload)),
             ...(event.payload.modelSelection
               ? { modelSelection: event.payload.modelSelection }
               : {}),
@@ -1289,9 +1290,7 @@ const make = Effect.gen(function* () {
               .slice(0, 57)}`,
           }
         : {}),
-      ...(event.payload.fdSkillVersionId !== undefined
-        ? { fdSkillVersionId: event.payload.fdSkillVersionId }
-        : {}),
+      ...fdSkillSelectionFields(fdSkillVersionIdsOf(event.payload)),
       ...(event.payload.nativeSkillNames !== undefined
         ? { nativeSkillNames: event.payload.nativeSkillNames }
         : {}),

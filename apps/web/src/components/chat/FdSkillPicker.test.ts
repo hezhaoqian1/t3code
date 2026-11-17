@@ -10,10 +10,11 @@ import {
   FdSkillPicker,
   MAX_VISIBLE_FD_SKILLS,
   clearRevokedFdSkillSelection,
+  fdSkillSelectionLabel,
   mergeBusinessCapabilities,
   partitionBusinessCapabilities,
   resolveProviderSkillCatalogState,
-  shouldClearRevokedFdSkillSelection,
+  revokedFdSkillVersionIds,
 } from "./FdSkillPicker.tsx";
 
 const threadId = ThreadId.make("thread-revoked-fd-skill");
@@ -22,6 +23,14 @@ const threadRef = scopeThreadRef(EnvironmentId.make("fd-skill-picker-test"), thr
 const availableSkill = {
   name: "enterprise-search",
   path: "fd-managed://10004",
+  scope: "fd-managed",
+  enabled: true,
+} satisfies ServerProviderSkill;
+
+const marketSkill = {
+  name: "market-macro-data",
+  displayName: "宏观与市场数据",
+  path: "fd-managed://10012",
   scope: "fd-managed",
   enabled: true,
 } satisfies ServerProviderSkill;
@@ -47,23 +56,23 @@ describe("clearRevokedFdSkillSelection", () => {
   });
 
   it("clears the selected version and sensitive draft after catalog revocation", () => {
-    useFdSkillSelectionStore.getState().select(threadId, 10004);
+    useFdSkillSelectionStore.getState().toggle(threadId, 10004);
     useComposerDraftStore.getState().setPrompt(threadRef, "查询企业敏感信息");
 
     expect(
       clearRevokedFdSkillSelection({
         threadId,
-        selectedVersionId: 10004,
+        selectedVersionIds: [10004],
         skills: [availableSkill],
         providerCatalogState: "ready",
       }),
     ).toBe(false);
-    expect(useFdSkillSelectionStore.getState().selectedByThread[threadId]).toBe(10004);
+    expect(useFdSkillSelectionStore.getState().selectedByThread[threadId]).toEqual([10004]);
 
     expect(
       clearRevokedFdSkillSelection({
         threadId,
-        selectedVersionId: 10004,
+        selectedVersionIds: [10004],
         skills: [],
         providerCatalogState: "ready",
       }),
@@ -74,21 +83,39 @@ describe("clearRevokedFdSkillSelection", () => {
     );
   });
 
+  it("drops only the revoked FD Skill from a selection of several", () => {
+    useFdSkillSelectionStore.getState().replace(threadId, [10004, 10012]);
+    useComposerDraftStore.getState().setPrompt(threadRef, "对比宏观数据和产品数据");
+
+    expect(
+      clearRevokedFdSkillSelection({
+        threadId,
+        selectedVersionIds: [10004, 10012],
+        skills: [marketSkill],
+        providerCatalogState: "ready",
+      }),
+    ).toBe(true);
+    expect(useFdSkillSelectionStore.getState().selectedByThread[threadId]).toEqual([10012]);
+    expect(Object.values(useComposerDraftStore.getState().draftsByThreadKey)).not.toContainEqual(
+      expect.objectContaining({ prompt: "对比宏观数据和产品数据" }),
+    );
+  });
+
   it.each(["loading", "error"] as const)(
     "preserves selection and draft while the provider catalog is %s",
     (providerCatalogState) => {
-      useFdSkillSelectionStore.getState().select(threadId, 10004);
+      useFdSkillSelectionStore.getState().toggle(threadId, 10004);
       useComposerDraftStore.getState().setPrompt(threadRef, "保留企业查询草稿");
 
       expect(
         clearRevokedFdSkillSelection({
           threadId,
-          selectedVersionId: 10004,
+          selectedVersionIds: [10004],
           skills: [],
           providerCatalogState,
         }),
       ).toBe(false);
-      expect(useFdSkillSelectionStore.getState().selectedByThread[threadId]).toBe(10004);
+      expect(useFdSkillSelectionStore.getState().selectedByThread[threadId]).toEqual([10004]);
       expect(Object.values(useComposerDraftStore.getState().draftsByThreadKey)).toContainEqual(
         expect.objectContaining({ prompt: "保留企业查询草稿" }),
       );
@@ -96,29 +123,48 @@ describe("clearRevokedFdSkillSelection", () => {
   );
 });
 
-describe("shouldClearRevokedFdSkillSelection", () => {
+describe("revokedFdSkillVersionIds", () => {
   it("revokes from a ready provider snapshot without depending on the local catalog", () => {
     expect(
-      shouldClearRevokedFdSkillSelection({
-        selectedVersionId: 10004,
+      revokedFdSkillVersionIds({
+        selectedVersionIds: [10004],
         skills: [],
         providerCatalogState: "ready",
       }),
-    ).toBe(true);
+    ).toEqual([10004]);
+  });
+
+  it("names only the selected versions the catalog no longer lists as enabled", () => {
+    expect(
+      revokedFdSkillVersionIds({
+        selectedVersionIds: [10004, 10012, 10020],
+        skills: [availableSkill, { ...marketSkill, enabled: false }],
+        providerCatalogState: "ready",
+      }),
+    ).toEqual([10012, 10020]);
   });
 
   it.each(["loading", "error"] as const)(
     "preserves selection while the provider catalog is %s",
     (providerCatalogState) => {
       expect(
-        shouldClearRevokedFdSkillSelection({
-          selectedVersionId: 10004,
+        revokedFdSkillVersionIds({
+          selectedVersionIds: [10004],
           skills: [],
           providerCatalogState,
         }),
-      ).toBe(false);
+      ).toEqual([]);
     },
   );
+});
+
+describe("fdSkillSelectionLabel", () => {
+  it("shows the entry point, one name, or the first name and how many more", () => {
+    expect(fdSkillSelectionLabel([])).toBe("FD Skills");
+    expect(fdSkillSelectionLabel(["FD数据资源"])).toBe("FD数据资源");
+    expect(fdSkillSelectionLabel(["FD数据资源", "宏观与市场数据"])).toBe("FD数据资源 +1");
+    expect(fdSkillSelectionLabel(["A", "B", "C"])).toBe("A +2");
+  });
 });
 
 describe("resolveProviderSkillCatalogState", () => {
