@@ -1,5 +1,7 @@
 import {
   EventId,
+  fdSkillSelectionFields,
+  fdSkillVersionIdsOf,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -957,9 +959,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
-          ...(command.fdSkillVersionId !== undefined
-            ? { fdSkillVersionId: command.fdSkillVersionId }
-            : {}),
+          ...fdSkillSelectionFields(fdSkillVersionIdsOf(command)),
           ...(command.nativeSkillNames !== undefined
             ? { nativeSkillNames: command.nativeSkillNames }
             : {}),

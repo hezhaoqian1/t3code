@@ -333,8 +333,40 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       expect(enterpriseEvents[1]?.type).toBe("thread.turn-start-requested");
       if (enterpriseEvents[1]?.type === "thread.turn-start-requested") {
         expect(enterpriseEvents[1].payload.fdSkillVersionId).toBe(10004);
+        expect("additionalFdSkillVersionIds" in enterpriseEvents[1].payload).toBe(false);
         expect(enterpriseEvents[1].causationEventId).toBe(enterpriseEvents[0]?.eventId ?? null);
         expect("titleSeed" in enterpriseEvents[1].payload).toBe(false);
+      }
+
+      // Several FD Skills are recorded ascending, whatever order the client sent.
+      const severalSkillsResult = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-several-skills-turn-start"),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId("message-several-skills-1"),
+            role: "user",
+            text: "compare macro data with product data",
+            attachments: [],
+          },
+          fdSkillVersionId: 10012,
+          additionalFdSkillVersionIds: [10004, 10012],
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        },
+        readModel,
+      });
+      const severalSkillsEvents = Array.isArray(severalSkillsResult)
+        ? severalSkillsResult
+        : [severalSkillsResult];
+      expect(severalSkillsEvents[1]?.type).toBe("thread.turn-start-requested");
+      if (severalSkillsEvents[1]?.type === "thread.turn-start-requested") {
+        expect(severalSkillsEvents[1].payload).toMatchObject({
+          fdSkillVersionId: 10004,
+          additionalFdSkillVersionIds: [10012],
+        });
       }
     }),
   );

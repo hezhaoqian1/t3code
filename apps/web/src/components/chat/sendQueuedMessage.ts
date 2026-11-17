@@ -4,7 +4,11 @@ import {
   squashAtomCommandFailure,
   type AtomCommand,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import {
+  fdSkillSelectionFields,
+  fdSkillVersionIdsOf,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 
 import {
   awaitAttachmentUploads,
@@ -181,11 +185,9 @@ export async function sendQueuedMessage(
           text,
           attachments: wireAttachments,
         },
-        // The same FD Skill keeps the provider on the running session's
-        // profile; a different one would restart it and drop the turn.
-        ...(sendSettings.fdSkillVersionId !== undefined
-          ? { fdSkillVersionId: sendSettings.fdSkillVersionId }
-          : {}),
+        // The same FD Skill selection keeps the provider on the running
+        // session's profile; a different one would restart it and drop the turn.
+        ...fdSkillSelectionFields(fdSkillVersionIdsOf(sendSettings)),
         ...(sendSettings.nativeSkillNames.length > 0
           ? { nativeSkillNames: [...sendSettings.nativeSkillNames] }
           : {}),

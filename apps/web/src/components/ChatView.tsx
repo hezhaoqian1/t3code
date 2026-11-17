@@ -3,6 +3,7 @@ import {
   DEFAULT_MODEL,
   defaultInstanceIdForDriver,
   type EnvironmentId,
+  fdSkillSelectionFields,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
@@ -173,7 +174,7 @@ import {
 } from "~/projectScripts";
 import { newDraftId, newMessageId, newProjectId, newThreadId } from "~/lib/utils";
 import { useBrowserHistoryStore } from "~/browserHistoryStore";
-import { FD_SKILL_THREAD_TITLE, selectedFdSkillVersionId } from "../fdSkillSelectionStore";
+import { FD_SKILL_THREAD_TITLE, selectedFdSkillVersionIds } from "../fdSkillSelectionStore";
 import { resolveSelectableProvider } from "../providerModels";
 import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import {
@@ -4765,7 +4766,9 @@ function ChatViewContent(props: ChatViewProps) {
           queueSendContext.reviewComments.length,
       });
       if (!hasSendableContent) return;
-      const queuedFdSkillVersionId = selectedFdSkillVersionId(activeThread.id);
+      const queuedFdSkillSelection = fdSkillSelectionFields(
+        selectedFdSkillVersionIds(activeThread.id),
+      );
       const inferredQueuedPresentation = detectPresentationIntent(queuedText);
       const queuedPresentation = queueSendContext.presentation ?? inferredQueuedPresentation;
       const queuedNativeSkillNames =
@@ -4788,9 +4791,7 @@ function ChatViewContent(props: ChatViewProps) {
           modelSelection: queueSendContext.selectedModelSelection,
           runtimeMode,
           interactionMode,
-          ...(queuedFdSkillVersionId !== undefined
-            ? { fdSkillVersionId: queuedFdSkillVersionId }
-            : {}),
+          ...queuedFdSkillSelection,
           nativeSkillNames: queuedNativeSkillNames,
           ...(queuedPresentation ? { presentation: queuedPresentation } : {}),
         },
@@ -4965,7 +4966,8 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
     const threadIdForSend = activeThread.id;
-    const fdSkillVersionId = selectedFdSkillVersionId(threadIdForSend);
+    const fdSkillSelection = fdSkillSelectionFields(selectedFdSkillVersionIds(threadIdForSend));
+    const fdSkillVersionId = fdSkillSelection.fdSkillVersionId;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
@@ -5243,7 +5245,7 @@ function ChatViewContent(props: ChatViewProps) {
             text: outgoingMessageText,
             attachments: turnAttachmentsResult.value,
           },
-          ...(fdSkillVersionId !== undefined ? { fdSkillVersionId } : {}),
+          ...fdSkillSelection,
           ...(nativeSkillNames.length > 0 ? { nativeSkillNames } : {}),
           ...(presentation ? { presentation } : {}),
           modelSelection: ctxSelectedModelSelection,
@@ -5732,7 +5734,8 @@ function ChatViewContent(props: ChatViewProps) {
         sendCtx;
 
       const threadIdForSend = activeThread.id;
-      const fdSkillVersionId = selectedFdSkillVersionId(threadIdForSend);
+      const fdSkillSelection = fdSkillSelectionFields(selectedFdSkillVersionIds(threadIdForSend));
+      const fdSkillVersionId = fdSkillSelection.fdSkillVersionId;
       const messageIdForSend = newMessageId();
       const messageCreatedAt = new Date().toISOString();
       const outgoingMessageText = formatOutgoingPrompt(trimmed);
@@ -5799,7 +5802,7 @@ function ChatViewContent(props: ChatViewProps) {
               text: outgoingMessageText,
               attachments: [],
             },
-            ...(fdSkillVersionId !== undefined ? { fdSkillVersionId } : {}),
+            ...fdSkillSelection,
             modelSelection: ctxSelectedModelSelection,
             ...(fdSkillVersionId === undefined ? { titleSeed: activeThread.title } : {}),
             runtimeMode,

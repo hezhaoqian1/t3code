@@ -72,6 +72,8 @@ export interface QueuedMessageSendSettings {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly fdSkillVersionId?: number;
+  /** FD Skills selected alongside `fdSkillVersionId`. */
+  readonly additionalFdSkillVersionIds?: ReadonlyArray<number>;
   readonly nativeSkillNames: ReadonlyArray<string>;
   readonly presentation?: PresentationTurnSelection;
 }

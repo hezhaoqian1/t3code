@@ -160,6 +160,30 @@ describe("sendQueuedMessage", () => {
     });
   });
 
+  it("sends every FD Skill that was selected when the message was queued", async () => {
+    mocks.readThreadShell.mockReturnValue(shell("ready"));
+    useSendQueueStore.getState().enqueue(
+      threadKey,
+      queued("a", {
+        sendSettings: {
+          modelSelection,
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          fdSkillVersionId: 7,
+          additionalFdSkillVersionIds: [12, 9],
+          nativeSkillNames: [],
+        },
+      }),
+    );
+
+    await expect(sendQueuedMessage(threadRef, "a")).resolves.toBe("sent");
+
+    expect(commandCalls(mocks.commands.startTurn)[0]?.input).toMatchObject({
+      fdSkillVersionId: 7,
+      additionalFdSkillVersionIds: [9, 12],
+    });
+  });
+
   it("steers a running turn without touching the task's settings", async () => {
     mocks.readThreadShell.mockReturnValue(shell("running", { runtimeMode: "auto" }));
     useSendQueueStore.getState().enqueue(threadKey, queued("a"));

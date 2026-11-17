@@ -1745,6 +1745,145 @@ describe("FdDeepSeekAdapter", () => {
     }),
   );
 
+  it.effect("keeps a selection of several FD Skills in a Codex conversation of its own", () =>
+    Effect.gen(function* () {
+      const codexProvider = ProviderDriverKind.make("codex");
+      const startedInputs: Array<Record<string, unknown>> = [];
+      const sentInputs: ProviderSendTurnInput[] = [];
+      const stopSession = vi.fn(() => Effect.void);
+      let sessionIndex = 0;
+      const ordinaryAdapter: ProviderAdapterShape<never> = {
+        provider: codexProvider,
+        capabilities: { sessionModelSwitch: "in-session", promptlessTurnContinuation: true },
+        startSession: (input) => {
+          startedInputs.push(input);
+          sessionIndex += 1;
+          return Effect.succeed({
+            provider: codexProvider,
+            providerInstanceId: FD_DEEPSEEK_INSTANCE_ID,
+            status: "ready" as const,
+            runtimeMode: input.runtimeMode,
+            model: "deepseek-v4-flash",
+            threadId: input.threadId,
+            resumeCursor: input.resumeCursor ?? { threadId: `codex-profile-${sessionIndex}` },
+            createdAt: "2026-11-17T00:00:00.000Z",
+            updatedAt: "2026-11-17T00:00:00.000Z",
+          });
+        },
+        sendTurn: (input) => {
+          sentInputs.push(input);
+          return Effect.succeed({
+            threadId: input.threadId,
+            turnId: TurnId.make(`codex-turn-${sentInputs.length}`),
+          });
+        },
+        interruptTurn: () => Effect.void,
+        respondToRequest: () => Effect.void,
+        respondToUserInput: () => Effect.void,
+        stopSession,
+        listSessions: () => Effect.succeed([]),
+        hasSession: () => Effect.succeed(false),
+        readThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        rollbackThread: (requestedThreadId) =>
+          Effect.succeed({ threadId: requestedThreadId, turns: [] }),
+        stopAll: () => Effect.void,
+        streamEvents: Stream.empty,
+      };
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel(streamer([])),
+        ordinaryAdapter,
+      });
+
+      yield* adapter.startSession(startInput);
+      yield* adapter.sendTurn({ threadId, input: "product data", fdSkillVersionId: 10004 });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "compare macro data with product data",
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+      });
+      // The same Skills in another order are the same selection: no restart.
+      yield* adapter.sendTurn({
+        threadId,
+        input: "and the year before",
+        fdSkillVersionId: 10012,
+        additionalFdSkillVersionIds: [10004],
+      });
+
+      expect(startedInputs).toHaveLength(2);
+      expect(startedInputs[0]).toMatchObject({ fdSkillVersionId: 10004 });
+      expect(startedInputs[0]).not.toHaveProperty("additionalFdSkillVersionIds");
+      expect(startedInputs[1]).toMatchObject({
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+      });
+      // Its context starts empty: neither Skill's own conversation is reused.
+      expect(startedInputs[1]).not.toHaveProperty("resumeCursor");
+      expect(stopSession).toHaveBeenCalledTimes(1);
+
+      // Going back to one Skill resumes that Skill's own conversation.
+      yield* adapter.sendTurn({ threadId, input: "product data again", fdSkillVersionId: 10004 });
+      expect(startedInputs[2]).toMatchObject({ resumeCursor: { threadId: "codex-profile-1" } });
+      expect(startedInputs[2]).not.toHaveProperty("additionalFdSkillVersionIds");
+
+      // A cut-off turn of the combined selection resumes with every Skill.
+      yield* adapter.sendTurn({
+        threadId,
+        input: "compare again",
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+      });
+      const cursor = (yield* adapter.listSessions())[0]?.resumeCursor;
+      expect(cursor).toMatchObject({
+        threadId: "codex-profile-2",
+        fdContext: {
+          activeProfile: "enterprise:10004+10012",
+          profiles: {
+            "enterprise:10004": { threadId: "codex-profile-1" },
+            "enterprise:10004+10012": { threadId: "codex-profile-2" },
+          },
+        },
+      });
+      yield* adapter.stopSession(threadId);
+      yield* adapter.startSession({ ...startInput, resumeCursor: structuredClone(cursor) });
+      yield* adapter.sendTurn({ threadId, continuation: true });
+
+      expect(startedInputs.at(-1)).toMatchObject({
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+        resumeCursor: { threadId: "codex-profile-2" },
+      });
+      expect(sentInputs.at(-1)).toMatchObject({
+        continuation: true,
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [10012],
+      });
+    }),
+  );
+
+  it.effect("refuses several FD Skills on the single-Skill Enterprise Agent transport", () =>
+    Effect.gen(function* () {
+      const adapter = yield* makeFdDeepSeekAdapter({
+        kernel: new FdAgentKernel({
+          stream: async function* () {
+            throw new Error("kernel must not run");
+          },
+        }),
+      });
+      yield* adapter.startSession(startInput);
+      const error = yield* adapter
+        .sendTurn({
+          threadId,
+          input: "compare macro data with product data",
+          fdSkillVersionId: 10004,
+          additionalFdSkillVersionIds: [10012],
+        })
+        .pipe(Effect.flip);
+      expect(error.message).toContain("一次只能使用一个 FD Skill");
+    }),
+  );
+
   it.effect("still requires input for an ordinary turn that is not a continuation", () =>
     Effect.gen(function* () {
       const adapter = yield* makeFdDeepSeekAdapter({

@@ -135,6 +135,25 @@ describe("ProviderSendTurnInput", () => {
     ).toThrow();
   });
 
+  it("preserves the FD Skill versions selected alongside the first", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      input: "对比宏观数据和产品数据",
+      fdSkillVersionId: 10004,
+      additionalFdSkillVersionIds: [10012],
+    });
+
+    expect(parsed.additionalFdSkillVersionIds).toEqual([10012]);
+    expect(() =>
+      decodeProviderSendTurnInput({
+        threadId: "thread-1",
+        input: "对比宏观数据和产品数据",
+        fdSkillVersionId: 10004,
+        additionalFdSkillVersionIds: [0],
+      }),
+    ).toThrow();
+  });
+
   it("accepts codex modelSelection", () => {
     const parsed = decodeProviderSendTurnInput({
       threadId: "thread-1",

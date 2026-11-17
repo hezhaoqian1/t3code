@@ -418,7 +418,7 @@ describe("composerDraftStore FD enterprise privacy", () => {
 
   it("keeps an FD-selected prompt in memory and excludes it from persisted drafts", () => {
     useComposerDraftStore.getState().setPrompt(threadRef, "企业敏感查询");
-    useFdSkillSelectionStore.getState().select(threadId, 10004);
+    useFdSkillSelectionStore.getState().toggle(threadId, 10004);
     excludeEnterpriseComposerDraftFromPersistence(threadId);
 
     const persisted = partializeComposerDraftStoreState(
@@ -438,7 +438,7 @@ describe("composerDraftStore FD enterprise privacy", () => {
 
   it("scrubs enterprise drafts and selections when the authenticated user changes", () => {
     useComposerDraftStore.getState().setPrompt(threadRef, "账号 A 的未发送企业查询");
-    useFdSkillSelectionStore.getState().select(threadId, 10004);
+    useFdSkillSelectionStore.getState().toggle(threadId, 10004);
     excludeEnterpriseComposerDraftFromPersistence(threadId);
     const publish = createFdAccountStatePublisher(vi.fn());
     publish({
@@ -463,7 +463,7 @@ describe("composerDraftStore FD enterprise privacy", () => {
 
   it("clears every selected enterprise draft before selections are discarded", () => {
     useComposerDraftStore.getState().setPrompt(threadRef, "需要清理的企业查询");
-    useFdSkillSelectionStore.getState().select(threadId, 10004);
+    useFdSkillSelectionStore.getState().toggle(threadId, 10004);
 
     clearAllEnterpriseComposerDrafts();
 
@@ -1878,7 +1878,7 @@ describe("composer draft persistence", () => {
       resetComposerDraftStore();
       useComposerDraftStore.getState().setPrompt(threadRef, "企业敏感查询");
       // The skill is picked while the debounced write is still pending.
-      useFdSkillSelectionStore.getState().select(threadId, 10004);
+      useFdSkillSelectionStore.getState().toggle(threadId, 10004);
       await vi.advanceTimersByTimeAsync(300);
 
       resetComposerDraftStore();

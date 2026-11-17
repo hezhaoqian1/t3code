@@ -14,6 +14,9 @@ import {
   ThreadId,
   TurnId,
   type PresentationTurnSelection,
+  type FdSkillSelectionFields,
+  fdSkillSelectionFields,
+  fdSkillVersionIdsOf,
 } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
 import * as Effect from "effect/Effect";
@@ -49,6 +52,8 @@ import {
 } from "../../fd-codex/ResponsesModelCatalog.ts";
 import {
   encodeFdContextBinding,
+  fdExecutionProfileFor,
+  fdSkillVersionIdsForProfile,
   restoreFdContextBinding,
   type FdExecutionProfile,
 } from "../../fd-codex/FdContextBinding.ts";
@@ -130,17 +135,9 @@ interface FdSessionContext {
   stopped: boolean;
 }
 
-function executionProfileFor(fdSkillVersionId: number | undefined): FdExecutionProfile {
-  return fdSkillVersionId === undefined ? "local" : `enterprise:${fdSkillVersionId}`;
-}
-
-/** The FD Skill version a profile runs with; undefined for the local profile. */
-export function fdSkillVersionIdForProfile(
-  profile: FdExecutionProfile | undefined,
-): number | undefined {
-  if (profile === undefined || profile === "local") return undefined;
-  const versionId = Number(profile.slice("enterprise:".length));
-  return Number.isSafeInteger(versionId) && versionId > 0 ? versionId : undefined;
+/** The profile a turn runs in: one per FD Skill selection, `local` without one. */
+function executionProfileFor(input: FdSkillSelectionFields): FdExecutionProfile {
+  return fdExecutionProfileFor(fdSkillVersionIdsOf(input));
 }
 
 interface EnterpriseToolGrounding {
@@ -1016,7 +1013,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     input: ProviderSendTurnInput,
   ) {
     const adapter = options.ordinaryAdapter!;
-    const profile = executionProfileFor(input.fdSkillVersionId);
+    const profile = executionProfileFor(input);
     if (context.ordinarySessionStarted && context.ordinaryExecutionProfile !== profile) {
       yield* adapter.stopSession(input.threadId);
       context.ordinarySessionStarted = false;
@@ -1036,9 +1033,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       context.ordinaryEnterpriseGeneration = options.enterpriseGeneration?.() ?? 0;
       const started = yield* adapter.startSession({
         ...resolved,
-        ...(input.fdSkillVersionId !== undefined
-          ? { fdSkillVersionId: input.fdSkillVersionId }
-          : {}),
+        ...fdSkillSelectionFields(fdSkillVersionIdsOf(input)),
       });
       if (started.resumeCursor !== undefined)
         context.ordinaryResumeCursors.set(profile, started.resumeCursor);
@@ -1062,16 +1057,18 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
     // in: the same FD Skill profile, so its Codex thread and history.
     const continuation =
       requestedInput.continuation === true && options.ordinaryAdapter !== undefined;
-    const continuationSkillVersionId = continuation
-      ? (requestedInput.fdSkillVersionId ??
-        fdSkillVersionIdForProfile(
-          context.ordinaryExecutionProfile ?? context.restoredExecutionProfile,
-        ))
-      : requestedInput.fdSkillVersionId;
+    const continuationSelection =
+      continuation && requestedInput.fdSkillVersionId === undefined
+        ? fdSkillSelectionFields(
+            fdSkillVersionIdsForProfile(
+              context.ordinaryExecutionProfile ?? context.restoredExecutionProfile,
+            ),
+          )
+        : {};
     const input: ProviderSendTurnInput =
-      continuationSkillVersionId === requestedInput.fdSkillVersionId
+      continuationSelection.fdSkillVersionId === undefined
         ? requestedInput
-        : { ...requestedInput, fdSkillVersionId: continuationSkillVersionId };
+        : { ...requestedInput, ...continuationSelection };
     const selectedModel =
       input.modelSelection?.model ?? context.session.model ?? FD_RESPONSES_MODEL;
     const inputText = input.input?.trim();
@@ -1101,6 +1098,19 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
       });
     }
     options.observeTurnModel?.(input.threadId, selectedModel);
+    if (
+      !options.ordinaryAdapter &&
+      (input.additionalFdSkillVersionIds?.length ?? 0) > 0 &&
+      input.fdSkillVersionId !== undefined
+    ) {
+      // The Enterprise Agent transport runs one Skill per turn; only Codex
+      // sessions merge several.
+      return yield* new ProviderAdapterValidationError({
+        provider: FD_DEEPSEEK_DRIVER_KIND,
+        operation: "sendTurn",
+        issue: "当前运行方式一次只能使用一个 FD Skill，请只保留一个后重试。",
+      });
+    }
     if (
       input.fdSkillVersionId !== undefined &&
       !options.ordinaryAdapter &&
@@ -1529,7 +1539,7 @@ export const makeFdDeepSeekAdapter = Effect.fn("makeFdDeepSeekAdapter")(function
               Effect.gen(function* () {
                 const context = yield* requireSession(threadId);
                 const requestedInput = input ?? { threadId };
-                const profile = executionProfileFor(requestedInput.fdSkillVersionId);
+                const profile = executionProfileFor(requestedInput);
                 if (!context.ordinaryResumeCursors.has(profile)) {
                   return yield* new ProviderAdapterRequestError({
                     provider: FD_DEEPSEEK_DRIVER_KIND,
