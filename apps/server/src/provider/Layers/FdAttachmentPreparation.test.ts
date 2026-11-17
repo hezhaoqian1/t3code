@@ -24,7 +24,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { makeFdDeepSeekAdapter, FD_DEEPSEEK_INSTANCE_ID } from "./FdDeepSeekAdapter.ts";
 
 const threadId = ThreadId.make("attachment-test");
-const selection = { instanceId: FD_DEEPSEEK_INSTANCE_ID, model: "kimi-k3" };
+const selection = { instanceId: FD_DEEPSEEK_INSTANCE_ID, model: "kimi-k3.1-pro" };
 const turn: ProviderSendTurnInput = {
   threadId,
   modelSelection: selection,
@@ -248,7 +248,7 @@ describe("FD attachment preparation lifecycle", () => {
           // Page tools run during the turn and read the thread's model from here.
           observeTurnModel: (id, model) => observed.push([id, model]),
           prepareAttachments: async (input, model) => {
-            expect(model).toBe("kimi-k3");
+            expect(model).toBe("kimi-k3.1-pro");
             expect(input.attachments?.[0]?.type).toBe("document");
             return { ...input, input: "scan.pdf page 1: Revenue 123", attachments: [] };
           },
@@ -262,7 +262,7 @@ describe("FD attachment preparation lifecycle", () => {
         expect(sent).toHaveLength(1);
         expect(sent[0]?.input).toContain("page 1");
         expect(sent[0]?.attachments).toEqual([]);
-        expect(observed).toEqual([[threadId, "kimi-k3"]]);
+        expect(observed).toEqual([[threadId, "kimi-k3.1-pro"]]);
       }),
   );
 

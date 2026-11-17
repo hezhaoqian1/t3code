@@ -46,11 +46,14 @@ export function fdResponsesBaseUrl(newApiOrigin: string): string {
 }
 
 function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
+  // slug, name, short name, native image input
   const externalModels = [
-    ["qwen3.8-max", "Qwen 3.8 Max", "Qwen Max"],
-    ["qwen3.8-flash", "Qwen 3.8 Flash", "Qwen Flash"],
-    ["glm-5.2", "GLM 5.2", "GLM 5.2"],
-    ["kimi-k3", "Kimi K3", "Kimi K3"],
+    ["qwen3.8-max", "Qwen 3.8 Max", "Qwen Max", true],
+    ["qwen3.8-flash", "Qwen 3.8 Flash", "Qwen Flash", true],
+    ["glm-5.2", "GLM 5.2", "GLM 5.2", false],
+    ["kimi-k3.1-pro", "Kimi K3.1 Pro", "Kimi K3.1 Pro", true],
+    ["claude-fable-5-2", "Claude Fable 5.2", "Fable 5.2", true],
+    ["claude-opus-5-5", "Claude Opus 5.5", "Opus 5.5", true],
   ] as const;
   return {
     providerId: FD_CODEX_PROVIDER,
@@ -83,17 +86,13 @@ function fdProviderConfig(baseUrl: string): ResponsesCodexProviderConfig {
         supportsForcedToolChoice: true,
         supportsParallelToolCalls: true,
       },
-      ...externalModels.map(([slug, name, shortName]) => ({
+      ...externalModels.map(([slug, name, shortName, nativeVision]) => ({
         slug,
         name,
         shortName,
         supportsTools: true,
-        supportsVision:
-          shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash",
-        visionRoute:
-          shortName === "Kimi K3" || slug === "qwen3.8-max" || slug === "qwen3.8-flash"
-            ? ("native" as const)
-            : ("unsupported" as const),
+        supportsVision: nativeVision,
+        visionRoute: nativeVision ? ("native" as const) : ("unsupported" as const),
         supportsReasoning: true,
         supportsStructuredOutput: true,
         supportsForcedToolChoice: false,
