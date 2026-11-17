@@ -136,10 +136,32 @@ describe("FD runtime credential contracts", () => {
       "qwen3.8-max",
       "qwen3.8-flash",
       "glm-5.2",
-      "kimi-k3",
+      "kimi-k3.1-pro",
+      "claude-fable-5-2",
+      "claude-opus-5-5",
       "deepseek-v4-flash",
       "deepseek-v4-flash-vision-exp",
+      "kimi-k3",
     ]);
+    // A credential issued before Kimi K3.1 Pro replaced Kimi K3 still loads.
+    expect(
+      decode({
+        ...projection,
+        policy: {
+          ...projection.policy,
+          models: [
+            "deepseek-flash",
+            "deepseek-v4-pro",
+            "qwen3.8-max",
+            "qwen3.8-flash",
+            "glm-5.2",
+            "kimi-k3",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-vision-exp",
+          ],
+        },
+      }).policy.models,
+    ).toContain("kimi-k3");
     expect(
       decode({
         ...projection,

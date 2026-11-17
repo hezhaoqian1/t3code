@@ -16,7 +16,12 @@ export const FD_RUNTIME_LEGACY_VISION_MODEL = "deepseek-v4-flash-vision-exp" as 
 export const FD_RUNTIME_QWEN_MAX_MODEL = "qwen3.8-max" as const;
 export const FD_RUNTIME_QWEN_FLASH_MODEL = "qwen3.8-flash" as const;
 export const FD_RUNTIME_GLM_MODEL = "glm-5.2" as const;
-export const FD_RUNTIME_KIMI_MODEL = "kimi-k3" as const;
+export const FD_RUNTIME_KIMI_MODEL = "kimi-k3.1-pro" as const;
+/** The Kimi model before K3.1 Pro. No longer offered; kept so credentials
+ * and tasks saved with it still load. */
+export const FD_RUNTIME_LEGACY_KIMI_MODEL = "kimi-k3" as const;
+export const FD_RUNTIME_CLAUDE_FABLE_MODEL = "claude-fable-5-2" as const;
+export const FD_RUNTIME_CLAUDE_OPUS_MODEL = "claude-opus-5-5" as const;
 export const FD_RUNTIME_SELECTABLE_MODELS = [
   FD_RUNTIME_DEFAULT_MODEL,
   FD_RUNTIME_PRO_MODEL,
@@ -24,11 +29,14 @@ export const FD_RUNTIME_SELECTABLE_MODELS = [
   FD_RUNTIME_QWEN_FLASH_MODEL,
   FD_RUNTIME_GLM_MODEL,
   FD_RUNTIME_KIMI_MODEL,
+  FD_RUNTIME_CLAUDE_FABLE_MODEL,
+  FD_RUNTIME_CLAUDE_OPUS_MODEL,
 ] as const;
 export const FD_RUNTIME_MODELS = [
   ...FD_RUNTIME_SELECTABLE_MODELS,
   FD_RUNTIME_LEGACY_DEFAULT_MODEL,
   FD_RUNTIME_LEGACY_VISION_MODEL,
+  FD_RUNTIME_LEGACY_KIMI_MODEL,
 ] as const;
 export type FdRuntimeModel = (typeof FD_RUNTIME_MODELS)[number];
 export type FdRuntimeSelectableModel =
@@ -76,6 +84,9 @@ export const FdServerRuntimePolicyProjection = Schema.Struct({
         FD_RUNTIME_QWEN_FLASH_MODEL,
         FD_RUNTIME_GLM_MODEL,
         FD_RUNTIME_KIMI_MODEL,
+        FD_RUNTIME_LEGACY_KIMI_MODEL,
+        FD_RUNTIME_CLAUDE_FABLE_MODEL,
+        FD_RUNTIME_CLAUDE_OPUS_MODEL,
       ]),
     ),
   ),

@@ -66,7 +66,8 @@ and credentials:
 | `deepseek-v4-flash`, `deepseek-v4-pro` | FD New API | Responses     |
 | `qwen3.8-max`, `qwen3.8-flash`         | DashScope  | Responses     |
 | `glm-5.2`                              | DashScope  | Responses     |
-| `kimi-k3`                              | DashScope  | Responses     |
+| `kimi-k3.1-pro`                        | DashScope  | Responses     |
+| `claude-fable-5-2`, `claude-opus-5-5`  | FD New API | Responses     |
 
 The current compatibility route keeps these under the historical
 `fd-deepseek` instance id so old threads and resume bindings remain readable.
@@ -143,7 +144,7 @@ transport; they should not silently receive a DeepSeek-generated description.
 The production alias `deepseek-v4-flash-vision-exp` is a private
 implementation model, not a selectable desktop model. Its upstream mapping
 must point to the approved DeepSeek vision deployment. It must never be mapped
-to `kimi-k3`: Kimi is the separate native route and receives the original
+to a Kimi model: Kimi is the separate native route and receives the original
 `input_image`. If the private alias is unavailable or returns a non-Responses
 stream, the server must fail the image turn and preserve the upstream error in
 server logs; it must not report a misleading file-format error or silently

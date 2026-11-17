@@ -54,7 +54,7 @@ Word、PPT、文本等长文档同样不会因为太长而报错：
 - 文字特别多的 PDF（例如几百页）会先放入前面的页面和其余页面的目录，AI 需要时按页继续读取，不会因为太长而报错。
 - 某一页识别失败（例如网络波动）时会自动重试；仍失败的页会在回答里注明未读到，其他页面照常使用。
 
-支持原生视觉的模型（DeepSeek V4.1 Flash、Qwen 3.8、Kimi K3）查看页面时直接看到页面图片，读图表时可以反复对照。DeepSeek V4 Pro、GLM 5.2 等文字模型查看 PDF 页面时，使用授权的 DeepSeek Flash 视觉预处理服务：先给出整页识别结果，需要某个具体读数（例如曲线最高点）时会把这一页分成上下两半放大，再针对这个读数识别一次。整页识别结果会记住，同一任务里再次问到时不会重复识别。
+支持原生视觉的模型（DeepSeek V4.1 Flash、Qwen 3.8、Kimi K3.1 Pro、Claude Fable 5.2、Claude Opus 5.5）查看页面时直接看到页面图片，读图表时可以反复对照。DeepSeek V4 Pro、GLM 5.2 等文字模型查看 PDF 页面时，使用授权的 DeepSeek Flash 视觉预处理服务：先给出整页识别结果，需要某个具体读数（例如曲线最高点）时会把这一页分成上下两半放大，再针对这个读数识别一次。整页识别结果会记住，同一任务里再次问到时不会重复识别。
 
 AI 只通过上述工具读取附件，不会在你的电脑上搜索文件或用脚本处理附件。
 
@@ -73,7 +73,7 @@ FD Skill 仍由企业运行时负责权限、数据工具和审计。桌面端�
 - DOCX/PPTX/ODF 内的图表、SmartArt、嵌入图片不会自动还原为完整视觉布局；需要视觉理解时请导出 PDF，或同时上传图片并选择支持视觉的模型。
 - 目前不解析 ZIP/RAR 等压缩包、音频、视频、CAD、PSD 和邮件容器。请先解压、转录，或导出 PDF、图片、文本及现代 Office 格式。
 - HEIC/HEIF、TIFF、BMP、SVG 暂未接入图片上传，请先导出 PNG/JPEG。带宏的 Word/PPT、WPS 专有格式、Pages/Numbers/Keynote 请导出 DOCX/XLSX/PPTX 或 PDF。
-- DeepSeek V4.1 Flash（模型 ID `deepseek-flash`）、Qwen 3.8 Max/Flash 和 Kimi K3 支持原生图片输入。DeepSeek V4 Pro 与 GLM 5.2 当前是文字路线；它们查看 PDF 页面时会使用 FD 视觉预处理，独立图片会明确提示切换视觉模型，不会静默把普通图片交给另一个模型。
+- DeepSeek V4.1 Flash（模型 ID `deepseek-flash`）、Qwen 3.8 Max/Flash、Kimi K3.1 Pro、Claude Fable 5.2 和 Claude Opus 5.5 支持原生图片输入。DeepSeek V4 Pro 与 GLM 5.2 当前是文字路线；它们查看 PDF 页面时会使用 FD 视觉预处理，独立图片会明确提示切换视觉模型，不会静默把普通图片交给另一个模型。
 - 图表和扫描页的识别可能出错，重要数值应对照原文核实。PDF 中用特殊字体绘制的公式可能显示为乱码，需要时请让 AI 查看该页画面。
 - 表格每个工作表最多读取 20 万行，超出时会附带截取说明。旧版 DOC/PPT 转换需本机标准路径下的 LibreOffice，转换超时或失败会明确提示。
 - 每轮放入对话的附件文字、识别结果和问题合计约 20 万 UTF-8 字节（约 6 万汉字）。超出部分留给 AI 按需读取：PDF 按页，表格按行或用完整 CSV 计算，Word、PPT、文本按行或关键词；不会因为附件太长而整轮失败。

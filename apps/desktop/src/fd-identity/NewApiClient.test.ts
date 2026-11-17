@@ -86,6 +86,34 @@ describe("NewApiClient", () => {
     });
   });
 
+  it("upgrades the whitelist an earlier version issued when the model list changes", async () => {
+    // What 0.2.47 wrote: Kimi K3, before Kimi K3.1 Pro and the Claude models.
+    const previous = runtimeToken({
+      model_limits:
+        "deepseek-flash,deepseek-v4-pro,qwen3.8-max,qwen3.8-flash,glm-5.2,kimi-k3,deepseek-v4-flash,deepseek-v4-flash-vision-exp",
+    });
+    const upgraded = runtimeToken({ model_limits: FD_RUNTIME_MODEL_LIMITS });
+    const fetch = responseQueue([
+      jsonResponse(apiSuccess(apiUser())),
+      jsonResponse(apiSuccess(previous)),
+      jsonResponse(apiSuccess(upgraded)),
+    ]);
+    const client = new NewApiClient({ baseUrl: "http://127.0.0.1:3001", fetch });
+
+    await expect(client.validate(credentials())).resolves.toMatchObject({
+      runtimeTokenId: 41,
+      runtimeApiKey: "sk-runtime",
+    });
+    expect(request(fetch, 2)).toMatchObject({ path: "/api/token/", method: "PUT" });
+    expect(JSON.parse(request(fetch, 2).body)).toMatchObject({
+      id: 41,
+      model_limits: FD_RUNTIME_MODEL_LIMITS,
+    });
+    expect(FD_RUNTIME_MODEL_LIMITS).toContain("kimi-k3.1-pro");
+    expect(FD_RUNTIME_MODEL_LIMITS).toContain("claude-fable-5-2");
+    expect(FD_RUNTIME_MODEL_LIMITS).toContain("claude-opus-5-5");
+  });
+
   it.each([
     ["failed response", { success: false, data: null }],
     [

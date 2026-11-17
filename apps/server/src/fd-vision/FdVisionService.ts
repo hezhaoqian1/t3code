@@ -60,7 +60,8 @@ export class FdVisionService {
         FD_RESPONSES_VISION_MODEL) as import("../fd-agent/FdResponsesProtocol.ts").FdResponsesModel,
       round: 1,
       input: [message],
-      reasoningEffort: input.model === "kimi-k3" ? "low" : "none",
+      // Kimi models keep low reasoning for page reading, as Kimi K3 did; the others use none.
+      reasoningEffort: input.model?.startsWith("kimi-") ? "low" : "none",
       timeoutMs: FD_VISION_LIMITS.timeoutMs,
       ...(input.signal ? { signal: input.signal } : {}),
     })) {

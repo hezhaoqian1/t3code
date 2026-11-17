@@ -1,8 +1,8 @@
 import type { FdAccountUserSummary, FdUsagePeriod, FdUsageSummary } from "@t3tools/contracts";
 import {
   FD_RUNTIME_DEFAULT_MODEL,
-  FD_RUNTIME_LEGACY_DEFAULT_MODEL,
   FD_RUNTIME_MODELS,
+  isFdRuntimeModel,
 } from "@t3tools/contracts/fd/runtime-credentials";
 
 import type { StoredFdCredentials } from "./CredentialVault.ts";
@@ -526,12 +526,17 @@ function assertManagedRuntimeToken(token: RuntimeToken): void {
   }
 }
 
+/**
+ * A managed token an earlier desktop version issued: its whitelist is not the
+ * current list but names only FD runtime models, written exactly. Such a token
+ * is upgraded in place so a model list change does not sign every employee out.
+ */
 function isLegacyManagedRuntimeToken(token: RuntimeToken): boolean {
   return (
     token.status === 1 &&
     token.modelLimitsEnabled &&
-    (token.modelLimits === FD_RUNTIME_MODEL ||
-      token.modelLimits === FD_RUNTIME_LEGACY_DEFAULT_MODEL)
+    token.modelLimits !== FD_RUNTIME_MODEL_LIMITS &&
+    token.modelLimits.split(",").every(isFdRuntimeModel)
   );
 }
 
