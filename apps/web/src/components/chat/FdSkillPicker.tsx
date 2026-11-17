@@ -387,28 +387,22 @@ export function FdSkillPicker(props: {
                         disabled={unavailable}
                         onClick={() => toggleFdSkill(versionId)}
                         className={cn(
-                          "flex min-h-12 w-full items-start gap-2.5 rounded-md border border-transparent px-2.5 py-2.5 text-left transition-colors hover:border-border/70 hover:bg-muted/70",
+                          "flex min-h-9 w-full items-center gap-2.5 rounded-md border border-transparent px-2.5 py-2 text-left transition-colors hover:border-border/70 hover:bg-muted/70",
                           selected && "border-primary/25 bg-primary/8",
                           unavailable &&
                             "cursor-not-allowed opacity-50 hover:border-transparent hover:bg-transparent",
                         )}
                       >
                         <Building2Icon
-                          className="mt-0.5 size-4 shrink-0 text-primary"
+                          className="size-4 shrink-0 text-primary"
                           aria-hidden="true"
                         />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm">
-                            {formatProviderSkillDisplayName(skill)}
-                          </span>
-                          {skill.shortDescription || skill.description ? (
-                            <span className="mt-0.5 block line-clamp-2 text-xs text-muted-foreground">
-                              {skill.shortDescription ?? skill.description}
-                            </span>
-                          ) : null}
+                        {/* Names only: descriptions made the list too long to scan. */}
+                        <span className="min-w-0 flex-1 truncate text-sm">
+                          {formatProviderSkillDisplayName(skill)}
                         </span>
                         {selected ? (
-                          <CheckIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                          <CheckIcon className="size-4 shrink-0" aria-hidden="true" />
                         ) : null}
                       </button>
                     );
